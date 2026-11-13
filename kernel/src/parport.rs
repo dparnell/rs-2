@@ -272,31 +272,6 @@ fn acpi_ports() -> Vec<(u16, u16, Option<u8>)> {
     v
 }
 
-/// A PCI parallel port: class 07h subclass 01h with a programming
-/// interface of a register-compatible port (00h SPP, 01h bidirectional,
-/// 02h ECP; 03h, an IEEE 1284 controller, and FEh, a 1284 target, have
-/// other registers). BAR 0 is the port, BAR 1 (when an I/O BAR) the ECP
-/// registers: the ECR at its third byte, as on the NetMos/MosChip
-/// 9805/9865 and Oxford OX16PCI952/OXPCIe952 parallel functions.
-/// (base, ECR) or why not.
-pub fn pci_port(class: u8, subclass: u8, progif: u8, bar0: u32, bar1: u32) -> Result<(u16, u16), &'static str> {
-    if (class, subclass) != (7, 1) {
-        return Err("not a parallel port");
-    }
-    if progif > 2 {
-        return Err("not register-compatible (IEEE 1284 controller or target)");
-    }
-    if bar0 & 1 == 0 {
-        return Err("memory-mapped registers");
-    }
-    let base = (bar0 & 0xfffc) as u16;
-    if base == 0 {
-        return Err("BAR 0 not assigned");
-    }
-    let ecr = if bar1 & 1 != 0 && bar1 & 0xfffc != 0 { (bar1 & 0xfffc) as u16 + 2 } else { 0 };
-    Ok((base, ecr))
-}
-
 /// Find the ports (once, at boot after ACPI and PCI).
 pub fn init() {
     // One probe; a caller on another CPU waits for it to finish.
@@ -323,7 +298,7 @@ pub fn init() {
             continue;
         }
         let (bar0, bar1) = (d.read(0x10), d.read(0x14));
-        let (base, ecr) = match pci_port(d.class, d.subclass, d.progif, bar0, bar1) {
+        let (base, ecr) = match ieee1284::pci_port(d.class, d.subclass, d.progif, bar0, bar1) {
             Ok(x) => x,
             Err(why) => {
                 crate::println!("PCI parallel port {:04x}:{:04x} at {:02x}:{:02x}.{}: {why}, not used", d.vendor, d.device, d.bus, d.dev, d.func);

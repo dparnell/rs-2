@@ -61,6 +61,15 @@ What is already done, by milestone. What is still to do is in
   timeout, comm and transfer modes, IEEE 1284 device ID). `PRNTEST LPT`
   and `PRNTEST LPT n STALL` (`lptstall=`) check it against QEMU's
   `-parallel file:` byte for byte (docs/PRINTING.md)
+- done: parallel port IEEE 1284 modes (`crates/parport`, host-tested
+  against a simulated chip and peripheral: `cargo test -p parport`):
+  ECP chips write through the compatibility FIFO by default, ECP mode
+  (negotiation, setup, the ECP FIFO, termination; the FIFO when the
+  printer refuses), EPP (compatibility mode when nothing answers), the
+  device ID in byte or nibble mode; PCI cards with register-compatible
+  ports; PRT_QUERYJOBHANDLE on spooled LPT handles (the spooler's job
+  id; PRNTEST). Real chips, printers and PCI cards are untested (QEMU's
+  port is SPP with no 1284 peripheral)
 - done: DosDevIOCtl as IBM's kernel routes it (the kernel's own
   functions, ERROR_INVALID_FUNCTION/INVALID_CATEGORY/BAD_COMMAND and the
   0xFF00+code errors, the 32-bit zero-length rule and length words,

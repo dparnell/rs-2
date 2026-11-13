@@ -597,6 +597,31 @@ pub fn id_field<'a>(id: &'a [u8], keys: &[&str]) -> Option<&'a [u8]> {
     })
 }
 
+/// A PCI parallel port: class 07h subclass 01h with a programming
+/// interface of a register-compatible port (00h SPP, 01h bidirectional,
+/// 02h ECP; 03h, an IEEE 1284 controller, and FEh, a 1284 target, have
+/// other registers). BAR 0 is the port, BAR 1 (when an I/O BAR) the ECP
+/// registers: the ECR at its byte 2, as on the NetMos/MosChip 9805/9865
+/// and Oxford OX16PCI952/OXPCIe952 parallel functions. (base, ECR, 0 for
+/// none) or why not.
+pub fn pci_port(class: u8, subclass: u8, progif: u8, bar0: u32, bar1: u32) -> Result<(u16, u16), &'static str> {
+    if (class, subclass) != (7, 1) {
+        return Err("not a parallel port");
+    }
+    if progif > 2 {
+        return Err("not register-compatible (IEEE 1284 controller or target)");
+    }
+    if bar0 & 1 == 0 {
+        return Err("memory-mapped registers");
+    }
+    let base = (bar0 & 0xfffc) as u16;
+    if base == 0 {
+        return Err("BAR 0 not assigned");
+    }
+    let ecr = if bar1 & 1 != 0 && bar1 & 0xfffc != 0 { (bar1 & 0xfffc) as u16 + 2 } else { 0 };
+    Ok((base, ecr))
+}
+
 #[cfg(test)]
 mod sim;
 #[cfg(test)]

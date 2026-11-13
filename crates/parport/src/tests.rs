@@ -272,3 +272,34 @@ fn nibble_decoding() {
     assert_eq!(status_to_nibble(STS_ERROR | STS_SELECT | STS_PAPER | STS_BUSY), 7);
     assert_eq!(status_to_nibble(STS_SELECT), 0x0a);
 }
+
+#[test]
+fn pci_ports() {
+    // A NetMos 9865 parallel function: I/O BARs 0 and 1.
+    assert_eq!(pci_port(7, 1, 2, 0xe001, 0xe101), Ok((0xe000, 0xe102)));
+    // SPP only, no second BAR.
+    assert_eq!(pci_port(7, 1, 0, 0xd001, 0), Ok((0xd000, 0)));
+    // A memory BAR 1 is not the ECP registers.
+    assert_eq!(pci_port(7, 1, 1, 0xd001, 0xfe00_0000), Ok((0xd000, 0)));
+    assert!(pci_port(7, 1, 3, 0xd001, 0).is_err());
+    assert!(pci_port(7, 1, 0xfe, 0xd001, 0).is_err());
+    assert!(pci_port(7, 1, 0, 0xfe00_0000, 0).is_err());
+    assert!(pci_port(7, 1, 0, 1, 0).is_err());
+    assert!(pci_port(7, 0, 2, 0xe001, 0xe101).is_err());
+}
+
+#[test]
+fn ecp_chip_on_pci_bars() {
+    // A card's port at BAR 0, its ECP registers at BAR 1 (the simulated
+    // chip decodes them at base+400h).
+    let mut s = Sim::ecp(Dev::ieee1284(ID, true, true));
+    s.base = 0xe000;
+    let (base, ecr) = pci_port(7, 1, 2, 0xe001, 0xe401).unwrap();
+    assert!(latch_ok(&mut s, &Port { base, ecr: 0 }));
+    assert!(ecr_ok(&mut s, base, ecr));
+    let p = Port { base, ecr };
+    assert_eq!(capabilities(&mut s, &p), CAP_ECP | CAP_EPP | CAP_BYTE);
+    assert_eq!(ecp_write(&mut s, &p, b"pci", 1000), (3, Ok(())));
+    assert_eq!(s.dev.ecp_data, b"pci");
+    assert_eq!(&device_id(&mut s, &p, CAP_BYTE).unwrap()[2..], ID.as_bytes());
+}

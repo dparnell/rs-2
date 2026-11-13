@@ -271,7 +271,11 @@ can compare it.
   or when no spooler runs, the program writes to the port itself; the
   spooler's own process (it serves the pipe) always does, so jobs reach
   the parallel port. Printer status IOCtls on a spooled port answer
-  "selected, not busy". DOS sessions (docs/DOS.md) open `LPT1`/`LPT2`
+  "selected, not busy"; PRT_QUERYJOBHANDLE answers the job's id. After
+  the answer byte the connection carries messages (a kind byte, a
+  32-bit length, the bytes): output (0), or a request for the job's id
+  (1), which the spooler answers with 4 bytes, starting the job first if
+  nothing was written. DOS sessions (docs/DOS.md) open `LPT1`/`LPT2`
   for INT 17h, the 378h/278h registers, PRN and INT 21h 05h, and close
   the job at each program's end (`PRINT_SEPARATE_OUTPUT`) or after
   `PRINT_TIMEOUT` seconds without output; Win-OS/2's printer drivers
@@ -373,8 +377,12 @@ driver, 13.8 KB, 16-bit NE):
   (40:08), which UEFI does not fill. rs2 takes them from ACPI
   (PNP0400/PNP0401 devices: the first I/O range of `_CRS`, a range at
   base+400h for the ECP registers, the interrupt), from PCI parallel
-  cards (class 07h subclass 01h: BAR 0 the port, BAR 1 the ECP
-  registers, the interrupt through ACPI's routing) and by probing 378h,
+  cards (class 07h subclass 01h with programming interface 00h-02h, a
+  register-compatible port, as on NetMos/MosChip 9805/9865 and Oxford
+  OX16PCI952/OXPCIe952 parallel functions: BAR 0 the port, an I/O BAR 1
+  the ECP registers with the ECR at its byte 2, the interrupt through
+  ACPI's routing; memory-mapped BARs and 1284 controllers are logged
+  and skipped) and by probing 378h,
   278h and 3BCh (a port is there when its data latch reads back; IRQ 7,
   or 5 for 278h as in PRINT01). 378h is LPT1, 278h LPT2, 3BCh LPT3;
   other ports take the free names. Each port is checked for an ECP chip
@@ -399,6 +407,39 @@ driver, 13.8 KB, 16-bit NE):
   is ready after two status reads, so a writer rarely sleeps and the
   interrupts arrive in bursts (IF is off during an API call); a real
   printer makes the thread sleep on each byte.
+- **IEEE 1284 modes** (PAR1284.SYS's, Warp 4.52's IEEE 1284 driver; only
+  its symbol file is on the CD, so its function names guided the
+  structure). A port with an ECP chip writes through the chip's
+  compatibility FIFO by default (ECR mode 010: the chip waits for the
+  printer and strobes each byte; PRT_QUERYDATAXFERMODE says 1). ECP mode
+  (PRT_SETCOMMMODE 4) negotiates it (extensibility byte 10h, events
+  0-6), runs the setup phase (HostAck low, the peripheral raises
+  nAckReverse), writes the ECP data FIFO (base+400h) and terminates
+  (events 22-29) after each write; a printer that does not negotiate
+  ECP is written through the compatibility FIFO until the mode is set
+  again or PRT_INITPRINTER. EPP (PRT_SETCOMMMODE 3) writes the EPP data
+  register; a port where no EPP peripheral answers (the timeout bit)
+  goes back to compatibility mode the same way. The device ID is read
+  in byte mode (extensibility byte 05h) on bidirectional ports, nibble
+  mode (04h) otherwise or when the peripheral refuses byte mode. Every
+  wait on the peripheral is bounded (35 ms per IEEE 1284 handshake, the
+  port's timeout for data), so a port with nothing 1284 behind it never
+  hangs. The protocol code is `crates/parport`, written over a port I/O
+  trait; the kernel gives it port I/O and the waits.
+- **Real hardware only.** QEMU's parallel port is a plain SPP port with
+  a file or character device behind it (no ECR, no EPP, no 1284
+  peripheral) and QEMU has no PCI parallel card, so in QEMU only
+  compatibility mode, detection of "SPP only" and the device ID's
+  ERROR_BAD_COMMAND are exercised. The ECP chip's FIFO and ECP mode,
+  EPP, the byte and nibble reverse channels, the device ID read and PCI
+  cards are tested on the host only (`cargo test -p parport`: a
+  simulated Super I/O chip and peripheral, 24 tests: detection, every
+  output path, negotiation refused or unanswered, device IDs with short
+  and long lengths) and have not run on a real port and printer. ECP
+  reverse transfers, DMA and PCI combo cards (serial and parallel on
+  one function, NetMos 9835/9845) are not done. EPP detection relies on
+  an address cycle timing out, so an EPP device that answers the probe
+  hides EPP.
 - **Timeout and errors.** As PRINT01: a printer that takes no byte for
   the port's timeout (seconds, 120 by default, PRT_SETIRQTIMEOUT) ends
   the write with an error from its status lines (PRINT01's `prterp`):
@@ -425,11 +466,11 @@ driver, 13.8 KB, 16-bit NE):
   | 48h PRT_ACTIVATEFONT / 69h PRT_QUERYACTIVEFONT / 6Ah PRT_VERIFYFONT | CPID (code page, font id): the printer's own (0, 0) or a prepared code page with font 0; others the device-specific error FF03h, PRINT01's answer when no code-page font switching is set up (DEVINFO=LPTn with the spooler's font monitor, which rs2 does not have) |
   | 4Dh PRT_SETPRINTJOBTITLE | ASCIIZ, up to 127 characters kept (PRINT01 passes it to the spooler's monitor) |
   | 4Eh PRT_SETIRQTIMEOUT / 6Eh PRT_QUERYIRQTIMEOUT | USHORT seconds (PRINT01's `/TOU:`), default 120 |
-  | 52h PRT_SETCOMMMODE / 72h PRT_QUERYCOMMMODE | a byte: 0 compatibility, 1 nibble, 2 byte, 3 EPP, 4 ECP; a mode the port lacks is ERROR_INVALID_PARAMETER. Output in nibble and byte mode is compatibility mode (they are reverse channels); EPP writes the EPP data register; ECP negotiates ECP mode (IEEE 1284 extensibility byte 10h) and writes the chip's FIFO |
-  | 53h PRT_SETDATAXFERMODE / 73h PRT_QUERYDATAXFERMODE | a byte: 0 programmed I/O, 1 FIFO (the ECP chip's compatibility FIFO, ECR mode 010: the chip strobes each byte); FIFO without an ECP chip, and DMA (2), are ERROR_INVALID_PARAMETER |
-  | 74h PRT_QUERDEVICEID | the IEEE 1284 device ID in nibble mode (extensibility byte 04h): two bytes of length, big-endian, then `MFG:...;MDL:...;`, cut to the data packet. A peripheral that does not negotiate (QEMU's) gives ERROR_BAD_COMMAND |
+  | 52h PRT_SETCOMMMODE / 72h PRT_QUERYCOMMMODE | a byte: 0 compatibility, 1 nibble, 2 byte, 3 EPP, 4 ECP; a mode the port lacks is ERROR_INVALID_PARAMETER. Output in nibble and byte mode is compatibility mode (they are reverse channels); EPP writes the EPP data register (compatibility mode when no EPP peripheral answers); ECP negotiates ECP mode (IEEE 1284 extensibility byte 10h) and writes the chip's ECP FIFO (the compatibility FIFO when the printer refuses). Setting a mode tries it again |
+  | 53h PRT_SETDATAXFERMODE / 73h PRT_QUERYDATAXFERMODE | a byte: 0 programmed I/O, 1 FIFO (the ECP chip's compatibility FIFO, ECR mode 010: the chip strobes each byte; the default on ECP chips); FIFO without an ECP chip, and DMA (2), are ERROR_INVALID_PARAMETER |
+  | 74h PRT_QUERDEVICEID | the IEEE 1284 device ID in byte mode (extensibility byte 05h) on bidirectional ports, else (or when refused) nibble mode (04h): two bytes of length, big-endian, then `MFG:...;MDL:...;`, cut to the data packet; reading stops at the length or when the peripheral has no more data. A peripheral that does not negotiate (QEMU's) gives ERROR_BAD_COMMAND after 35 ms |
   | 66h PRT_GETPRINTERSTATUS | PRINT01's status byte: not busy 80h, acknowledge 40h, out of paper 20h, selected 10h, I/O error 08h (from the status lines, ACK and ERROR active high), plus the timeout bit 01h after a write that timed out (PRINT01 never sets it). Without a port: selected, not busy |
-  | 21h PRT_QUERYJOBHANDLE | not on a port (ERROR_INVALID_FUNCTION) |
+  | 21h PRT_QUERYJOBHANDLE | on a handle the spooler serves: the job's id, a WORD (the spooler starts the job if nothing was written yet; ERROR_GEN_FAILURE if the spooler is gone); on the port itself ERROR_INVALID_FUNCTION, as PRINT01 does not know it |
 
   Other functions are ERROR_INVALID_FUNCTION and other categories
   ERROR_INVALID_CATEGORY. Warp 4.52's PRINT01 knows 42h-4Eh and
@@ -438,8 +479,8 @@ driver, 13.8 KB, 16-bit NE):
   rs2's (a byte for the modes). On a handle the spooler serves
   (`Handle::Spool`) the status is always "selected, not busy",
   PRT_SETFRAMECTL only remembers the frame, PRT_INITPRINTER does
-  nothing, PRT_QUERDEVICEID is ERROR_BAD_COMMAND and the rest act on the
-  port's settings as above.
+  nothing, PRT_QUERDEVICEID is ERROR_BAD_COMMAND, PRT_QUERYJOBHANDLE
+  answers the job and the rest act on the port's settings as above.
 - **DOS sessions** reach the driver through VDM.EXE, which opens
   `LPT1`/`LPT2` and writes what INT 17h, the 378h/278h registers, PRN
   and INT 21h 05h produce (or the spooler takes it as a job).
@@ -450,7 +491,8 @@ driver, 13.8 KB, 16-bit NE):
   the bytes 0-255). `PRNTEST LPT 1 STALL` with `lptstall=2000,4000` in
   work/cmdline.txt checks the timeout (ERROR_OUT_OF_PAPER after 2 s,
   the timeout bit) and infinite retry; with `POPUP` the hard-error
-  pop-up shows instead.
+  pop-up shows instead. `cargo test -p parport` runs the IEEE 1284
+  code against the simulated port (above).
 
 ## Status
 
@@ -465,11 +507,11 @@ IPP), and the Workplace Shell's printer objects work:
 | The queue processor: PM_Q_STD (the metafile played on an OD_DIRECT DC, page setup from the metafile) and PM_Q_RAW (DEVESC_RAWDATA) | `userland/pmprint` | PRNTEST |
 | The PostScript driver: DevOpenDC OD_QUEUED/OD_DIRECT/OD_INFO, STARTDOC/NEWFRAME/ENDDOC/ABORTDOC/RAWDATA/GETJOBID/job properties escapes, DevQueryCaps (300 dpi, CAPS_TECH_POSTSCRIPT), DevQueryHardcopyCaps (Letter, A4, Legal, A3, A5, Executive), DevQueryDeviceNames, DevPostDeviceModes (a job properties dialog: form, orientation, copies) | PMWIN `printer.rs`, `crates/gpi/src/psdev.rs` | PRNTEST, host unit tests (`cargo test -p gpi`), Ghostscript renders the output as the screen shows it |
 | Ports: FILE (FILEn), LPT1-3 (the kernel drives the parallel port), COM1-4, LPRn (RFC 1179), IPPn (IPP/1.1 Print-Job) | PMSPL `port.rs`, kernel `chardev.rs` | PRNTEST LPR/IPP with `tools/scripts/printer_listen.py`; LPT1 with QEMU's `-parallel file:` |
-| The parallel port driver: ports from ACPI, PCI cards and probing; output on the acknowledge interrupt (polled without one), PRINT01's timeout and infinite retry, hard errors; the category 5 IOCtls | kernel `parport.rs` | PRNTEST LPT (LPT1, LPT2, `lptpoll`) and LPT STALL (`lptstall=`) with QEMU's `-parallel file:`, the host file compared byte for byte |
+| The parallel port driver: ports from ACPI, PCI cards and probing; output on the acknowledge interrupt (polled without one), PRINT01's timeout and infinite retry, hard errors; the category 5 IOCtls; ECP chips' FIFO, ECP and EPP output, IEEE 1284 device IDs in byte and nibble mode | kernel `parport.rs`, `crates/parport` | PRNTEST LPT (LPT1, LPT2, `lptpoll`) and LPT STALL (`lptstall=`) with QEMU's `-parallel file:`, the host file compared byte for byte; the 1284 modes only by `cargo test -p parport` (simulated port; not on real hardware) |
 | Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
 | Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page), EPM's formatted printing (File > Print file: its print thread draws each page on a `PU_TWIPS` presentation space of a queued DC) | QEMU runs, output rendered with Ghostscript |
 | Windows 3.x programs (native Win16): printer DCs, StartDoc...EndDoc and the escapes, PrintDlg, WIN.INI's printers (docs/WIN16.md) | WIN16 `print.rs`: queued PM_Q_RAW DCs | W16TEST, `RS2\PRINT16.EXE` (output rendered with Ghostscript), NOTE16's File > Print |
-| Programs that print to a port: `DosOpen("LPTn")`/`PRN` while the spooler runs is a PM_Q_RAW job on the port's printer's queue (nothing for an open without output); the spooler's own opens and ports without a printer go to the port; PRT_GETPRINTERSTATUS on a spooled port | kernel `chardev.rs` (`lpt_spool_open`, `Handle::Spool`), PMSPL `lptpipe.rs` | PRNTEST: LPT3 from an OS/2 program (job with the bytes and the program's name, printed unchanged) |
+| Programs that print to a port: `DosOpen("LPTn")`/`PRN` while the spooler runs is a PM_Q_RAW job on the port's printer's queue (nothing for an open without output); the spooler's own opens and ports without a printer go to the port; PRT_GETPRINTERSTATUS and PRT_QUERYJOBHANDLE on a spooled port | kernel `chardev.rs` (`lpt_spool_open`, `SpoolConn`), PMSPL `lptpipe.rs` | PRNTEST: LPT3 from an OS/2 program (job with the bytes and the program's name, its id from PRT_QUERYJOBHANDLE, printed unchanged) |
 | DOS sessions print: INT 17h, the 378h/278h registers, PRN/LPTn handles, INT 21h 05h; a job per DOS program, PRINT_TIMEOUT, PRINT_SEPARATE_OUTPUT | `crates/dos` (`Host::print`), VDM.EXE | PRNTEST: a DOS session's PRINT.COM (tests/dos/print.S) gives one 63-byte job named after the session; `tests/dos/run.sh` (dosrun --lpt) |
 | Win-OS/2 programs print through Windows' printer drivers to `LPT1:` (or `LPT1.OS2`) into the spooler | the DOS machine's printer path | dosrun: Notepad's File > Print with the CD's TTY.DRV as the default printer, with and without Print Manager (`tools/scripts/winos2_tree.py --printer`); not run in QEMU |
 | Separator pages (LAN Manager's .SEP format; rs2's SAMPLE.SEP and PSCRIPT.SEP), print times, queue priorities | PMSPL `sep.rs`, `spooler.rs`; PMPRINT SplQpPrintSeparator | PRNTEST: owner, job id, document, queue, width, hex, new lines and eject before the job's data; a queue outside its times keeps its job, which prints when the times allow |

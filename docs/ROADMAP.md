@@ -9,8 +9,10 @@ What is still to do. Everything already finished is in
   shift state and E0 prefix shared between keyboard sources, torn time
   fields in the infoseg, socket ids passed to select, DosDebug reading a
   debuggee thread that never parks
-- parallel ports: ECP/EPP transfers, IEEE 1284 device IDs and PCI cards
-  on real hardware (QEMU has none); PRT_QUERYJOBHANDLE on spooled ports
+- parallel ports: try ECP/EPP transfers, IEEE 1284 device IDs and PCI
+  cards on real hardware (only host-tested: QEMU has none); ECP reverse
+  transfers and DMA, PCI combo cards that put the parallel port behind
+  other BARs (NetMos 9835/9845 serial+parallel)
 - DOS sessions: the sharing retries and INT 24h for lock violations on
   compatibility-mode and FCB opens
 - DOSCALLS.443 (SYSINST2.EXE), diskette IOCtls, APM suspend and events
