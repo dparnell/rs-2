@@ -5,11 +5,10 @@ What is still to do. Everything already finished is in
 
 ## Milestone 1: unmodified text-mode programs
 
-- the legacy lock's corner (docs/ARCHITECTURE.md "Locking"): pop-ups,
-  the session manager, replacement subsystems, DosDevIOCtl/DosFSCtl/
-  DosFSAttach, DosDebug, the LAN requester, process exit; hot keys that
-  switch sessions from interrupt context; DLL initialisation run twice
-  when two processes load a DLL at once
+- small SMP races left (docs/ARCHITECTURE.md "Locking"): the keyboard
+  shift state and E0 prefix shared between keyboard sources, torn time
+  fields in the infoseg, socket ids passed to select, DosDebug reading a
+  debuggee thread that never parks
 - parallel ports: ECP/EPP transfers, IEEE 1284 device IDs and PCI cards
   on real hardware (QEMU has none); PRT_QUERYJOBHANDLE on spooled ports
 - DOS sessions: the sharing retries and INT 24h for lock violations on

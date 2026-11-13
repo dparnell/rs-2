@@ -83,11 +83,19 @@ What is already done, by milestone. What is still to do is in
   block cache, disks and network, a recursive loader lock); TLB
   shootdowns are served from every spin loop; about 60 races found by an
   audit fixed; lockdep checks the lock order in checked builds; STRESS
-  has an `smp` section. The big kernel lock survives only as the legacy
-  lock around the session and device corner (`api/legacy.rs`; `bkl` on
-  the command line restores the old behaviour). With 4 CPUs (QEMU
-  multi-threaded TCG) a kernel-call load in 4 processes runs 3.4 times
-  faster (docs/ARCHITECTURE.md "Locking")
+  has an `smp` section. With 4 CPUs (QEMU multi-threaded TCG) a
+  kernel-call load in 4 processes runs 3.4 times faster than under the
+  big lock (docs/ARCHITECTURE.md "Locking")
+- done: the big kernel lock is gone: sessions, pop-ups and the hot keys
+  run under a recursive session lock and a session thread (the keyboard
+  interrupt hands Ctrl+Esc, Alt+Esc, Alt+Home and PrtSc to it); the LAN
+  requester, mounting, the boot chain, the display, DosDebug (debuggee
+  frames only while parked), the DosDevIOCtl devices and DosShutdown have
+  their own locks; a DLL's initialisation runs once when several
+  processes load it at once (init claims, as IBM's loader semaphore
+  does); socket ids, timers clearing RAM semaphores, HPFS/JFS rename and
+  find handles no longer race. STRESS `corner` puts up pop-ups, starts
+  and switches sessions and issues IOCtls from several processes at once
 
 ## Milestone 2: storage and installed systems
 
