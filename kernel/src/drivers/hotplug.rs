@@ -26,10 +26,15 @@ static MOUNTED: SpinLock<Vec<(Handle, Vec<u8>, Vec<Arc<dyn BlockDev>>)>> = SpinL
 /// Start the hot-plug thread.
 pub fn start() {
     crate::task::kthread::spawn("storage hot-plug", || loop {
-        match xhci::STORAGE_EVENTS.take() {
+        let ev = xhci::STORAGE_EVENTS.take();
+        // Drive letters are picked and mounted under the big kernel lock,
+        // as NET USE does (smp.rs: the session and device corner).
+        crate::smp::bkl_acquire();
+        match ev {
             StorageEvent::Added(h) => added(h),
             StorageEvent::Removed(h) => removed(h),
         }
+        crate::smp::bkl_release();
     });
 }
 

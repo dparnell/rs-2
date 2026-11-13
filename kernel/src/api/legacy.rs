@@ -58,6 +58,28 @@ const FREE: &[&str] = &[
     "DOSREPLACEMODULE", "DOSSETEXTLIBPATH", "DOSQUERYEXTLIBPATH", "DOSGETENV", "DOSLIBINIT",
 ];
 
+/// Calls still under the big kernel lock in modules that are otherwise
+/// free: the session switching corner (pop-ups, display mode, the PM
+/// session, windowed sessions' control), which the keyboard's hot keys
+/// also reach from interrupt context.
+const LOCKED: &[(u8, u16)] = &[
+    (1, 11),  // VioPopUp
+    (1, 1),   // VioEndPopUp
+    (1, 6), (1, 45), (1, 70), (2, 8), (2, 20), (3, 14), (3, 24), // replacement subsystems
+    (8, 1),   // Rs2MapDisplay (creates the PM session)
+    (8, 7),   // Rs2PowerOff
+    (8, 23),  // Rs2SetDisplayMode
+    (8, 16),  // viowin control (windowed/full screen, select)
+    (8, 18),  // Rs2PtyStart (a session)
+    (8, 400), // VDM register (a DOS session)
+    (8, 407), // VDM request (starts programs in DOS sessions)
+    (8, 600), (8, 601), (8, 602), (8, 603), (8, 604), (8, 605), (8, 606), (8, 607), (8, 608), // LAN requester
+];
+
+/// Modules whose calls are free unless listed in LOCKED: VIOCALLS,
+/// KBDCALLS, MOUCALLS, MSG, NLS, QUECALLS, RS2API, MONCALLS.
+const FREE_MODULES: &[u8] = &[1, 2, 3, 4, 5, 7, 8, 9];
+
 /// 0 not decided yet, 1 under the lock, 2 free.
 static CACHE: [AtomicU8; MODULES.len() * ORDINALS as usize] = [const { AtomicU8::new(0) }; MODULES.len() * ORDINALS as usize];
 
@@ -72,8 +94,14 @@ pub fn needs_bkl(module: u8, ordinal: u16) -> bool {
         2 => false,
         _ => {
             let name = super::names::display(module, ordinal);
-            let free = name != "?"
-                && FREE.iter().any(|p| name.len() >= p.len() && name.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes()));
+            let free = if LOCKED.contains(&(module, ordinal)) {
+                false
+            } else if FREE_MODULES.contains(&module) {
+                true
+            } else {
+                name != "?"
+                    && FREE.iter().any(|p| name.len() >= p.len() && name.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes()))
+            };
             slot.store(if free { 2 } else { 1 }, Ordering::Relaxed);
             !free
         }

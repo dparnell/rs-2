@@ -598,7 +598,12 @@ impl Process {
         // The rest can wait for things (a file closing, the disk), which a
         // thread already dead must not: it would come back to life.
         let p = self.clone();
-        crate::task::kthread::spawn("procexit", move || p.finish());
+        crate::task::kthread::spawn("procexit", move || {
+            // Its session's end (switching the screen, ending pop-ups) is
+            // in the corner still under the big kernel lock (smp.rs).
+            crate::smp::bkl_acquire();
+            p.finish();
+        });
     }
 
     /// The last thread is gone: everything else the process had.

@@ -183,7 +183,7 @@ pub fn init_bsp() {
 /// finer locks (API calls decide per call: api/legacy.rs).
 pub const BKL_EXCEPTIONS: bool = false;
 pub const BKL_USER_RETURN: bool = false;
-pub const BKL_KTHREADS: bool = true;
+pub const BKL_KTHREADS: bool = false;
 
 /// `bkl` on the kernel command line: every path takes the big kernel lock
 /// again (the old model), for comparing and for hunting a locking bug.
