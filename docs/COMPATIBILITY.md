@@ -716,6 +716,15 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
 
 ## Fixed while getting these to run
 
+- IBM's installer SYSINST2.EXE imports DOSCALLS.443, which neither
+  DOSCALL1.DLL nor the Toolkit libraries name: IBM's kernel exports it
+  itself, as a call gate in its own DOSCALLS entry table (in OS2KRNL's
+  data, before DOSCALL1's ordinals take over), and the gate is
+  GDT_DOSQUERYABIOSSUPPORT: the 16-bit DosQueryABIOSSupport(ULONG
+  reserved), HW_CFG_* flags as the return value. SYSINST2 asks it right
+  after OEMHLP$'s machine information (whether ABIOS is supported but
+  absent) and now goes on to its welcome screen.
+
 - Workplace Shell: REXXUTIL's `SysOpenObject('C:\MMOS2\SOUNDS', ...)`
   once opened the Multimedia Templates folder: a program's
   WinQueryObject of a path, done while the shell was starting, gave the

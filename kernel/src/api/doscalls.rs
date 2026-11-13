@@ -197,6 +197,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 995) => super::sysctl::dos_system_service,
         (0, 112) => super::sysctl::dos_query_ras_info,
         (0, 371) => super::sysctl::dos_query_abios_support,
+        // The 16-bit DosQueryABIOSSupport(ULONG reserved): an export of
+        // IBM's kernel itself (not of DOSCALL1), used by SYSINST2.EXE.
+        (0, 443) => super::sysctl::dos_query_abios_support,
         (0, 976) => super::sysctl::dos_perf_sys_call,
         (0, 364) => super::perf::dos_alias_perf_ctrs,
         (0, 365) => super::perf::dos_configure_perf,

@@ -13,7 +13,7 @@ What is still to do. Everything already finished is in
   on real hardware (QEMU has none); PRT_QUERYJOBHANDLE on spooled ports
 - DOS sessions: the sharing retries and INT 24h for lock violations on
   compatibility-mode and FCB opens
-- DOSCALLS.443 (SYSINST2.EXE), diskette IOCtls, APM suspend and events
+- Diskette IOCtls, APM suspend and events
 
 ## Milestone 2: storage and installed systems
 
