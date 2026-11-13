@@ -11,8 +11,6 @@ What is still to do. Everything already finished is in
   debuggee thread that never parks
 - parallel ports: ECP/EPP transfers, IEEE 1284 device IDs and PCI cards
   on real hardware (QEMU has none); PRT_QUERYJOBHANDLE on spooled ports
-- DOS sessions: the sharing retries and INT 24h for lock violations on
-  compatibility-mode and FCB opens
 - DOSCALLS.443 (SYSINST2.EXE), diskette IOCtls, APM suspend and events
 
 ## Milestone 2: storage and installed systems

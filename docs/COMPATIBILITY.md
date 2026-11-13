@@ -818,9 +818,10 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
   the open file and when it ends (a child's inherited handle does not
   own them). DOS programs' INT 21h AH=5Ch locks are the same locks
   (`tests/dos` LOCKTEST.COM); `DosCopy` fails on a locked source or
-  target. `STRESS locks` checks all of this; not done: the DOS sharing
-  retry count and the INT 24h hard error IBM raises for a DOS
-  compatibility-mode or FCB open (rs2's DOS fails the call with 33).
+  target. `STRESS locks` checks all of this. In DOS sessions a sharing
+  or lock violation is tried again as IOCTL 440Bh says, then raises INT
+  24h for a compatibility-mode or FCB file, as IBM's VDM does
+  (docs/DOS.md; `tests/dos` I24TEST.COM).
 
 - `DosGetMessage`: an insertion table slot holding NULL made the call fail
   with ERROR_INVALID_ADDRESS; OS/2 only reads the strings the message uses
