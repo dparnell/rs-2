@@ -18,6 +18,7 @@ pub mod filelock;
 pub mod fsctl;
 pub mod ioctl;
 pub mod cdioctl;
+pub mod oemdev;
 pub mod harderr;
 pub mod kbdapi;
 pub mod lan;

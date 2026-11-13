@@ -206,6 +206,25 @@ pub fn register(h: u16, pid: u32, inbuf: u32, outbuf: u32, pos: u16, sid: u32) -
     }
     let mut s = STATE.lock();
     let dev = s.open.iter().find(|o| o.0 == h && o.2 == pid).map(|o| o.1).ok_or(ERROR_MON_INVALID_HANDLE)?;
+    add(&mut s, dev, h, pid, inbuf, outbuf, pos, sid)
+}
+
+/// The device's register-monitor IOCtl (category 0xA function 0x40 on
+/// KBD$ or MOUSE$): a registration without a monitor handle, ending with
+/// the process.
+pub fn register_device(dev: Dev, pid: u32, inbuf: u32, outbuf: u32, pos: u16, sid: u32) -> Result<(), u32> {
+    if pos > 2 || inbuf == outbuf || !crate::session::exists(sid) {
+        return Err(ERROR_MON_INVALID_PARMS);
+    }
+    let mut s = STATE.lock();
+    if !s.open.iter().any(|o| o.0 == 0 && o.2 == pid) {
+        s.open.push((0, dev, pid));
+    }
+    add(&mut s, dev, 0, pid, inbuf, outbuf, pos, sid)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add(s: &mut State, dev: Dev, h: u16, pid: u32, inbuf: u32, outbuf: u32, pos: u16, sid: u32) -> Result<(), u32> {
     let taken = s.chains.iter().any(|c| c.regs.iter().any(|r| r.pid == pid && (r.inbuf == inbuf || r.outbuf == outbuf)));
     if taken {
         return Err(ERROR_MON_INVALID_PARMS);
