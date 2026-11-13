@@ -5,10 +5,16 @@ What is still to do. Everything already finished is in
 
 ## Milestone 1: unmodified text-mode programs
 
-- parallel port hardware
-- DosDevIOCtl coverage
-- mandatory file locks
-- finer-grained kernel locking (in place of the big kernel lock)
+- the legacy lock's corner (docs/ARCHITECTURE.md "Locking"): pop-ups,
+  the session manager, replacement subsystems, DosDevIOCtl/DosFSCtl/
+  DosFSAttach, DosDebug, the LAN requester, process exit; hot keys that
+  switch sessions from interrupt context; DLL initialisation run twice
+  when two processes load a DLL at once
+- parallel ports: ECP/EPP transfers, IEEE 1284 device IDs and PCI cards
+  on real hardware (QEMU has none); PRT_QUERYJOBHANDLE on spooled ports
+- DOS sessions: the sharing retries and INT 24h for lock violations on
+  compatibility-mode and FCB opens
+- DOSCALLS.443 (SYSINST2.EXE), diskette IOCtls, APM suspend and events
 
 ## Milestone 2: storage and installed systems
 
@@ -86,3 +92,7 @@ Microsoft file (docs/WIN16.md).
   those blocks flat), multiple images per file, compound files (RIFF CF)
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux
   system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
+- other architectures (AArch64 on QEMU `virt` and the Raspberry Pi 4,
+  then RISC-V): an architecture layer in the kernel, a native kernel,
+  OS/2 programs on an x86 runner built from x86emu, native system DLLs
+  behind thunks, later a JIT; see [PORTING.md](PORTING.md)
