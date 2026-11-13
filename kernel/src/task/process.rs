@@ -213,6 +213,8 @@ pub struct ExecParams<'a> {
 }
 
 pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
+    // Until the process is listed (its modules count as in use from then).
+    let _loading = loader::lock();
     let data = crate::fs::read_file(p.path).ok_or(loader::err::FILE_NOT_FOUND)?;
     let mut space = AddressSpace::new().ok_or(loader::err::NOT_ENOUGH_MEMORY)?;
     let exe = loader::load_exe(p.path, data, &mut space)?;
