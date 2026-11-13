@@ -2,7 +2,7 @@
 //!
 //! The PS/2 controller delivers set-1 scancodes on IRQ 1; USB keyboards
 //! (`drivers::hid`) translate their reports into the same scancodes and
-//! feed them through [`scancode`], so shift state and key translation live
+//! feed them through [`key`], so shift state and key translation live
 //! here only. Character assignment follows the selected national layout
 //! ([`layout`]).
 
@@ -46,13 +46,12 @@ struct State {
     /// Key events by session.
     queues: BTreeMap<u32, VecDeque<KeyInfo>>,
     shift: u16,
-    e0: bool,
     /// A second character produced by the last key (a dead key that did
     /// not combine).
     extra: Option<KeyInfo>,
 }
 
-static STATE: SpinLock<State> = SpinLock::new(State { queues: BTreeMap::new(), shift: 0, e0: false, extra: None });
+static STATE: SpinLock<State> = SpinLock::new(State { queues: BTreeMap::new(), shift: 0, extra: None });
 static WAITERS: WaitQueue = WaitQueue::new();
 
 // Keys outside the layout tables (Esc, Backspace, Tab, Enter, keypad *,
@@ -71,27 +70,77 @@ pub fn init() {
     crate::irq::register(1, irq);
 }
 
-fn irq(_f: &mut TrapFrame) {
-    scancode(unsafe { inb(0x60) });
-}
+/// The PS/2 keyboard's E0 prefix: only its interrupt handler uses it
+/// (USB and virtio keyboards pass whole keys to [`key`]), so a prefix
+/// from one keyboard never extends a key from another.
+static PS2_E0: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Process one set-1 scancode byte (0xE0 prefixes included). Safe to call
-/// from interrupt context (the PS/2 IRQ, the USB poll in the timer tick).
-pub fn scancode(sc: u8) {
+fn irq(_f: &mut TrapFrame) {
+    use core::sync::atomic::Ordering;
+    let sc = unsafe { inb(0x60) };
     if crate::conkbd::raw_byte(sc) {
         return;
     }
+    if sc == 0xe0 {
+        PS2_E0.store(true, Ordering::Relaxed);
+        return;
+    }
+    key(sc, PS2_E0.swap(false, Ordering::Relaxed));
+}
+
+/// One key went down or up: a set-1 scan code (bit 7 for a release) and
+/// `ext` for an E0-prefixed key. Each keyboard source keeps its own
+/// prefix; the shift and lock state changes under `STATE` in one piece,
+/// so keys from several keyboards (or CPUs) at once cannot tear it. Safe
+/// to call from interrupt context (the PS/2 IRQ, the USB poll in the
+/// timer tick, virtio-input's interrupt).
+pub fn key(sc: u8, ext: bool) {
     let (ev, extra, before, after) = {
         let mut s = STATE.lock();
         let before = s.shift;
-        let ev = translate(&mut s, sc);
-        (ev, s.extra.take(), before, s.shift)
+        let ev = translate(&mut s, sc, ext);
+        let after = shift_after(s.shift, sc, ext, ev.as_ref());
+        s.shift = after;
+        let extra = s.extra.take();
+        (ev, extra, before, after)
     };
-    crate::conkbd::key_event(sc, before, after, ev);
+    let with_shift = |k: Option<KeyInfo>| {
+        k.map(|mut k| {
+            k.shift = after;
+            k
+        })
+    };
+    crate::conkbd::key_event(sc, ext, before, after, with_shift(ev));
     // A dead key that did not combine also yields the following character.
     if extra.is_some() {
-        crate::conkbd::key_event(sc, after, after, extra);
+        crate::conkbd::key_event(sc, ext, after, after, with_shift(extra));
     }
+}
+
+/// The shift state after a key, with the bits [`translate`] does not
+/// keep: the lock keys and SysRq held down (0x1000..0x8000) and Insert.
+fn shift_after(cur: u16, sc: u8, ext: bool, ev: Option<&KeyInfo>) -> u16 {
+    let code = sc & 0x7f;
+    let release = sc & 0x80 != 0;
+    let held_bit = match (code, ext) {
+        (0x46, false) => 0x1000,
+        (0x45, false) => 0x2000,
+        (0x3a, false) => 0x4000,
+        (0x54, false) => 0x8000,
+        _ => 0,
+    };
+    let mut held = cur & 0xf000;
+    if held_bit != 0 {
+        held = if release { held & !held_bit } else { held | held_bit };
+    }
+    let mut after = cur;
+    if let Some(k) = ev {
+        let ins = code == 0x52 && (ext || after & shift::NUMLOCK_ON == 0 || after & (shift::LEFTSHIFT | shift::RIGHTSHIFT) != 0);
+        if ins && k.shift & shift::ALT == 0 {
+            after ^= shift::INSERT_ON;
+        }
+    }
+    (after & 0x0fff) | held
 }
 
 /// Queue a key event for session `sid` (after hot keys and monitors).
@@ -109,8 +158,8 @@ pub fn unget(sid: u32, k: KeyInfo) {
 /// Translate a scan code in a given shift state without side effects
 /// (KbdXlate); `ext` for E0-prefixed keys.
 pub fn xlate(scan: u8, shift: u16, ext: bool) -> Option<KeyInfo> {
-    let mut s = State { queues: BTreeMap::new(), shift, e0: ext, extra: None };
-    translate(&mut s, scan & 0x7f)
+    let mut s = State { queues: BTreeMap::new(), shift, extra: None };
+    translate(&mut s, scan & 0x7f, ext)
 }
 
 /// Set the shift and lock state (KbdSetStatus, KBD_SETSHIFTSTATE).
@@ -118,13 +167,8 @@ pub fn set_shift_state(v: u16) {
     STATE.lock().shift = v;
 }
 
-fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
+fn translate(s: &mut State, sc: u8, ext: bool) -> Option<KeyInfo> {
     use shift::*;
-    if sc == 0xe0 {
-        s.e0 = true;
-        return None;
-    }
-    let ext = core::mem::take(&mut s.e0);
     let release = sc & 0x80 != 0;
     let code = sc & 0x7f;
     // Modifier keys.

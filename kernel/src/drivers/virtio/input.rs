@@ -2,7 +2,7 @@
 //!
 //! The device sends Linux evdev events (type, code, value) on its event
 //! queue, which is kept full of 8-byte buffers and drained from its
-//! MSI-X interrupt (polled from the timer tick without one). Key events become set-1 scancodes for `kbd::scancode`, as USB
+//! MSI-X interrupt (polled from the timer tick without one). Key events become set-1 scancodes for `kbd::key`, as USB
 //! keyboards do; relative motion goes to `mouse::motion` and absolute
 //! positions (tablets: exact pointer placement in a VM, without grabbing
 //! the host mouse) to `mouse::motion_abs`, scaled by the axis ranges the
@@ -88,7 +88,8 @@ static DEVS: SpinLock<Vec<Dev>> = SpinLock::new(Vec::new());
 /// What a batch of events asks for, done after the device lock is gone.
 #[derive(Clone, Copy)]
 enum Action {
-    Scancode(u8),
+    /// A set-1 scan code (bit 7 = release) and whether it is E0-prefixed.
+    Scancode(u8, bool),
     Rel(u8, i32, i32),
     Abs(u8, u32, u32, u32, u32),
 }
@@ -107,16 +108,13 @@ impl Actions {
     }
 
     fn key(&mut self, sc: u16, release: bool) {
-        if sc & 0x100 != 0 {
-            self.push(Action::Scancode(0xe0));
-        }
-        self.push(Action::Scancode(sc as u8 | if release { 0x80 } else { 0 }));
+        self.push(Action::Scancode(sc as u8 | if release { 0x80 } else { 0 }, sc & 0x100 != 0));
     }
 
     fn run(&self) {
         for a in &self.v[..self.n] {
             match *a {
-                Action::Scancode(b) => crate::kbd::scancode(b),
+                Action::Scancode(b, ext) => crate::kbd::key(b, ext),
                 Action::Rel(b, dx, dy) => crate::mouse::motion(b, dx, dy),
                 Action::Abs(b, x, y, mx, my) => crate::mouse::motion_abs(b, x, y, mx, my),
             }
@@ -362,7 +360,7 @@ pub fn attach(mut dev: Device) {
 
 /// Process delivered events (timer tick).
 pub fn poll() {
-    let mut acts = Actions { v: [Action::Scancode(0); 64], n: 0 };
+    let mut acts = Actions { v: [Action::Scancode(0, false); 64], n: 0 };
     {
         let Some(mut devs) = DEVS.try_lock() else {
             super::retry();

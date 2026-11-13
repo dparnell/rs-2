@@ -321,19 +321,23 @@ pub fn set_typematic(delay_ms: u32, cps: u32) {
 /// show it on the LEDs.
 pub fn set_shift(v: u16) {
     kbd::set_shift_state(v);
-    update_leds(v);
+    update_leds();
 }
 
-/// Show the lock state on the PS/2 keyboard's LEDs.
-fn update_leds(state: u16) {
-    let leds = ((state & shift::SCROLLLOCK_ON != 0) as u8) | ((state & shift::NUMLOCK_ON != 0) as u8) << 1 | ((state & shift::CAPSLOCK_ON != 0) as u8) << 2;
-    {
+/// Show the lock state on the PS/2 keyboard's LEDs. The state is read
+/// with the port locked, so of two CPUs changing it the later one's
+/// LEDs are what stays lit.
+fn update_leds() {
+    let leds = {
         let mut p = PS2.lock();
+        let state = kbd::shift_state();
+        let leds = ((state & shift::SCROLLLOCK_ON != 0) as u8) | ((state & shift::NUMLOCK_ON != 0) as u8) << 1 | ((state & shift::CAPSLOCK_ON != 0) as u8) << 2;
         if p.leds == leds {
             return;
         }
         p.leds = leds;
-    }
+        leds
+    };
     ps2_send(&[0xed, leds]);
 }
 
@@ -346,46 +350,13 @@ pub mod dd {
     pub const SECONDARY: u16 = 0x0080;
 }
 
-static E0: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
-/// One scancode byte was translated: `before`/`after` are the shift state
-/// around it, `ev` the key event it produced (None for breaks, shift and
-/// lock keys).
-pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
-    use core::sync::atomic::Ordering;
-    if sc == 0xe0 {
-        E0.store(true, Ordering::Relaxed);
-        return;
-    }
-    let ext = E0.swap(false, Ordering::Relaxed);
-    let code = sc & 0x7f;
-    let release = sc & 0x80 != 0;
-    // Shift-state bits kbd does not keep: keys held down and Insert.
-    let held = match (code, ext) {
-        (0x46, false) => shift_held(0x1000, release),
-        (0x45, false) => shift_held(0x2000, release),
-        (0x3a, false) => shift_held(0x4000, release),
-        (0x54, false) => shift_held(0x8000, release),
-        _ => kbd::shift_state() & 0xf000,
-    };
-    let mut after = after;
-    if let Some(k) = ev {
-        let ins = code == 0x52 && (ext || after & shift::NUMLOCK_ON == 0 || after & (shift::LEFTSHIFT | shift::RIGHTSHIFT) != 0);
-        if ins && k.shift & shift::ALT == 0 {
-            after ^= shift::INSERT_ON;
-        }
-    }
-    let after = (after & 0x0fff) | held;
-    if after != kbd::shift_state() {
-        kbd::set_shift_state(after);
-    }
+/// One key was translated (`kbd::key`): `ext` for an E0-prefixed key,
+/// `before`/`after` the shift state around it (already stored), `ev` the
+/// key event it produced (None for breaks, shift and lock keys).
+pub fn key_event(sc: u8, ext: bool, before: u16, after: u16, ev: Option<KeyInfo>) {
     if (before ^ after) & (shift::SCROLLLOCK_ON | shift::NUMLOCK_ON | shift::CAPSLOCK_ON) != 0 {
-        update_leds(after);
+        update_leds();
     }
-    let ev = ev.map(|mut k| {
-        k.shift = after;
-        k
-    });
     if let Some(k) = &ev {
         let ctrl = k.shift & shift::CONTROL != 0;
         let alt = k.shift & shift::ALT != 0;
@@ -512,11 +483,6 @@ pub fn inject_key(sid: u32, k: KeyInfo, up: bool) {
         return;
     }
     deliver_key(sid, k, flags);
-}
-
-fn shift_held(bit: u16, release: bool) -> u16 {
-    let cur = kbd::shift_state() & 0xf000;
-    if release { cur & !bit } else { cur | bit }
 }
 
 fn is_shift_key(code: u8, ext: bool) -> bool {
