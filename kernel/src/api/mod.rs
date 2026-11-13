@@ -21,6 +21,7 @@ pub mod cdioctl;
 pub mod harderr;
 pub mod kbdapi;
 pub mod lan;
+pub mod legacy;
 pub mod moncalls;
 pub mod memx;
 pub mod module;
@@ -400,6 +401,19 @@ fn code_linear(space: &AddressSpace, cs: u16, rip: u64) -> u32 {
     space.linear(cs, rip as u32).unwrap_or(rip as u32)
 }
 
+/// Gate slots of module 0 that are returns from code the kernel called
+/// (entry points, DLL init, exception handlers, exit lists...), not APIs.
+fn special_return(ordinal: u32) -> bool {
+    ordinal == 0
+        || ordinal == module::INIT_RETURN_ORDINAL
+        || ordinal == thunk::UNITHUNK_RETURN_ORDINAL
+        || ordinal == subsys::RETURN_ORDINAL
+        || ordinal == win16::RETURN_ORDINAL
+        || ordinal == exceptions::HANDLER_RETURN_ORDINAL
+        || ordinal == proc::EXITLIST_RETURN_ORDINAL
+        || ordinal == proc::THREAD_EXIT_ORDINAL
+}
+
 pub fn dispatch(f: &mut TrapFrame) {
     dispatch_with(f, true, None);
 }
@@ -419,7 +433,19 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         let sp = if big { f.rsp as u32 } else { f.rsp as u32 & 0xffff };
         (lin, big, vm::desc_base(dss).wrapping_add(sp))
     };
-    let Some((module, ordinal)) = gate::decode(linear) else {
+    let decoded = gate::decode(linear);
+    // Calls not yet converted to finer locks run under the big kernel
+    // lock (legacy.rs); so do the gate's own return slots (module 0).
+    match decoded {
+        Some((m, o)) if m != 0 || !special_return(o) => {
+            let (m8, o16) = names::canonical(m as u8, o as u16);
+            if legacy::needs_bkl(m8, o16) {
+                crate::smp::bkl_acquire();
+            }
+        }
+        _ => crate::smp::bkl_acquire(),
+    }
+    let Some((module, ordinal)) = decoded else {
         // int 0x99 executed outside the gate: treat as a protection fault.
         f.vector = 13;
         f.error = 0x99 * 8 + 2;

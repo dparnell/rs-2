@@ -458,7 +458,9 @@ pub extern "C" fn first_user_return(f: &mut TrapFrame) {
     if !debugged {
         return;
     }
-    crate::smp::bkl_acquire();
+    if crate::smp::BKL_USER_RETURN {
+        crate::smp::bkl_acquire();
+    }
     if crate::task::before_user_return(f) {
         crate::task::sched::exit_current();
     }

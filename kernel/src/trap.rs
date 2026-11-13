@@ -22,8 +22,9 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
     match f.vector {
         v if v < 32 => {
             if user {
-                // Kernel code runs under the big kernel lock (smp.rs).
-                smp::bkl_acquire();
+                if smp::BKL_EXCEPTIONS {
+                    smp::bkl_acquire();
+                }
                 let t = crate::fs::iostat::begin();
                 crate::task::user_exception(f);
                 crate::fs::iostat::fault(t);
@@ -32,7 +33,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
             }
         }
         v if v == API_VECTOR as u64 => {
-            smp::bkl_acquire();
+            // Takes the big kernel lock for calls still under it.
             crate::api::dispatch(f);
         }
         // Interrupt handlers only use spin locks and never sleep.
@@ -51,7 +52,9 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
         }
     }
     if user {
-        smp::bkl_acquire();
+        if smp::BKL_USER_RETURN {
+            smp::bkl_acquire();
+        }
         if crate::task::before_user_return(f) {
             // No references are held in this frame.
             crate::task::sched::exit_current();

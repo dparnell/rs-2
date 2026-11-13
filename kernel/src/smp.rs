@@ -63,6 +63,9 @@ pub struct PerCpu {
     /// it did: see [`tlb_shootdown`].
     pub tlb_req: AtomicU64,
     pub tlb_done: AtomicU64,
+    /// Spin locks this CPU holds, for lock-order checks (lockdep.rs).
+    pub spins: UnsafeCell<crate::lockdep::Held>,
+    pub lockdep_busy: AtomicBool,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
@@ -91,6 +94,8 @@ impl PerCpu {
             dr7_loaded: AtomicBool::new(false),
             tlb_req: AtomicU64::new(0),
             tlb_done: AtomicU64::new(0),
+            spins: UnsafeCell::new(crate::lockdep::Held::new()),
+            lockdep_busy: AtomicBool::new(false),
             current: UnsafeCell::new(None),
             idle: UnsafeCell::new(None),
             switched_from: UnsafeCell::new(None),
@@ -173,6 +178,12 @@ pub fn init_bsp() {
 }
 
 // ---- The big kernel lock ----
+
+/// Kernel paths still under the big kernel lock while the kernel moves to
+/// finer locks (API calls decide per call: api/legacy.rs).
+pub const BKL_EXCEPTIONS: bool = true;
+pub const BKL_USER_RETURN: bool = true;
+pub const BKL_KTHREADS: bool = true;
 
 static BKL: AtomicBool = AtomicBool::new(false);
 

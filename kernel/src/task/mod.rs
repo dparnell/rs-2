@@ -22,6 +22,7 @@ pub struct WaitQueue {
 }
 
 impl WaitQueue {
+    #[track_caller]
     pub const fn new() -> Self {
         Self { waiters: SpinLock::new(VecDeque::new()) }
     }

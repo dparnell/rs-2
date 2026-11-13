@@ -76,6 +76,8 @@ pub struct Thread {
     pub init_run: crate::sync::SpinLock<Option<crate::api::module::InitRun>>,
     /// Saved FPU/SSE state while the thread is switched out.
     pub fpu: UnsafeCell<Box<FpuState>>,
+    /// Mutexes this thread holds, for lock-order checks (lockdep.rs).
+    pub mutexes: UnsafeCell<crate::lockdep::Held>,
     /// Kernel threads: the function to run (taken when the thread starts)
     /// and a name for messages.
     pub kentry: crate::sync::SpinLock<Option<Box<dyn FnOnce() + Send>>>,
@@ -161,6 +163,7 @@ impl Thread {
             interrupted: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
+            mutexes: UnsafeCell::new(crate::lockdep::Held::new()),
             init_run: crate::sync::SpinLock::new(None),
             kentry: crate::sync::SpinLock::new(None),
             kname: "",

@@ -27,6 +27,7 @@ mod infoseg;
 mod irq;
 mod kbd;
 mod loader;
+mod lockdep;
 mod pipe;
 mod power;
 mod resmgr;

@@ -25,7 +25,9 @@ pub extern "C" fn kthread_start() -> ! {
     // and take the kernel lock (kernel threads run kernel code), then
     // enable interrupts (schedule() disabled them before switching).
     sched::finish_switch();
-    crate::smp::bkl_acquire();
+    if crate::smp::BKL_KTHREADS {
+        crate::smp::bkl_acquire();
+    }
     crate::arch::enable_interrupts();
     {
         let f = sched::current().kentry.lock().take();
@@ -44,6 +46,7 @@ pub struct Inbox<T> {
 }
 
 impl<T> Inbox<T> {
+    #[track_caller]
     pub const fn new() -> Self {
         Self { items: crate::sync::SpinLock::new(alloc::collections::VecDeque::new()), wait: super::WaitQueue::new() }
     }
