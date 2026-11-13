@@ -185,6 +185,19 @@ pub const BKL_EXCEPTIONS: bool = false;
 pub const BKL_USER_RETURN: bool = false;
 pub const BKL_KTHREADS: bool = true;
 
+/// `bkl` on the kernel command line: every path takes the big kernel lock
+/// again (the old model), for comparing and for hunting a locking bug.
+static FORCED: AtomicBool = AtomicBool::new(false);
+
+pub fn force_bkl() {
+    FORCED.store(true, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn bkl_forced() -> bool {
+    FORCED.load(Ordering::Relaxed)
+}
+
 static BKL: AtomicBool = AtomicBool::new(false);
 
 

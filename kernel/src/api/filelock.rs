@@ -79,7 +79,16 @@ fn set_locks(c: &Ctx, hf: u32, unlock: Option<(u64, u64)>, lock: Option<(u64, u6
     }
     let Some((start, len)) = lock else { return 0 };
     let shared = flags & FL_SHARED != 0;
-    let free = || !conflicts(&LOCKS.lock(), &key, &of, start, len, shared);
+    // Checked and taken in one critical section (another process may ask
+    // for an overlapping range on another CPU at the same moment).
+    let free = || {
+        let mut l = LOCKS.lock();
+        let ok = !conflicts(&l, &key, &of, start, len, shared);
+        if ok {
+            l.push(Lock { file: key.clone(), owner: Arc::downgrade(&of), start, len, shared });
+        }
+        ok
+    };
     if !free() {
         if timeout == 0 {
             return ERROR_LOCK_VIOLATION;
@@ -100,7 +109,6 @@ fn set_locks(c: &Ctx, hf: u32, unlock: Option<(u64, u64)>, lock: Option<(u64, u6
             }
         }
     }
-    LOCKS.lock().push(Lock { file: key, owner: Arc::downgrade(&of), start, len, shared });
     0
 }
 

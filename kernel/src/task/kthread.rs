@@ -25,7 +25,7 @@ pub extern "C" fn kthread_start() -> ! {
     // and take the kernel lock (kernel threads run kernel code), then
     // enable interrupts (schedule() disabled them before switching).
     sched::finish_switch();
-    if crate::smp::BKL_KTHREADS {
+    if crate::smp::BKL_KTHREADS || crate::smp::bkl_forced() {
         crate::smp::bkl_acquire();
     }
     crate::arch::enable_interrupts();

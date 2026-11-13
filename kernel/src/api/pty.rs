@@ -84,7 +84,12 @@ pub fn wait(c: &mut Ctx) -> u32 {
         return ERROR_TIMEOUT;
     }
     let deadline = (ms != u32::MAX).then(|| crate::irq::ticks() + ms as u64 * crate::irq::HZ / 1000);
-    crate::pty::wait(deadline, || now() != Some(seen));
+    loop {
+        let g = crate::pty::generation();
+        if now() != Some(seen) || !crate::pty::wait(deadline, g) {
+            break;
+        }
+    }
     match now() {
         None => ERROR_SMG_SESSION_NOT_FOUND,
         Some(g) if g != seen => {

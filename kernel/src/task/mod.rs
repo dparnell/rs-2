@@ -83,6 +83,13 @@ impl WaitQueue {
         }
     }
 
+    /// Run `f` with whether any thread waits, under the queue's lock (so
+    /// no waiter comes or goes meanwhile).
+    pub fn with_waiters<R>(&self, f: impl FnOnce(bool) -> R) -> R {
+        let w = self.waiters.lock();
+        f(!w.is_empty())
+    }
+
     /// Whether a thread matching `f` is waiting.
     pub fn has_waiter(&self, f: impl Fn(&Thread) -> bool) -> bool {
         self.waiters.lock().iter().any(|t| f(t))

@@ -22,7 +22,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
     match f.vector {
         v if v < 32 => {
             if user {
-                if smp::BKL_EXCEPTIONS {
+                if smp::BKL_EXCEPTIONS || smp::bkl_forced() {
                     smp::bkl_acquire();
                 }
                 // (Debuggees take it in user_exception.)
@@ -53,7 +53,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
         }
     }
     if user {
-        if smp::BKL_USER_RETURN {
+        if smp::BKL_USER_RETURN || smp::bkl_forced() {
             smp::bkl_acquire();
         }
         if crate::task::before_user_return(f) {

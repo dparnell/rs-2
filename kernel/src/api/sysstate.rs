@@ -270,8 +270,11 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             }
             o.align();
             // Handle table: SFN per open handle, 0xFFFF if closed.
-            let hs: Vec<Option<(String, u32, u16, u16)>> =
-                p.handles.lock().iter().map(|h| h.as_ref().map(handle_name)).collect();
+            // Copied out first: a file's size and name may come from the
+            // disk, which must not be read under the handle table's spin lock.
+            let handles: Vec<Option<crate::fs::Handle>> = p.handles.lock().clone();
+            let hs: Vec<Option<(String, u32, u16, u16)>> = handles.iter().map(|h| h.as_ref().map(handle_name)).collect();
+            drop(handles);
             let fs_at = o.at();
             for h in &hs {
                 match h {

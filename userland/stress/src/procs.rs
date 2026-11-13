@@ -44,6 +44,8 @@ pub fn child(args: &[String]) -> u32 {
         "oom" => crate::mem::child_oom(),
         "flood" => crate::more::child_flood(rest),
         "npserver" => crate::more::child_npserver(),
+        "smpmutex" => crate::smp::child_mutex(num(rest, 0)),
+        "smpmix" => crate::smp::child_mix(num(rest, 0)),
         _ => 255,
     }
 }

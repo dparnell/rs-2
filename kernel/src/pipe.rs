@@ -59,8 +59,7 @@ impl PipeEnd {
     }
 
     pub fn set_mode(&self, m: u32) {
-        let keep = self.mode() & 0x7;
-        self.mode.store((m & !0x7) | keep, Ordering::Relaxed);
+        let _ = self.mode.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((m & !0x7) | (old & 0x7)));
     }
 
     /// Read up to `n` bytes; blocks until data arrives or all writers close
@@ -70,16 +69,23 @@ impl PipeEnd {
             return Err(err::ACCESS_DENIED);
         }
         let p = &self.pipe;
-        // Interrupted by a signal or a kill: ERROR_INTERRUPT, not end of file.
-        if !p.readable.wait_until(None, || !p.buf.lock().is_empty() || p.writers.load(Ordering::Acquire) == 0) {
-            return Err(err::INTERRUPT);
+        loop {
+            // Interrupted by a signal or a kill: ERROR_INTERRUPT, not end of file.
+            if !p.readable.wait_until(None, || !p.buf.lock().is_empty() || p.writers.load(Ordering::Acquire) == 0) {
+                return Err(err::INTERRUPT);
+            }
+            let mut b = p.buf.lock();
+            // Another reader of the pipe may have taken the data first:
+            // empty is end of file only with no writer left.
+            if b.is_empty() && p.writers.load(Ordering::Acquire) != 0 {
+                continue;
+            }
+            let k = n.min(b.len());
+            let v: Vec<u8> = b.drain(..k).collect();
+            drop(b);
+            p.writable.wake_all();
+            return Ok(v);
         }
-        let mut b = p.buf.lock();
-        let k = n.min(b.len());
-        let v: Vec<u8> = b.drain(..k).collect();
-        drop(b);
-        p.writable.wake_all();
-        Ok(v)
     }
 
     pub fn write(&self, data: &[u8]) -> Result<usize, u32> {

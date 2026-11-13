@@ -106,7 +106,7 @@ fn write(c: &Ctx, h: u32, request: u32, len: u32, addr: u32, priority: u32) -> u
 /// which the reader frees with DosFreeMem.
 pub fn post_kernel(name: &str, request: u32, data: &[u8]) {
     let name = name.to_ascii_uppercase();
-    let Some(owner) = QUEUES.lock().values().find(|q| q.name == name).map(|q| q.owner) else { return };
+    let Some((h, owner)) = QUEUES.lock().iter().find(|(_, q)| q.name == name).map(|(&h, q)| (h, q.owner)) else { return };
     let Some(p) = crate::task::process::by_pid(owner) else { return };
     let addr = {
         let mut sp = p.space.lock();
@@ -117,7 +117,13 @@ pub fn post_kernel(name: &str, request: u32, data: &[u8]) {
     };
     let notify = {
         let mut qs = QUEUES.lock();
-        let Some(q) = qs.values_mut().find(|q| q.name == name) else { return };
+        // The same queue as above (it may have been closed meanwhile, and
+        // the name taken by another process's queue).
+        let Some(q) = qs.get_mut(&h).filter(|q| q.name == name && q.owner == owner) else {
+            drop(qs);
+            let _ = p.space.lock().free(addr);
+            return;
+        };
         let code = q.next_code;
         q.next_code = q.next_code.wrapping_add(1).max(1);
         q.elements.push(Element { pid: 0, request, len: data.len() as u32, addr, priority: 0, code });
@@ -147,19 +153,19 @@ fn take(c: &Ctx, h: u32, code: u32, wait: bool, remove: bool, hsem: u32) -> Resu
                 None => return Err(err::QUE_ELEMENT_NOT_EXIST),
             }
         };
+        // Without waiting, the semaphore to post on the next arrival is
+        // registered in the same critical section that found the queue
+        // empty (a writer on another CPU must either see it or have
+        // written first).
+        if idx.is_none() && !wait && hsem != 0 && !q.notify.contains(&hsem) {
+            q.notify.push(hsem);
+        }
         Ok(idx.map(|i| if remove { q.elements.remove(i) } else { q.elements[i] }))
     };
     if let Some(e) = find()? {
         return Ok(e);
     }
     if !wait {
-        if hsem != 0 {
-            if let Some(q) = QUEUES.lock().get_mut(&h) {
-                if !q.notify.contains(&hsem) {
-                    q.notify.push(hsem);
-                }
-            }
-        }
         return Err(err::QUE_EMPTY);
     }
     let mut got = None;

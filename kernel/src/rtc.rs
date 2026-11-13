@@ -27,11 +27,19 @@ pub struct DateTime {
     pub weekday: u8,
 }
 
-pub(crate) fn cmos(reg: u8) -> u8 {
+fn cmos(reg: u8) -> u8 {
     unsafe {
         outb(0x70, reg);
         inb(0x71)
     }
+}
+
+/// Read one CMOS register (thread context), with the port pair locked.
+pub(crate) fn cmos_read(reg: u8) -> u8 {
+    lock_cmos();
+    let v = cmos(reg);
+    unlock_cmos();
+    v
 }
 
 fn read_raw() -> [u8; 7] {
@@ -146,8 +154,10 @@ pub fn tick() {
     let up = mono_ms();
     let base = BASE.load(Ordering::Relaxed);
     let now = (base + up) / 1000 * 1000 + 1000;
-    BASE.store(now.saturating_sub(up).max(base), Ordering::Release);
-    STATE.store(2, Ordering::Release);
+    // A DosSetDateTime on another CPU since the load wins.
+    if BASE.compare_exchange(base, now.saturating_sub(up).max(base), Ordering::AcqRel, Ordering::Relaxed).is_ok() {
+        let _ = STATE.compare_exchange(1, 2, Ordering::AcqRel, Ordering::Relaxed);
+    }
 }
 
 /// Compare the clock with the CMOS clock (called four times a second).
@@ -160,12 +170,14 @@ pub fn resync() {
     let up = mono_ms();
     let base = BASE.load(Ordering::Relaxed);
     let now = base + up;
+    // (compare_exchange: a DosSetDateTime on another CPU since the load
+    // wins.)
     if now < cm {
         // Behind (timer ticks lost): catch up.
-        BASE.store(cm - up, Ordering::Release);
+        let _ = BASE.compare_exchange(base, cm - up, Ordering::AcqRel, Ordering::Relaxed);
     } else if now >= cm + 1250 {
         // Ahead by more than the polling explains: hold back gently.
-        BASE.store(base - ((now - cm - 1000) / 4).max(1), Ordering::Release);
+        let _ = BASE.compare_exchange(base, base - ((now - cm - 1000) / 4).max(1), Ordering::AcqRel, Ordering::Relaxed);
     }
 }
 
