@@ -72,14 +72,16 @@ impl Machine {
         if r == 0 { 128 } else { r }
     }
 
-    /// Read or write one record at `rec` through the DTA; AL code.
-    fn fcb_io<H: Host>(&mut self, host: &mut H, a: u32, rec: u32, write: bool, count: u32) -> (u8, u32) {
-        let Some(i) = self.fcb_sft(a) else { return (if write { 1 } else { 1 }, 0) };
+    /// Read or write `count` records at `rec` through the DTA: (AL code,
+    /// records). A sharing or lock violation (after the retries) is the
+    /// error, for a critical error.
+    fn fcb_io<H: Host>(&mut self, host: &mut H, a: u32, rec: u32, write: bool, count: u32) -> Result<(u8, u32), u16> {
+        let Some(i) = self.fcb_sft(a) else { return Ok((1, 0)) };
         let h = self.dos.sft[i].as_ref().unwrap().host;
         let size = self.rec_size(a);
         let dta = self.dta_lin();
         if host.seek(h, (rec as u64 * size as u64) as i64, 0).is_err() {
-            return (1, 0);
+            return Ok((1, 0));
         }
         let total = size * count;
         if write {
@@ -90,16 +92,24 @@ impl Machine {
                 let _ = host.set_size(h, pos);
                 0
             } else {
-                host.write(h, &buf).unwrap_or(0) as u32
+                match self.share_retry(host, |x| x.write(h, &buf)) {
+                    Ok(n) => n as u32,
+                    Err(e @ (err::SHARING_VIOLATION | err::LOCK_VIOLATION)) => return Err(e),
+                    Err(_) => 0,
+                }
             };
             let end = host.seek(h, 0, 2).unwrap_or(0) as u32;
             self.hw.wr32(a + 0x10, end);
-            (if n < total { 1 } else { 0 }, n / size.max(1))
+            Ok((if n < total { 1 } else { 0 }, n / size.max(1)))
         } else {
             let mut buf = alloc::vec![0u8; total as usize];
-            let n = host.read(h, &mut buf).unwrap_or(0) as u32;
+            let n = match self.share_retry(host, |x| x.read(h, &mut buf)) {
+                Ok(n) => n as u32,
+                Err(e @ (err::SHARING_VIOLATION | err::LOCK_VIOLATION)) => return Err(e),
+                Err(_) => 0,
+            };
             if n == 0 {
-                return (1, 0);
+                return Ok((1, 0));
             }
             // A partial record is padded with zeros.
             for b in buf[n as usize..].iter_mut() {
@@ -107,8 +117,23 @@ impl Machine {
             }
             let recs = n.div_ceil(size);
             self.hw.write_bytes(dta, &buf[..(recs * size) as usize]);
-            (if n < total { 3 } else { 0 }, recs)
+            Ok((if n < total { 3 } else { 0 }, recs))
         }
+    }
+
+    /// An FCB call's sharing or lock violation `e` on the FCB at `a`:
+    /// a critical error (FCB files are compatibility mode), failing with
+    /// AL = `fail_al`; else AL = `fail_al`.
+    fn fcb_violation<H: Host>(&mut self, host: &mut H, a: u32, e: u16, write: bool, fail_al: u8) -> Cb {
+        let drive = match self.fcb_sft(a).and_then(|i| self.dos.sft[i].clone()) {
+            Some(s) => (s.info & 0x1f) as u8,
+            None => self.fcb_name(a).0,
+        };
+        self.dos_error(e);
+        if self.share_error(e, 0, write, drive) == super::crit::RAISED {
+            return self.raise_crit(host, super::FailWith::Fcb(fail_al));
+        }
+        self.al_done(fail_al)
     }
 
     fn fcb_seq_pos(&mut self, a: u32) -> u32 {
@@ -176,7 +201,12 @@ impl Machine {
                     Err(_) => return self.al_done(0xff),
                 };
                 let create = if ah == 0x16 { Some((attr, Create::Truncate)) } else { None };
-                let r = self.open_name(host, &n, 2, create).or_else(|_| if ah == 0x0f { self.open_name(host, &n, 0, None) } else { Err(err::ACCESS_DENIED) });
+                // Read/write, else read only; a sharing violation (after
+                // the retries) is a critical error.
+                let r = self.open_name(host, &n, 2, create).or_else(|e| if ah == 0x0f && e != err::SHARING_VIOLATION { self.open_name(host, &n, 0, None) } else { Err(e) });
+                if let Err(e @ err::SHARING_VIOLATION) = r {
+                    return self.fcb_violation(host, a, e, false, 0xff);
+                }
                 match r {
                     Ok(i) => {
                         let (size, dt) = match &n {
@@ -250,7 +280,10 @@ impl Machine {
             }
             0x14 | 0x15 => {
                 let rec = self.fcb_seq_pos(a);
-                let (r, n) = self.fcb_io(host, a, rec, ah == 0x15, 1);
+                let (r, n) = match self.fcb_io(host, a, rec, ah == 0x15, 1) {
+                    Ok(x) => x,
+                    Err(e) => return self.fcb_violation(host, a, e, ah == 0x15, 1),
+                };
                 if n > 0 {
                     self.fcb_set_seq(a, rec + 1);
                 }
@@ -284,7 +317,10 @@ impl Machine {
             0x21 | 0x22 => {
                 let rec = self.fcb_random(a);
                 self.fcb_set_seq(a, rec);
-                self.fcb_io(host, a, rec, ah == 0x22, 1).0
+                match self.fcb_io(host, a, rec, ah == 0x22, 1) {
+                    Ok(x) => x.0,
+                    Err(e) => return self.fcb_violation(host, a, e, ah == 0x22, 1),
+                }
             }
             0x23 => {
                 let Ok((path, _)) = self.fcb_path(a) else { return self.al_done(0xff) };
@@ -317,7 +353,13 @@ impl Machine {
             0x27 | 0x28 => {
                 let rec = self.fcb_random(a);
                 let count = self.cpu.cx() as u32;
-                let (r, n) = self.fcb_io(host, a, rec, ah == 0x28, count);
+                let (r, n) = match self.fcb_io(host, a, rec, ah == 0x28, count) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        self.cpu.set_cx(0);
+                        return self.fcb_violation(host, a, e, ah == 0x28, 1);
+                    }
+                };
                 self.cpu.set_cx(n as u16);
                 self.hw.wr32(a + 0x21, rec + n);
                 self.fcb_set_seq(a, rec + n);

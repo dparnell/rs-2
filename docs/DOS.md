@@ -134,6 +134,33 @@ All served in Rust, on the guest's registers and memory:
   opening a file that is not there is error 2 (OS/2 says 110,
   ERROR_OPEN_FAILED; the Delphi 1.01 patch's PATCH.EXE creates its
   temporary file on error 2), creating one that is there 80.
+- **Sharing and lock violations** (`crates/dos/src/dos/crit.rs`, as
+  IBM's VDM: its kernel's `SHARE_ERROR`, `Share_Violation`,
+  `Read_Lock_Violation` and `demiocSetRetries`). AH=5Ch locks are OS/2's
+  mandatory locks (DosSetFileLocks); compatibility mode is deny-none in
+  the session. An open that meets another open's sharing mode (20h), or
+  a read or write that meets another owner's lock (21h; the VDM reads
+  and writes through a 64 KB-aligned buffer so the whole call fails, as
+  on OS/2), is tried again: the retry count in all, with the delay
+  between tries (IOCTL 440Bh: DX tries, CX delay in units of about a
+  millisecond, IBM yields once per unit; 3 and 1 by default; DX=0 is
+  error 1). Still failing, a handle opened with a sharing mode gets the
+  error; a compatibility-mode handle or an FCB (open 0Fh/16h, read and
+  write 14h/15h, 21h/22h, 27h/28h) raises a critical error: INT 24h with
+  AH = 1Eh (Fail and Retry allowed, data area; 1Fh writing), AL = the
+  drive, DI = 0Ch (DOS hands INT 24h no code above "general failure";
+  59h gives the real 20h or 21h, class 0Ah locked, action 2 delay and
+  retry), BP:SI a block device header, and DOS's stack frame (the
+  handler's IRET frame, the caller's AX BX CX DX SI DI BP DS ES, its INT
+  21h frame). The handler's answer: Retry runs the call again (a new
+  round of tries), Fail returns 53h (FCB calls: AL = FFh for an open, 01h
+  for a read or write; 59h then says 53h), Abort ends the program
+  (termination type 2), Ignore (not allowed here) counts as Fail. Without
+  a handler of the program's, DOS's own INT 24h prompts "Lock violation
+  reading drive C" / "Abort, Retry, Fail?" in the session and waits for
+  A, R or F (where IBM's VDM shows OS/2's hard-error pop-up). Calls from
+  protected mode (DPMI clients, Win-OS/2) get the error without INT 24h.
+  dosrun keeps sharing modes and locks the same way on the host.
 - **INT 10h** video BIOS (modes 0-7, 0Dh-13h, cursor, scrolling, teletype,
   palette and DAC, fonts 8x8/8x14/8x16; VBE 2.0 with 4 MB of video
   memory: 8-bit modes 100h, 101h, 103h, 105h, 107h, 144h (320x240),
@@ -437,7 +464,11 @@ a current host), and DOS settings beyond those in the table above.
   the mixer), FMTEST (AdLib and OPL3 detection, two tones), BEEP, DOSSET
   (DOS settings, with `--set`), PRINT (the printer by handle 4, `LPT1`
   as a file, INT 21h 05h, INT 17h and the 378h registers: one job with
-  all five lines, `dosrun --lpt`), COMMAND.COM; the sound of SBTEST,
+  all five lines, `dosrun --lpt`), COMMAND.COM, LOCKTEST (AH=5Ch locks),
+  I24TEST (440Bh, INT 24h for compatibility-mode and FCB lock and sharing
+  violations with Fail/Retry/Ignore answers, the plain error for
+  sharing-mode handles; `I24TEST D` and `A` answer DOS's own prompt);
+  the sound of SBTEST,
   SB16TEST, FMTEST and BEEP is recorded (`dosrun --wav`, 16-bit stereo)
   and its tones checked with `tools/scripts/doswav.py`.
   `dosrun --keys`, `--png`, `--wav`, `--set NAME=VALUE`, `--trace` and `--stats` help with

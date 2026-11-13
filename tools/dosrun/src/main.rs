@@ -28,6 +28,11 @@ use dos::{Config, Create, DateTime, DirEntry, Event, Host, Machine, OpenMode};
 struct Run {
     drives: Vec<Option<PathBuf>>,
     files: Vec<Option<File>>,
+    /// Each open file's (path, access, sharing mode) and byte-range
+    /// locks (handle, offset, length), kept as OS/2 does so that DOS
+    /// programs see sharing and lock violations here too.
+    opens: Vec<(String, u8, u8)>,
+    locks: Vec<(u32, u32, u32)>,
     start: Instant,
     keys: VecDeque<KeyItem>,
     next_key_at: f64,
@@ -97,13 +102,47 @@ impl Run {
         self.files.get_mut(h as usize).and_then(|f| f.as_mut()).ok_or(6)
     }
 
-    fn add_file(&mut self, f: File) -> u32 {
+    fn add_file(&mut self, f: File, info: (String, u8, u8)) -> u32 {
         if let Some(i) = self.files.iter().position(|f| f.is_none()) {
             self.files[i] = Some(f);
+            self.opens[i] = info;
             return i as u32;
         }
         self.files.push(Some(f));
+        self.opens.push(info);
         (self.files.len() - 1) as u32
+    }
+
+    /// Opening `key` for `access` with sharing mode `share` conflicts
+    /// with an open of it (OS/2's rules; DOS's compatibility mode is
+    /// deny-none in a DOS session).
+    fn share_conflict(&self, key: &str, access: u8, share: u8) -> bool {
+        // What a sharing mode denies: bit 0 reading, bit 1 writing.
+        let denies = |s: u8| match s {
+            1 => 3,
+            2 => 2,
+            3 => 1,
+            _ => 0,
+        };
+        let wants = |a: u8| match a {
+            0 => 1,
+            1 => 2,
+            _ => 3,
+        };
+        self.files.iter().zip(&self.opens).any(|(f, (k, a, s))| f.is_some() && k == key && (denies(*s) & wants(access) != 0 || denies(share) & wants(*a) != 0))
+    }
+
+    /// A read or write of `len` bytes at handle `h`'s position meets
+    /// another handle's lock of the same file.
+    fn locked(&mut self, h: u32, len: usize) -> Result<(), u16> {
+        if len == 0 || self.locks.is_empty() {
+            return Ok(());
+        }
+        let pos = self.handle(h)?.stream_position().map_err(io_err)?;
+        let key = &self.opens[h as usize].0;
+        let (a, b) = (pos, pos + len as u64);
+        let hit = self.locks.iter().any(|&(lh, off, n)| lh != h && &self.opens[lh as usize].0 == key && (off as u64) < b && a < off as u64 + n as u64);
+        if hit { Err(33) } else { Ok(()) }
     }
 }
 
@@ -157,13 +196,17 @@ impl Host for Run {
         if p.is_dir() {
             return Err(5);
         }
+        let key = p.to_string_lossy().to_lowercase();
+        if self.share_conflict(&key, mode.access(), mode.sharing()) {
+            return Err(32);
+        }
         let f = match mode.access() {
             0 => File::open(&p),
             1 => OpenOptions::new().write(true).open(&p),
             _ => OpenOptions::new().read(true).write(true).open(&p).or_else(|_| File::open(&p)),
         }
         .map_err(io_err)?;
-        Ok(self.add_file(f))
+        Ok(self.add_file(f, (key, mode.access(), mode.sharing())))
     }
     fn create(&mut self, path: &str, _attr: u8, how: Create) -> Result<u32, u16> {
         let p = self.path(path)?;
@@ -173,15 +216,36 @@ impl Host for Run {
             Create::Truncate => o.create(true).truncate(true),
             Create::New => o.create_new(true),
         };
+        let key = p.to_string_lossy().to_lowercase();
+        if self.share_conflict(&key, 2, 4) {
+            return Err(32);
+        }
         let f = o.open(&p).map_err(io_err)?;
-        Ok(self.add_file(f))
+        Ok(self.add_file(f, (key, 2, 4)))
     }
     fn close(&mut self, h: u32) {
         if let Some(f) = self.files.get_mut(h as usize) {
             *f = None;
         }
+        self.locks.retain(|l| l.0 != h);
+    }
+    fn lock(&mut self, h: u32, unlock: bool, off: u32, len: u32) -> Result<(), u16> {
+        self.handle(h)?;
+        if unlock {
+            let i = self.locks.iter().position(|&l| l == (h, off, len)).ok_or(33u16)?;
+            self.locks.remove(i);
+            return Ok(());
+        }
+        let key = &self.opens[h as usize].0;
+        let end = off as u64 + len as u64;
+        if self.locks.iter().any(|&(lh, o, n)| &self.opens[lh as usize].0 == key && (o as u64) < end && (off as u64) < o as u64 + n as u64) {
+            return Err(33);
+        }
+        self.locks.push((h, off, len));
+        Ok(())
     }
     fn read(&mut self, h: u32, buf: &mut [u8]) -> Result<usize, u16> {
+        self.locked(h, buf.len())?;
         let f = self.handle(h)?;
         let mut n = 0;
         while n < buf.len() {
@@ -194,6 +258,7 @@ impl Host for Run {
         Ok(n)
     }
     fn write(&mut self, h: u32, buf: &[u8]) -> Result<usize, u16> {
+        self.locked(h, buf.len())?;
         self.handle(h)?.write_all(buf).map_err(io_err)?;
         Ok(buf.len())
     }
@@ -682,6 +747,8 @@ fn main() {
     let mut host = Run {
         drives,
         files: Vec::new(),
+        opens: Vec::new(),
+        locks: Vec::new(),
         start: Instant::now(),
         keys: parse_keys(&keys),
         next_key_at: 0.3,

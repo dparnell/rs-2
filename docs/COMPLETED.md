@@ -86,6 +86,10 @@ What is already done, by milestone. What is still to do is in
   one), LOCK_ATOMIC, waits and DosCancelLockRequest, release at the last
   close and at process exit, DOS INT 21h 5Ch, DosCopy. `STRESS locks`,
   `tests/dos/LOCKTEST.COM`, IBM CMD's TYPE/COPY of a locked file (SYS0033)
+- done: DOS sessions' sharing retries (IOCTL 440Bh) and critical errors
+  (INT 24h) for sharing and lock violations of compatibility-mode and FCB
+  files, as IBM's VDM (SHARE_ERROR, Share_Violation, Read_Lock_Violation);
+  DOS's own Abort, Retry, Fail? prompt. `tests/dos/I24TEST.COM`
 - done: finer-grained kernel locking: API calls, exceptions and kernel
   threads run concurrently on all CPUs under per-subsystem and
   per-object locks (spin locks, sleeping mutexes for the file systems,

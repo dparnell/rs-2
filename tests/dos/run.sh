@@ -49,4 +49,13 @@ lpt=${TMPDIR:-/tmp}/rs2-dosprint.$$
 if [ "$(grep -c '^[1-5] ' "$lpt.1" 2>/dev/null)" = 5 ] && [ ! -e "$lpt.2" ]; then echo "PASS PRINT.COM job"; else echo "FAIL PRINT.COM job"; fail=$((fail + 1)); fi
 rm -f "$lpt".*
 check COMMAND.COM "rs2 DOS session, version" 'ver\nexit\n'
+check LOCKTEST.COM "LOCKTEST OK" ""
+check I24TEST.COM "I24TEST OK" ""
+# DOS's own INT 24h handler: Retry (a second prompt), then Fail; Abort
+# ends the program.
+out=$(cd "$here/bin" && "$dosrun" --timeout 30 --keys 'rf' I24TEST.COM D 2>/dev/null)
+if printf '%s' "$out" | grep -q "I24TEST DEFAULT OK" && [ "$(printf '%s' "$out" | grep -c 'Abort, Retry, Fail?')" = 2 ]; then echo "PASS I24TEST.COM D"; else echo "FAIL I24TEST.COM D"; fail=$((fail + 1)); fi
+out=$(cd "$here/bin" && "$dosrun" --timeout 30 --keys 'a' I24TEST.COM A 2>/dev/null)
+if printf '%s' "$out" | grep -q 'Abort, Retry, Fail?' && ! printf '%s' "$out" | grep -q I24TEST; then echo "PASS I24TEST.COM A"; else echo "FAIL I24TEST.COM A"; fail=$((fail + 1)); fi
+rm -f "$here/bin/CRITT.TMP"
 exit $fail
