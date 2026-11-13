@@ -1173,7 +1173,9 @@ fn dos_dev_config(c: &mut Ctx) -> u32 {
     let v: u8 = match item {
         0 => 0,    // DEVINFO_PRINTER
         1 => 1,    // DEVINFO_RS232
-        2 => 1,    // DEVINFO_FLOPPY
+        // DEVINFO_FLOPPY: the diskette drives (DISKCOPY A: B: copies
+        // with one drive when there is only one).
+        2 => (0..2).filter(|&d| crate::drivers::floppy::unit(d).is_some()).count() as u8,
         3 => 1,    // DEVINFO_COPROCESSOR
         4 => 0,    // DEVINFO_SUBMODEL
         5 => 0xfc, // DEVINFO_MODEL (AT)

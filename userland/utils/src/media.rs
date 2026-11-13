@@ -1,12 +1,12 @@
 //! Whole diskettes for DISKCOPY and DISKCOMP: a drive opened for DASD
 //! access (its sectors through the track IOCtls), or a diskette image
-//! file (rs2: there are no diskette drives, so `DISKCOPY A: B.IMG` and
-//! the like make and write images).
+//! file (`DISKCOPY A: B.IMG` and the like make and write images).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::disk::Disk;
+use os2::BiosParameterBlock;
 
 pub enum Medium {
     Drive(Disk),
@@ -49,8 +49,45 @@ impl Medium {
     }
 
     /// Write a whole medium (a drive: exactly its size).
-    pub fn write(&self, data: &[u8]) -> Result<(), u32> {
+    pub fn write(&mut self, data: &[u8]) -> Result<(), u32> {
         match self {
+            Medium::Drive(d) if d.removable() => {
+                // A diskette drive: written in the source's format, track
+                // by track; a track that does not take the data (a new
+                // diskette) is formatted first.
+                let (tracks, spt, heads) = geometry(data);
+                let bpb = BiosParameterBlock {
+                    bytes_per_sector: 512,
+                    sectors: (data.len() / 512) as u16,
+                    sectors_per_track: spt as u16,
+                    heads: heads as u16,
+                    ..Default::default()
+                };
+                let rc = d.lock();
+                if rc != 0 {
+                    return Err(rc);
+                }
+                let r = (|| {
+                    if d.set_medium(bpb) != 0 {
+                        return Err(1240);
+                    }
+                    let per = spt as usize * 512;
+                    for t in 0..(tracks * heads) as u64 {
+                        let piece = &data[t as usize * per..(t as usize + 1) * per];
+                        if d.write(t * spt as u64, piece).is_err() {
+                            let rc = d.format_track(t);
+                            if rc != 0 {
+                                return Err(rc);
+                            }
+                            d.write(t * spt as u64, piece)?;
+                        }
+                    }
+                    Ok(())
+                })();
+                d.unlock();
+                d.redetermine();
+                r
+            }
             Medium::Drive(d) => {
                 if data.len() != d.sectors as usize * d.bps {
                     return Err(1240);
