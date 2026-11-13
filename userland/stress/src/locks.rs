@@ -155,6 +155,7 @@ pub fn run() {
     }
     let buf = mem;
     let (f, g) = (file("STRESSL2.TMP"), file("STRESSL3.TMP"));
+    println!("   lock test file {}", core::str::from_utf8(&f[..f.len() - 1]).unwrap_or("?"));
     let h1 = open(true);
     let (rc, n) = wr(h1, 0, buf, SIZE);
     check("locks: test file written", rc == 0 && n == SIZE);
