@@ -1,0 +1,8 @@
+[package]
+name = "parport"
+description = "no_std parallel port protocol code of rs2's LPT driver (kernel parport.rs): mode detection, compatibility/FIFO/ECP/EPP output and IEEE 1284 negotiation and reverse channels over a port I/O trait, host-tested against a simulated port"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
