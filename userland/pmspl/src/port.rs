@@ -249,8 +249,11 @@ pub extern "C" fn PrtNewPage(h: u32, _page: u32) -> u32 {
 pub extern "C" fn PrtDevIOCtl(data: *mut u8, parms: *mut u8, func: u32, cat_: u32, h: u32) -> u32 {
     with(h, |o| match o.sink {
         Sink::Handle(hf) => {
-            let (mut pl, mut dl) = (0u32, 0u32);
-            unsafe { os2::DosDevIOCtl(hf, cat_, func, parms, 0, &mut pl, data, 0, &mut dl) }
+            // The buffers' lengths are not known: as large as a 16-bit
+            // DosDevIOCtl's (a buffer with length 0 must be NULL).
+            let len = |p: *mut u8| if p.is_null() { 0 } else { 0xffff };
+            let (mut pl, mut dl) = (len(parms), len(data));
+            unsafe { os2::DosDevIOCtl(hf, cat_, func, parms, len(parms), &mut pl, data, len(data), &mut dl) }
         }
         _ => 0,
     })

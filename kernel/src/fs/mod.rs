@@ -435,6 +435,13 @@ pub enum CharDev {
     VBox,
     /// VMWARE$: VMware's backdoor calls (crate::vmware::call_regs).
     VMware,
+    /// OEMHLP$: machine information (crate::api::oemdev).
+    OemHlp,
+    /// TESTCFG$: bus, ROM and port queries for installers
+    /// (crate::api::oemdev).
+    TestCfg,
+    /// APM$: power management (crate::api::oemdev).
+    Apm,
 }
 
 impl CharDev {
@@ -453,6 +460,9 @@ impl CharDev {
             CharDev::ResMgr => String::from("\\DEV\\RESMGR$"),
             CharDev::VBox => String::from("\\DEV\\VBOXGST$"),
             CharDev::VMware => String::from("\\DEV\\VMWARE$"),
+            CharDev::OemHlp => String::from("\\DEV\\OEMHLP$"),
+            CharDev::TestCfg => String::from("\\DEV\\TESTCFG$"),
+            CharDev::Apm => String::from("\\DEV\\APM$"),
         }
     }
 }
@@ -482,6 +492,9 @@ pub fn device_name(path: &str) -> Option<Device> {
         "RESMGR$" => Device::Char(CharDev::ResMgr),
         "VBOXGST$" => Device::Char(CharDev::VBox),
         "VMWARE$" => Device::Char(CharDev::VMware),
+        "OEMHLP$" => Device::Char(CharDev::OemHlp),
+        "TESTCFG$" => Device::Char(CharDev::TestCfg),
+        "APM$" => Device::Char(CharDev::Apm),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
