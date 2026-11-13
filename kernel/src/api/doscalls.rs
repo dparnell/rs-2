@@ -569,11 +569,8 @@ fn dos_exit(c: &mut Ctx) -> u32 {
 fn exit(c: &mut Ctx, action: u32, code: u32) -> u32 {
     let p = c.process.clone();
     c.thread.sync_exit.store(true, core::sync::atomic::Ordering::Relaxed);
-    let live = p.threads.lock().iter().filter(|t| t.state() != crate::task::thread::State::Dead).count();
     // EXIT_THREAD (0) on the last thread ends the process too.
-    if action == 0 && live > 1 {
-        c.thread.request_exit();
-    } else {
+    if action != 0 || !p.end_thread(&c.thread) {
         p.exit(0, code);
     }
     0

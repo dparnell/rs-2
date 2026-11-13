@@ -1390,8 +1390,11 @@ fn map_alias(c: &Ctx, p: &Process, u: &mut Udb, write: bool) {
     match vm::alias(&p.space, &c.process.space, addr, len, write) {
         Ok(a) => {
             let first = addr & !(vm::PAGE - 1);
+            // The space lock comes before ALIASES (vm::free calls
+            // memory_freed with it held).
+            let root = p.space.lock().root;
             ALIASES.lock().push(Alias {
-                root: p.space.lock().root,
+                root,
                 start: first,
                 end: addr + len,
                 pid: p.pid,

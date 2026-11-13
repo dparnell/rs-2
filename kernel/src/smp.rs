@@ -181,8 +181,8 @@ pub fn init_bsp() {
 
 /// Kernel paths still under the big kernel lock while the kernel moves to
 /// finer locks (API calls decide per call: api/legacy.rs).
-pub const BKL_EXCEPTIONS: bool = true;
-pub const BKL_USER_RETURN: bool = true;
+pub const BKL_EXCEPTIONS: bool = false;
+pub const BKL_USER_RETURN: bool = false;
 pub const BKL_KTHREADS: bool = true;
 
 static BKL: AtomicBool = AtomicBool::new(false);

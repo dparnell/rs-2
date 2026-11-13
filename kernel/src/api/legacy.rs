@@ -6,8 +6,20 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::loader::gate::{MODULES, ORDINALS};
 
-/// API names (prefixes) that run without the big kernel lock.
-const FREE: &[&str] = &[];
+/// API names (prefixes, any case) that run without the big kernel lock.
+const FREE: &[&str] = &[
+    // Processes, threads, exceptions and signals.
+    "DOSCREATETHREAD", "DOSEXIT", "DOSENTERCRITSEC", "DOSENTERMUSTCOMPLETE", "DOSWAITTHREAD", "DOSKILLTHREAD",
+    "DOSSUSPENDTHREAD", "DOSRESUMETHREAD", "DOSSETPRIORITY", "DOSSETPRTY", "DOSGETPRTY", "DOSGETINFOBLOCKS",
+    "DOSSLEEP", "DOSWAITCHILD", "DOSCWAIT", "DOSKILLPROCESS", "DOSALLOCTHREADLOCALMEMORY",
+    "DOSFREETHREADLOCALMEMORY", "DOSSETSIGNALEXCEPTIONFOC", "DOSSETEXCEPTIONHANDLER", "DOSUNSETEXCEPTIONHANDLER",
+    "DOSRAISEEXCEPTION", "DOSUNWINDEXCEPTION", "DOSACKNOWLEDGESIGNALEXC", "DOSSENDSIGNALEXCEPTION", "DOSGETPID",
+    "DOSGETPPID", "DOSQUERYSYSINFO", "DOSQSYSINFO", "DOSGETDATETIME", "DOSFSRAMSEM", "DOSSETMAXFH",
+    "DOSSETRELMAXFH", "DOSISETRELMAXFH", "DOSGETINFOSEG", "DOSTMRQUERY", "DOSERROR", "DOSGETVERSION",
+    "DOSGETMACHINEMODE", "DOSQUERYTHREADCONTEXT", "DOSVERIFYPIDTID", "DOSHOLDSIGNAL", "DOSSETSIGHANDLER",
+    "DOSFLAGPROCESS", "DOSSENDSIGNAL", "DOSTIB", "DOSLOCALINFO", "DOSGLOBALINFO", "DOSPAGESIZE",
+    "DOSMAXPATHLEN", "DOSSELTOFLAT", "DOSFLATTOSEL",
+];
 
 /// 0 not decided yet, 1 under the lock, 2 free.
 static CACHE: [AtomicU8; MODULES.len() * ORDINALS as usize] = [const { AtomicU8::new(0) }; MODULES.len() * ORDINALS as usize];
@@ -20,7 +32,8 @@ pub fn needs_bkl(module: u8, ordinal: u16) -> bool {
         2 => false,
         _ => {
             let name = super::names::display(module, ordinal);
-            let free = name != "?" && FREE.iter().any(|p| name.starts_with(p));
+            let free = name != "?"
+                && FREE.iter().any(|p| name.len() >= p.len() && name.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes()));
             slot.store(if free { 2 } else { 1 }, Ordering::Relaxed);
             !free
         }

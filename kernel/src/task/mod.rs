@@ -106,6 +106,7 @@ impl WaitQueue {
 pub fn user_exception(f: &mut TrapFrame) {
     let t = sched::current();
     let Some(p) = t.process() else { return };
+    debuggee_lock(&p);
     if f.vector == 14 {
         // Thread-local memory: page tables this CPU's copies lack, or the
         // first touch on a CPU still on the process's own tables.
@@ -192,6 +193,17 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     }
 }
 
+/// A program under DosDebug runs its exceptions and returns to user mode
+/// under the big kernel lock, as DosDebug itself does: the debugger
+/// changes a stopped thread's saved registers and FPU state, which that
+/// thread reads and writes on its own way out of the kernel. The trap path
+/// drops the lock when the thread returns to user mode.
+fn debuggee_lock(p: &Process) {
+    if p.debugged.load(core::sync::atomic::Ordering::Relaxed) {
+        crate::smp::bkl_acquire();
+    }
+}
+
 /// Last chance before `iretq` to user mode: preemption and sanity checks on
 /// the selectors we are about to load. Returns true if the current thread
 /// must terminate instead (the caller then calls `sched::exit_current`
@@ -199,6 +211,9 @@ pub fn timer_tick(_f: &mut TrapFrame) {
 pub fn before_user_return(f: &mut TrapFrame) -> bool {
     sched::maybe_preempt();
     let t = sched::current();
+    if let Some(p) = t.process() {
+        debuggee_lock(&p);
+    }
     // A thread inside DosEnterMustComplete (PMWIN updating its shared
     // state) finishes that section first; it ends when it leaves it.
     if t.exit_requested() && t.must_complete.load(core::sync::atomic::Ordering::Relaxed) > 0 {

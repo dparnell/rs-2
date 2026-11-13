@@ -25,6 +25,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
                 if smp::BKL_EXCEPTIONS {
                     smp::bkl_acquire();
                 }
+                // (Debuggees take it in user_exception.)
                 let t = crate::fs::iostat::begin();
                 crate::task::user_exception(f);
                 crate::fs::iostat::fault(t);

@@ -467,6 +467,22 @@ impl Process {
         Ok(t)
     }
 
+    /// A thread ends by itself (DosExit EXIT_THREAD, its function
+    /// returned): true if other threads go on (`t` is told to end), false
+    /// if it is the last one, which ends the process. Decided under the
+    /// thread list's lock: two last threads ending at once on two CPUs
+    /// must not both leave it to the other.
+    pub fn end_thread(&self, t: &Arc<Thread>) -> bool {
+        let ts = self.threads.lock();
+        let others = ts
+            .iter()
+            .any(|o| !Arc::ptr_eq(o, t) && o.state() != super::thread::State::Dead && !o.exit_requested());
+        if others {
+            t.request_exit();
+        }
+        others
+    }
+
     pub fn main_thread(&self) -> Option<Arc<Thread>> {
         self.threads.lock().first().cloned()
     }
@@ -635,7 +651,7 @@ impl Process {
 
 /// Remove a terminated process from the table (its memory is released once
 /// nothing references it any more).
-pub fn reap(pid: u32) {
+pub fn reap(pid: u32) -> bool {
     // The last reference may go with it: drop it after the table lock
     // (freeing an address space takes other locks and may wait).
     let gone: Vec<Arc<Process>> = {
@@ -644,5 +660,7 @@ pub fn reap(pid: u32) {
         *ps = keep;
         gone
     };
+    let found = !gone.is_empty();
     drop(gone);
+    found
 }

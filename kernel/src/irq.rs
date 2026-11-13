@@ -24,14 +24,19 @@ pub fn uptime_ms() -> u64 {
 }
 
 type Handler = fn(&mut TrapFrame);
-static mut HANDLERS: [Option<Handler>; 16] = [None; 16];
+/// Handlers by IRQ (a `Handler` as an address, 0 = none): set from thread
+/// context (opening a COM port) while other CPUs take interrupts.
+static HANDLERS: [core::sync::atomic::AtomicUsize; 16] = [const { core::sync::atomic::AtomicUsize::new(0) }; 16];
+/// The read-modify-write of the interrupt masks.
+static MASK: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 
 pub fn register(irq: u8, h: Handler) {
-    unsafe { (*core::ptr::addr_of_mut!(HANDLERS))[irq as usize] = Some(h) };
+    HANDLERS[irq as usize].store(h as usize, Ordering::Release);
     unmask(irq);
 }
 
 pub fn unmask(irq: u8) {
+    let _g = MASK.lock();
     if crate::apic::active() {
         crate::apic::route_irq(irq);
         return;
@@ -102,7 +107,9 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
         }
         return;
     }
-    if let Some(h) = unsafe { (*core::ptr::addr_of!(HANDLERS))[irq as usize] } {
+    let h = HANDLERS[irq as usize].load(Ordering::Acquire);
+    if h != 0 {
+        let h: Handler = unsafe { core::mem::transmute::<usize, Handler>(h) };
         h(f);
     }
 }
