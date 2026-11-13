@@ -52,6 +52,42 @@ What is already done, by milestone. What is still to do is in
   command prompt window (`PROTSHELL=C:\OS2\PMVIOWIN.EXE /SHELL`)
 - done: AVIO (VioCreatePS & co. in PM windows, drawn with
   `crates/viocell`)
+- done: the parallel port driver (`kernel/src/parport.rs`, after IBM's
+  PRINT01.SYS): ports from ACPI, PCI cards and probing, listed by the
+  resource manager; ECP/EPP/byte-mode detection; output driven by the
+  acknowledge interrupt (polled with `lptpoll`); PRINT01's timeout,
+  infinite retry and out-of-paper/write-fault hard errors; every category
+  5 IOCtl with per-port state (frame control sent to the printer, IRQ
+  timeout, comm and transfer modes, IEEE 1284 device ID). `PRNTEST LPT`
+  and `PRNTEST LPT n STALL` (`lptstall=`) check it against QEMU's
+  `-parallel file:` byte for byte (docs/PRINTING.md)
+- done: DosDevIOCtl as IBM's kernel routes it (the kernel's own
+  functions, ERROR_INVALID_FUNCTION/INVALID_CATEGORY/BAD_COMMAND and the
+  0xFF00+code errors, the 32-bit zero-length rule and length words,
+  category 8 on handle -1); every Toolkit function of categories 1, 3,
+  4, 7, 8, 9, 0xA and 0xB except the diskette ones and
+  PTR_GETPTRDRAWADDRESS; new `OEMHLP$` (functions 0-0xF with the PCI
+  BIOS), `TESTCFG$` (bus, ROM, ports, SCSI inquiry of the CD drives) and
+  `APM$` devices, after OS2LDR, TESTCFG.SYS and APM.SYS. IBM's CDINST.EXE
+  gets to "Insert CD"
+- done: mandatory byte-range file locks with the rules of IBM's kernel
+  (OS2KRNLB lock.asm): DosRead/DosWrite/DosSetFileSize get
+  ERROR_LOCK_VIOLATION on other owners' locks (owner = open file +
+  process; 32-bit calls transfer the 64 KB pieces before the locked
+  one), LOCK_ATOMIC, waits and DosCancelLockRequest, release at the last
+  close and at process exit, DOS INT 21h 5Ch, DosCopy. `STRESS locks`,
+  `tests/dos/LOCKTEST.COM`, IBM CMD's TYPE/COPY of a locked file (SYS0033)
+- done: finer-grained kernel locking: API calls, exceptions and kernel
+  threads run concurrently on all CPUs under per-subsystem and
+  per-object locks (spin locks, sleeping mutexes for the file systems,
+  block cache, disks and network, a recursive loader lock); TLB
+  shootdowns are served from every spin loop; about 60 races found by an
+  audit fixed; lockdep checks the lock order in checked builds; STRESS
+  has an `smp` section. The big kernel lock survives only as the legacy
+  lock around the session and device corner (`api/legacy.rs`; `bkl` on
+  the command line restores the old behaviour). With 4 CPUs (QEMU
+  multi-threaded TCG) a kernel-call load in 4 processes runs 3.4 times
+  faster (docs/ARCHITECTURE.md "Locking")
 
 ## Milestone 2: storage and installed systems
 
