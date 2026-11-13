@@ -168,20 +168,45 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
             }
         }
         (Handle::Char(CharDev::Com(n)), 0xb) => crate::chardev::com_general(n as usize, r.function).err().unwrap_or(0),
-        (Handle::Char(CharDev::Lpt(n)), 5) => match crate::chardev::lpt_ioctl(n as usize, r.function) {
-            Ok(d) => put_data(c, r, 0, &d),
-            Err(e) => e,
-        },
-        (Handle::Spool(..), 5) => match crate::chardev::lpt_spool_ioctl(r.function) {
-            Ok(d) => put_data(c, r, 0, &d),
-            Err(e) => e,
-        },
+        (Handle::Char(CharDev::Lpt(n)), 5) => printer(c, r, n as usize, false),
+        (Handle::Spool(n, _), 5) => printer(c, r, n as usize, true),
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
         (Handle::Char(CharDev::ResMgr), 0x80) => crate::resmgr::ioctl(c, r),
         (Handle::Char(CharDev::VBox), 0x80) => vbox(c, r),
         (Handle::Char(CharDev::VMware), 0x80) if r.function == 1 => vmware(c, r),
         (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,
+    }
+}
+
+/// Category 5 (printer) on LPTn, the port itself or (`spooled`) a
+/// handle the spooler serves (`parport::ioctl`).
+fn printer(c: &Ctx, r: &Req, n: usize, spooled: bool) -> u32 {
+    let need = crate::parport::input_len(r.function);
+    let input = if need > 0 {
+        match c.read_vec(r.data, need) {
+            Some(d) => d,
+            None => return err::INVALID_ADDRESS,
+        }
+    } else {
+        alloc::vec::Vec::new()
+    };
+    let title = if r.function == 0x4d {
+        match c.read_str(r.data, 128) {
+            Some(t) => Some(t.chars().map(|ch| ch as u8).collect::<alloc::vec::Vec<u8>>()),
+            None => return err::INVALID_ADDRESS,
+        }
+    } else {
+        None
+    };
+    let rc = if spooled {
+        crate::parport::spool_ioctl(n, r.function, &input, title.as_deref(), r.data_len)
+    } else {
+        crate::parport::ioctl(n, r.function, &input, title.as_deref(), r.data_len)
+    };
+    match rc {
+        Ok(d) => put_data(c, r, 0, &d),
+        Err(e) => e,
     }
 }
 

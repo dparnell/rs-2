@@ -75,6 +75,10 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             Ok(()) => (0, len),
             Err(e) => (e, 0),
         },
+        Handle::Char(fs::CharDev::Lpt(n)) => {
+            let (e, w) = crate::chardev::lpt_write_rc(n as usize, &data);
+            (e, w as u32)
+        }
         Handle::Char(d) => (0, crate::chardev::write(d, &data) as u32),
         // The spooler gone: the output is dropped, as a port that went away.
         Handle::Spool(_, p) => (0, p.write(&data).unwrap_or(data.len()) as u32),

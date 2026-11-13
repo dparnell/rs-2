@@ -8,12 +8,10 @@
 //! it, so tests use COM2. The DCB read timeout modes (normal, wait for
 //! something, no wait) are honoured for DosRead.
 //!
-//! The printer ports drive a parallel port when there is one at the
-//! standard address (LPT1 0x378, LPT2 0x278, LPT3 0x3BC; QEMU's
-//! `-parallel`, VMware's parallel0): each byte on the data lines, a
-//! strobe, waiting while the printer is busy (output stops after five
-//! seconds of busy). Without a port they are sinks. CLOCK$ reads and
-//! writes the DOS clock record:
+//! The printer ports drive the parallel ports `parport` finds (QEMU's
+//! `-parallel`, VMware's parallel0, real ones through ACPI or PCI);
+//! without a port they are sinks. CLOCK$ reads and writes the DOS clock
+//! record:
 //! days since 1980-01-01, minutes, hours, hundredths, seconds.
 
 use alloc::collections::VecDeque;
@@ -119,6 +117,7 @@ static RX_WAIT: WaitQueue = WaitQueue::new();
 /// Find the UARTs (scratch register test). COM1 keeps the debug log's
 /// 115200 8N1 setup.
 pub fn init() {
+    crate::parport::init();
     for i in 0..4 {
         let b = BASES[i];
         let present = unsafe {
@@ -412,85 +411,24 @@ pub fn com_general(i: usize, f: u32) -> Result<(), u32> {
 
 static LPT_BYTES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
-const LPT_BASES: [u16; 3] = [0x378, 0x278, 0x3bc];
-/// Per port: 0 not probed, 1 present, 2 absent.
-static LPT_STATE: [core::sync::atomic::AtomicU8; 3] = [const { core::sync::atomic::AtomicU8::new(0) }; 3];
-const PARA_CTR_STROBE: u8 = 0x01;
-const PARA_CTR_INIT: u8 = 0x04;
-const PARA_CTR_SELECT: u8 = 0x08;
-const PARA_STS_BUSY: u8 = 0x80;
-
-/// Whether port `n` exists (the data latch reads back), set up once.
+/// Whether port `n` (0-based) has a parallel port (`parport`).
 pub(crate) fn lpt_present(n: usize) -> bool {
-    use core::sync::atomic::Ordering;
-    let Some(&base) = LPT_BASES.get(n) else { return false };
-    match LPT_STATE[n].load(Ordering::Relaxed) {
-        1 => return true,
-        2 => return false,
-        _ => {}
-    }
-    let present = unsafe {
-        outb(base, 0x55);
-        let a = inb(base);
-        outb(base, 0xaa);
-        let b = inb(base);
-        a == 0x55 && b == 0xaa
-    };
-    if present {
-        // Not reset (INIT is active low), selected.
-        unsafe { outb(base + 2, PARA_CTR_INIT | PARA_CTR_SELECT) };
-        crate::println!("LPT{}: parallel port at {:#x}, status {:#04x}", n + 1, base, unsafe { inb(base + 1) });
-    }
-    LPT_STATE[n].store(if present { 1 } else { 2 }, Ordering::Relaxed);
-    present
+    crate::parport::present(n)
 }
 
-/// Output to LPTn (0-based): to the parallel port, or nowhere when there
-/// is none (it is counted, and traced with `apitrace`). Returns the bytes
-/// taken.
-pub fn lpt_write(n: usize, data: &[u8]) -> usize {
+/// Output to LPTn (0-based): (error, bytes taken). Without a port the
+/// bytes go nowhere (counted, traced with `apitrace`).
+pub fn lpt_write_rc(n: usize, data: &[u8]) -> (u32, usize) {
     LPT_BYTES.fetch_add(data.len() as u64, core::sync::atomic::Ordering::Relaxed);
     if crate::api::tracing() {
         crate::trace!("LPT{}: {} bytes", n + 1, data.len());
     }
-    if !lpt_present(n) {
-        return data.len();
-    }
-    let base = LPT_BASES[n];
-    let mut busy_since: Option<u64> = None;
-    for (i, &b) in data.iter().enumerate() {
-        // Wait while the printer is busy (BUSY reads 0 when it is).
-        let mut spins = 0u32;
-        while unsafe { inb(base + 1) } & PARA_STS_BUSY == 0 {
-            spins += 1;
-            if spins > 1000 {
-                let now = crate::irq::ticks();
-                let since = *busy_since.get_or_insert(now);
-                if now.saturating_sub(since) > 5 * crate::irq::HZ {
-                    return i;
-                }
-                crate::task::sched::yield_now();
-                spins = 0;
-            }
-        }
-        busy_since = None;
-        unsafe {
-            outb(base, b);
-            let c = PARA_CTR_INIT | PARA_CTR_SELECT;
-            outb(base + 2, c | PARA_CTR_STROBE);
-            // About a microsecond (port reads are slow).
-            inb(base + 1);
-            inb(base + 1);
-            outb(base + 2, c);
-        }
-    }
-    // The last byte taken (the printer not busy any more), briefly.
-    for _ in 0..1000 {
-        if unsafe { inb(base + 1) } & PARA_STS_BUSY != 0 {
-            break;
-        }
-    }
-    data.len()
+    crate::parport::write(n, data)
+}
+
+/// Output to LPTn; returns the bytes taken.
+pub fn lpt_write(n: usize, data: &[u8]) -> usize {
+    lpt_write_rc(n, data).1
 }
 
 /// The spooler's port pipe (PMSPL's spooler thread serves it): a
@@ -533,40 +471,6 @@ pub fn lpt_spool_open(n: u8) -> Option<alloc::sync::Arc<crate::npipe::End>> {
     match end.read(1) {
         Ok((v, _)) if v.first() == Some(&0) => Some(end),
         _ => None,
-    }
-}
-
-/// Category 5 IOCtls of a spooled printer port: always ready.
-pub fn lpt_spool_ioctl(f: u32) -> Result<Vec<u8>, u32> {
-    match f {
-        // Selected, not busy.
-        0x66 => Ok(alloc::vec![0x90]),
-        _ => lpt_ioctl(usize::MAX, f),
-    }
-}
-
-/// Category 5 (printer) IOCtls.
-pub fn lpt_ioctl(n: usize, f: u32) -> Result<Vec<u8>, u32> {
-    match f {
-        // PRT_GETPRINTERSTATUS: not busy (0x80), out of paper (0x20),
-        // selected (0x10), I/O error (0x08), from the port's status
-        // lines (ERROR is active low); without a port selected and not
-        // busy.
-        0x66 => {
-            let st = if lpt_present(n) {
-                let hw = unsafe { inb(LPT_BASES[n] + 1) };
-                (hw & 0xb0) | if hw & 0x08 == 0 { 0x08 } else { 0 }
-            } else {
-                0x90
-            };
-            Ok(alloc::vec![st])
-        }
-        // PRT_GETFRAMECTL: 80 characters per line, 6 lines per inch.
-        0x62 => Ok(alloc::vec![80, 6]),
-        // PRT_GETINFINITERETRY
-        0x64 => Ok(alloc::vec![0]),
-        0x42 | 0x44 | 0x46 | 0x48 | 0x4d | 0x4e | 0x52 | 0x53 => Ok(Vec::new()),
-        _ => Err(err::INVALID_FUNCTION),
     }
 }
 
