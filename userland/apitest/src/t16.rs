@@ -28,6 +28,12 @@ unsafe extern "C" {
     fn D16FindFirst2();
     #[link_name = "DOSCALLS.63"]
     fn D16FindClose();
+    // The 16-bit DosQueryABIOSSupport: a gate of IBM's kernel itself
+    // (SYSINST2.EXE).
+    #[link_name = "DOSCALLS.443"]
+    fn D16QueryABIOSSupport();
+    #[link_name = "DOSCALLS.371"]
+    fn DosQueryABIOSSupport(reserved: u32) -> u32;
     static at16_create: u8;
     static at16_thread: u8;
 }
@@ -168,10 +174,22 @@ pub fn run() {
     suballoc();
     find16();
     let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
+    let flags = PascalCall::new().l(0).call(gate(D16QueryABIOSSupport)) & 0xffff;
+    check("DOSCALLS.443 (16-bit DosQueryABIOSSupport) answers as the 32-bit one", flags == unsafe { DosQueryABIOSSupport(0) } && flags & 0x10 != 0);
     let (mut gsel, mut lsel) = (0u16, 0u16);
     PascalCall::new().l(far(&raw mut gsel as *const u8)).l(far(&raw mut lsel as *const u8)).call(gate(D16GetInfoSeg));
     let lis = flat((lsel as u32) << 16) as *const u16;
-    check("16-bit DosGetInfoSeg: tidCurrent of the main thread is 1", !lis.is_null() && unsafe { lis.add(3).read_volatile() } == 1);
+    // (A thread of this process still ending on another CPU can hold
+    // tidCurrent for a moment: look again after a yield.)
+    let main_tid = !lis.is_null()
+        && (0..20).any(|_| {
+            let t = unsafe { lis.add(3).read_volatile() };
+            if t != 1 {
+                unsafe { os2::DosSleep(1) };
+            }
+            t == 1
+        });
+    check("16-bit DosGetInfoSeg: tidCurrent of the main thread is 1", main_tid);
     // A 16-bit stack (in a tiled object) and the result buffer.
     let mut stack: *mut u8 = core::ptr::null_mut();
     const OBJ_TILE: u32 = 0x40;

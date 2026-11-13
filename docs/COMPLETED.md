@@ -96,6 +96,16 @@ What is already done, by milestone. What is still to do is in
   does); socket ids, timers clearing RAM semaphores, HPFS/JFS rename and
   find handles no longer race. STRESS `corner` puts up pop-ups, starts
   and switches sessions and issues IOCtls from several processes at once
+- done: DOSCALLS.443, which IBM's SYSINST2.EXE imports, is the 16-bit
+  DosQueryABIOSSupport, a call gate in IBM's kernel's own DOSCALLS entry
+  table (not in DOSCALL1); SYSINST2 reaches its welcome screen
+- done: diskette drives A:/B: on an i82077 driver (PIO, media sensing,
+  change line) with the category 8 IOCtls as OS2DASD answers them; IBM
+  FORMAT.COM and DISKCOPY.COM and rs2's FORMAT/DISKCOPY work on them
+  (docs/COMPATIBILITY.md "Diskettes")
+- done: APM$ power events for programs as APM.SYS keeps them (event
+  semaphores and queues per handle, broadcasts, the daemon's
+  confirmation); suspend and standby are refused
 
 ## Milestone 2: storage and installed systems
 

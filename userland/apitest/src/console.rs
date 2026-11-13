@@ -12,6 +12,8 @@ use os2::*;
 use crate::check;
 
 unsafe extern "C" {
+    #[link_name = "DOSCALLS.231"]
+    fn DosDevConfig(info: *mut u8, item: u32) -> u32;
     #[link_name = "VIOCALLS.1"]
     fn VIOENDPOPUP();
     #[link_name = "VIOCALLS.2"]
@@ -651,6 +653,87 @@ fn ioctl(h: u32, cat: u32, func: u32, p: &mut [u8], d: &mut [u8]) -> (u32, u32, 
     (rc, cbp, cbd)
 }
 
+/// Diskette drive A: (run with `xtask run --floppy IMG`, a 1.44 MB FAT
+/// diskette that may be written): category 8 as OS2DASD answers it.
+/// Without diskette drives only DosDevConfig is checked.
+fn diskettes() {
+    let mut n = 0xffu8;
+    let rc = unsafe { DosDevConfig(&mut n, 2) };
+    if rc != 0 || n == 0 {
+        check("DosDevConfig DEVINFO_FLOPPY: no diskette drives", rc == 0 && n == 0);
+        return;
+    }
+    let (mut h, mut act) = (0, 0);
+    if unsafe { DosOpen(b"A:\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x8042 | 0x2000, null_mut()) } != 0 {
+        check("diskette A: open for DASD", false);
+        return;
+    }
+    let w = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
+    let mut dev = [0u8; 36];
+    let r1 = ioctl(h, 8, 0x63, &mut [0], &mut dev).0;
+    check(
+        "diskette DSK_GETDEVICEPARAMS (drive): 1.44 MB BPB, 80 cylinders, type 7, removable with change line",
+        r1 == 0 && w(&dev, 8) == 2880 && dev[10] == 0xf0 && w(&dev, 13) == 18 && w(&dev, 31) == 80 && dev[33] == 7 && w(&dev, 34) == 0x12,
+    );
+    let mut med = [0u8; 36];
+    let r1 = ioctl(h, 8, 0x63, &mut [1], &mut med).0;
+    let mut rem = [0xffu8];
+    let r2 = ioctl(h, 8, 0x20, &mut [0], &mut rem).0;
+    let mut sense = [0xffu8];
+    let r3 = ioctl(h, 8, 0x60, &mut [0], &mut sense).0;
+    let mut ls = [0u8; 2];
+    let r4 = ioctl(h, 8, 0x66, &mut [0], &mut ls).0;
+    check(
+        "diskette medium BPB, removable, media sense 1.44 MB, diskette in",
+        r1 == 0 && w(&med, 0) == 512 && w(&med, 13) == 18 && w(&med, 15) == 2 && r2 == 0 && rem[0] == 0 && r3 == 0 && sense[0] == 2 && r4 == 0 && ls == [4, 0],
+    );
+    // DSK_FORMATVERIFY: command 3 is not done on diskettes, others than
+    // 0, 1, 3 are unknown, the cylinder must exist.
+    let mut tf = [0u8; 9 + 4];
+    tf[0] = 3;
+    let r1 = ioctl(h, 8, 0x45, &mut tf, &mut [0]).0;
+    let multi = w(&tf, 5) == 0x4000;
+    tf[0] = 2;
+    let r2 = ioctl(h, 8, 0x45, &mut tf, &mut [0]).0;
+    tf[0] = 1;
+    tf[3] = 90;
+    tf[7] = 1;
+    tf[9..13].copy_from_slice(&[90, 0, 1, 2]);
+    let r3 = ioctl(h, 8, 0x45, &mut tf, &mut [0]).0;
+    check("diskette DSK_FORMATVERIFY: multi-track verify, bad command, bad cylinder", r1 == 0 && multi && r2 == 22 && r3 == 87);
+    // The last track: format it, write it, read it back.
+    let r0 = ioctl(h, 8, 0x00, &mut [0], &mut []).0;
+    let mut tf = alloc::vec![0u8; 9 + 4 * 18];
+    tf[0] = 1;
+    tf[1] = 1;
+    tf[3] = 79;
+    tf[7] = 18;
+    for s in 0..18 {
+        tf[9 + 4 * s..13 + 4 * s].copy_from_slice(&[79, 1, s as u8 + 1, 2]);
+    }
+    let r1 = ioctl(h, 8, 0x45, &mut tf, &mut [0]).0;
+    let mut tl = alloc::vec![0u8; 9 + 4 * 18];
+    tl[0] = 1;
+    tl[1] = 1;
+    tl[3] = 79;
+    tl[7] = 18;
+    for s in 0..18 {
+        tl[9 + 4 * s..13 + 4 * s].copy_from_slice(&[s as u8 + 1, 0, 0, 2]);
+    }
+    let mut data: alloc::vec::Vec<u8> = (0..18 * 512).map(|i| (i * 7 + 3) as u8).collect();
+    let r2 = ioctl(h, 8, 0x44, &mut tl, &mut data).0;
+    let mut back = alloc::vec![0u8; 18 * 512];
+    let r3 = ioctl(h, 8, 0x64, &mut tl, &mut back).0;
+    let r4 = ioctl(h, 8, 0x65, &mut tl, &mut []).0;
+    let r5 = ioctl(h, 8, 0x01, &mut [0], &mut []).0;
+    check("diskette lock, format, write, read and verify the last track, unlock", r0 == 0 && r1 == 0 && r2 == 0 && r3 == 0 && back == data && r4 == 0 && r5 == 0);
+    unsafe { DosClose(h) };
+    // The file system is still there (the last track is not in use).
+    let mut fsa = [0u8; 18];
+    let rc = unsafe { DosQueryFSInfo(1, 1, fsa.as_mut_ptr(), 18) };
+    check("diskette A: DosQueryFSInfo: 512-byte sectors", rc == 0 && w(&fsa, 16) == 512);
+}
+
 /// IOCtl coverage: IBM's routing and error codes, OEMHLP$, TESTCFG$,
 /// APM$, the general category, monitors, mouse and disk functions.
 fn ioctls(b: &Buf) {
@@ -807,6 +890,79 @@ fn ioctls(b: &Buf) {
             let bad_subid = rcw == [1, 0];
             let rc2 = ioctl(h, 0xc, 0x50, &mut ev, &mut rcw).0;
             check("APM$ bad power event, unknown function", rc == 87 && bad_subid && rc2 == 87 && rcw == [1, 0]);
+            // Power events: a client per APM$ handle with an event
+            // semaphore and a mask (bit n - 1 for sub-ID n).
+            let mut q = [0u8; 12];
+            q[0] = 12;
+            let rc = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            check("APM$ query power event without an event semaphore", rc == 87 && rcw == [0x0a, 0]);
+            let mut hev = 0u32;
+            unsafe { DosCreateEventSem(null_mut(), &mut hev, 1, 0) }; // DC_SEM_SHARED
+            let mask: u32 = 1 << 5 | 1 << 10 | 1 << 11; // set power state, engage, disengage
+            let mut ss = [0u8; 10];
+            ss[0] = 1 | 8;
+            ss[2..6].copy_from_slice(&hev.to_le_bytes());
+            ss[6..10].copy_from_slice(&mask.to_le_bytes());
+            let r1 = ioctl(h, 0xc, 0x41, &mut ss, &mut rcw).0;
+            let r2 = ioctl(h, 0xc, 0x41, &mut ss, &mut rcw).0;
+            let again = rcw == [5, 0];
+            let mut bad = ss;
+            bad[6] = 1; // sub-ID 1 is no event
+            bad[0] = 0x10;
+            let r3 = ioctl(h, 0xc, 0x41, &mut bad, &mut rcw).0;
+            check("APM$ set event semaphore, twice, reserved mask bit", r1 == 0 && r2 == 87 && again && r3 == 87 && rcw == [2, 0]);
+            // A broadcast (engage, sub-ID 0x0B) posts the semaphore and
+            // queues the event; other sub-IDs are not asked for.
+            let mut ev = [0x0bu8, 0, 0, 0, 0, 0, 0, 0];
+            let r1 = ioctl(h, 0xc, 0x43, &mut ev, &mut rcw).0;
+            let mut ev2 = [0x0du8, 0, 0, 0, 0, 0, 0, 0];
+            let r2 = ioctl(h, 0xc, 0x43, &mut ev2, &mut rcw).0;
+            let w = unsafe { DosWaitEventSem(hev, 2000) };
+            let mut q = [0u8; 12];
+            q[0] = 12;
+            let r3 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            let w16 = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
+            let got = w16(&q, 0) == 12 && w16(&q, 2) == 0 && w16(&q, 4) == 0x0b;
+            let r4 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            check("APM$ broadcast event: semaphore posted, event queued, then none", r1 == 0 && r2 == 0 && w == 0 && r3 == 0 && got && r4 == 0 && w16(&q, 0) == 4);
+            // A suspend request reaches the clients before the system
+            // acts on it; rs2 cannot suspend and says so.
+            let mut cnt = 0u32;
+            unsafe { DosResetEventSem(hev, &mut cnt) };
+            let mut sus = [6u8, 0, 0, 0, 1, 0, 2, 0];
+            let r1 = ioctl(h, 0xc, 0x40, &mut sus, &mut rcw).0;
+            let refused = rcw == [0x0f, 0];
+            let w = unsafe { DosWaitEventSem(hev, 2000) };
+            let mut q = [0u8; 12];
+            q[0] = 12;
+            let r2 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            check(
+                "APM$ suspend request: event to the clients, then refused",
+                r1 == 87 && refused && w == 0 && r2 == 0 && w16(&q, 4) == 6 && w16(&q, 8) == 1 && w16(&q, 10) == 2,
+            );
+            // Nothing pending to confirm.
+            let mut cf = [6u8, 0, 0, 0, 1, 0, 2, 0, 0, 0];
+            let r1 = ioctl(h, 0xc, 0x42, &mut cf, &mut rcw).0;
+            check("APM$ confirm event with no request pending", r1 == 87 && rcw == [0x0f, 0]);
+            // Six events into a queue of five: the first query says one
+            // was lost.
+            for _ in 0..6 {
+                ioctl(h, 0xc, 0x43, &mut ev, &mut rcw);
+            }
+            let r1 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            let lost = rcw == [0x0e, 0] && w16(&q, 2) == 4 && w16(&q, 4) == 0x0b;
+            for _ in 0..4 {
+                ioctl(h, 0xc, 0x61, &mut q, &mut rcw);
+            }
+            let r2 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            check("APM$ full event queue: event lost", r1 == 87 && lost && r2 == 0 && w16(&q, 0) == 4);
+            // Deregister: then no client.
+            ss[0] = 2 | 8;
+            q[0] = 12;
+            let r1 = ioctl(h, 0xc, 0x41, &mut ss, &mut rcw).0;
+            let r2 = ioctl(h, 0xc, 0x61, &mut q, &mut rcw).0;
+            check("APM$ deregister the event semaphore", r1 == 0 && r2 == 87 && rcw == [0x0a, 0]);
+            unsafe { DosCloseEventSem(hev) };
             unsafe { DosClose(h) };
         }
         Err(e) => check(&alloc::format!("APM$ open ({e})"), false),
@@ -868,6 +1024,7 @@ fn ioctls(b: &Buf) {
     let r2 = ioctl(0xffff_ffff, 8, 0x69, &mut [0, 2, 0, 0, 0, 0, 0, 0], &mut [0u8; 5]).0;
     let r3 = ioctl(0xffff_ffff, 8, 0x63, &mut [0, 25], &mut [0u8; 36]).0;
     check("category 8 on handle -1 (drive C:, unknown function, no drive)", r1 == 0 && u16::from_le_bytes([bpb[0], bpb[1]]) == 512 && r2 == 22 && r3 == 15);
+    diskettes();
     let mut hp = [0u8; 2];
     if unsafe { DosPhysicalDisk(2, hp.as_mut_ptr(), 2, b"1:\0".as_ptr() as *mut u8, 3) } == 0 {
         let h = u16::from_le_bytes(hp) as u32;

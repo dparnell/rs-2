@@ -24,7 +24,7 @@ const SPT: u64 = 63;
 
 /// Arguments common to the 16- and 32-bit forms.
 pub(crate) struct Req {
-    handle: u32,
+    pub handle: u32,
     pub category: u32,
     pub function: u32,
     pub params: u32,

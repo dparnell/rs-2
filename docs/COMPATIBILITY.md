@@ -546,15 +546,27 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   SCR_ALLOCLDT, SCR_ALLOCLDTOFF, SCR_DEALLOCLDT (PTR_GETPTRDRAWADDRESS
   is refused: rs2 has no ring-0 pointer draw routine to give a mouse
   driver); 4 all; 7 all of IBM MOUSE.SYS's on the session's mouse state
-  (MOU_VER answers without data, as IBM's does); 8 all but the diskette
-  ones (DSK_UNLOCKEJECTMEDIA, DSK_DISKETTECONTROL, DSK_QUERYMEDIASENSE),
-  also on handle -1 with the drive in the parameters; 9 lock, unlock,
+  (MOU_VER answers without data, as IBM's does); 8 all but
+  DSK_UNLOCKEJECTMEDIA and DSK_DISKETTECONTROL, also on handle -1 with
+  the drive in the parameters, and on diskette drives as IBM's OS2DASD
+  answers them over IBM1FLPY.ADD (see "Diskettes" below); 9 lock, unlock,
   verify, the track functions and the kernel's rediscover (0x6A, which
   IBM's LVM VCU.EXE calls); 0xA
   MON_REGISTERMONITOR on KBD$ and MOUSE$; 0xB flush input/output and
   DEV_QUERYMONSUPPORT on the character devices; 0xC on `APM$` (IBM
   APM.SYS's interface on rs2's ACPI power code: power status on line
-  with no battery, power info APM 1.2, the power-off event); 0x80 on
+  with no battery, power info APM 1.2, the power-off event, and power
+  events for programs as APM.SYS keeps them: an event semaphore and
+  mask per APM$ handle (0x41; six clients, a queue of five events each,
+  a 32-bit shared event semaphore posted or a 16-bit system semaphore
+  cleared), events read with 0x61 (0x0E when one was lost), broadcast
+  with 0x43, and the events programs send (0x40) reach the clients
+  before the system acts on them. A suspend or standby request is
+  refused (0x0F, cannot enter the state): rs2 cannot come back from ACPI
+  S3/S1 yet (the firmware's waking vector and every device would have
+  to be set up again); with an APM daemon registered (0x44) a suspend
+  waits for its confirmation (0x42) as on OS/2, which is then refused);
+  0x80 on
   `OEMHLP$` (IBM's is in OS2LDR: functions 0-0xF; OEM name "rs2",
   revision 20.45, no machine ID, VGA display combination, memory, disk
   information from rs2's disks with the synthetic 255/63 geometry, the
@@ -564,6 +576,44 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   refused on ports a driver owns and on PCI configuration 0xCF8-0xCFF;
   no POS or EISA IDs; the SCSI inquiry lists the CD drives, which IBM's
   CDINST.EXE needs to go on to ask for the CD). APITEST checks them.
+
+### Diskettes
+
+Diskette drives are A: and B: (kernel/src/drivers/floppy.rs: the PC
+floppy controller, an Intel 82077 as QEMU's isa-fdc emulates it, with
+the drive types from CMOS; `cargo xtask run --floppy IMG` or `--floppy
+empty`, twice for B:; the monitor's `change fd0 IMG raw` puts another
+diskette in). The controller is driven by programmed I/O without DMA,
+polled; the diskette's format is found by the data rate READ ID works
+at, the highest sector of track 0 and whether head 1 reads (720 KB,
+1.2 MB, 1.44 MB, 2.88 MB, also 360 KB in a 1.2 MB drive). The disk
+change line makes the drive mount the next diskette (fs/removable.rs);
+nothing is cached across a change. QEMU's controller never finishes a
+non-DMA write (it writes the last sector and stays busy without a
+result phase): the driver resets it then.
+
+Category 8 on a diskette drive, as OS2DASD.DMD (studied with Ghidra)
+answers it: DSK_GETDEVICEPARAMS gives the drive's own format (0) or the
+medium's (1: the boot sector's BPB, else the standard one of the format
+found), with OS2DASD's device types (720 KB 2, 1.2 MB 1, 1.44 MB 7, 2.88
+MB 9) and attributes 0x12 (removable, change line);
+DSK_SETDEVICEPARAMS with the medium's BPB also sets the format the
+driver formats, reads and writes (a 720 KB diskette in a 1.44 MB
+drive); DSK_FORMATVERIFY formats a track from its sector table
+(command 0 any table, 1 sectors 1..n only, 3, verifying several
+tracks, is not done on diskettes and gives 0x4000 back, as OS2DASD
+does) and reads it back; the track functions use the diskette's
+geometry; DSK_QUERYMEDIASENSE (1 = 720 KB, 2 = 1.44 MB, 3 = 2.88 MB),
+DSK_BLOCKREMOVABLE (removable), DSK_GETLOCKSTATUS (diskette in or not)
+and DSK_REDETERMINEMEDIA (format found again). Diskettes are no
+partitionable disks, so category 9 does not reach them, as on OS/2.
+DosDevConfig counts the diskette drives.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| FORMAT.COM (IBM) | works | `FORMAT A: /ONCE /V:x` on a 1.44 MB diskette: GETDEVICEPARAMS, QUERYMEDIASENSE, BEGINFORMAT, SETDEVICEPARAMS, 160 FORMATVERIFYs, then the file system through DosWrite on the DASD handle. |
+| DISKCOPY.COM (IBM) | works | `DISKCOPY A: B:` (with one drive it asks for the target diskette in A:): READTRACK/WRITETRACK of 160 tracks; the copy differs only in the new volume serial number, as on OS/2. |
+| FORMAT, DISKCOPY, CHKDSK (rs2) | work | rs2's FORMAT formats diskettes track by track in the drive's format or `/F:360|720|1200|1440|2880`; DISKCOPY writes a target in the source's format, formatting tracks that need it. |
 
 ## DOS sessions
 
