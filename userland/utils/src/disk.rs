@@ -55,20 +55,84 @@ impl Disk {
             heads: 255,
             cache: RefCell::new(BTreeMap::new()),
         };
-        let mut cmd = [1u8, 0];
+        // The medium's BPB; a diskette that cannot be read (not formatted
+        // yet) has the drive's own.
+        let bpb = match d.device_params(1) {
+            Ok(b) => b,
+            Err(rc) if d.removable() => d.device_params(0).map_err(|_| rc)?,
+            Err(rc) => return Err(rc),
+        };
+        d.use_bpb(bpb);
+        Ok(d)
+    }
+
+    /// DSK_GETDEVICEPARAMS: 0 the drive's own format, 1 the medium's.
+    pub fn device_params(&self, which: u8) -> Result<BiosParameterBlock, u32> {
+        let mut cmd = [which, 0];
         let mut bpb = BiosParameterBlock::default();
-        let rc = d.ioctl(DSK_GETDEVICEPARAMS, &mut cmd, unsafe {
+        let rc = self.ioctl(DSK_GETDEVICEPARAMS, &mut cmd, unsafe {
             core::slice::from_raw_parts_mut(&mut bpb as *mut _ as *mut u8, core::mem::size_of::<BiosParameterBlock>())
         });
-        if rc != 0 {
-            return Err(rc);
+        if rc != 0 { Err(rc) } else { Ok(bpb) }
+    }
+
+    fn use_bpb(&mut self, bpb: BiosParameterBlock) {
+        self.bpb = bpb;
+        self.bps = bpb.bytes_per_sector.max(128) as usize;
+        self.sectors = if bpb.sectors != 0 { bpb.sectors as u64 } else { bpb.large_sectors as u64 };
+        self.spt = bpb.sectors_per_track.max(1) as u64;
+        self.heads = bpb.heads.max(1) as u64;
+        self.cache.borrow_mut().clear();
+    }
+
+    /// Whether the drive takes removable media (DSK_BLOCKREMOVABLE).
+    pub fn removable(&self) -> bool {
+        let mut p = [0u8];
+        let mut d = [1u8];
+        self.ioctl(DSK_BLOCKREMOVABLE, &mut p, &mut d) == 0 && d[0] == 0
+    }
+
+    /// A diskette: from now on read and write it in the format `bpb`
+    /// describes (DSK_SETDEVICEPARAMS for the medium).
+    pub fn set_medium(&mut self, bpb: BiosParameterBlock) -> u32 {
+        let mut p = [2u8];
+        let mut b = bpb;
+        let rc = self.ioctl(DSK_SETDEVICEPARAMS, &mut p, unsafe {
+            core::slice::from_raw_parts_mut(&mut b as *mut _ as *mut u8, core::mem::size_of::<BiosParameterBlock>())
+        });
+        if rc == 0 {
+            self.use_bpb(bpb);
         }
-        d.bpb = bpb;
-        d.bps = bpb.bytes_per_sector as usize;
-        d.sectors = if bpb.sectors != 0 { bpb.sectors as u64 } else { bpb.large_sectors as u64 };
-        d.spt = bpb.sectors_per_track.max(1) as u64;
-        d.heads = bpb.heads.max(1) as u64;
-        Ok(d)
+        rc
+    }
+
+    /// A diskette: format track `track` (cylinder * heads + head) with
+    /// sectors 1..n of the medium's size, and verify it.
+    pub fn format_track(&self, track: u64) -> u32 {
+        let (cyl, head) = (track / self.heads, track % self.heads);
+        let n = match self.bps {
+            128 => 0u8,
+            256 => 1,
+            1024 => 3,
+            _ => 2,
+        };
+        let mut p = Vec::with_capacity(9 + 4 * self.spt as usize);
+        p.push(1u8);
+        p.extend_from_slice(&(head as u16).to_le_bytes());
+        p.extend_from_slice(&(cyl as u16).to_le_bytes());
+        p.extend_from_slice(&0u16.to_le_bytes());
+        p.extend_from_slice(&(self.spt as u16).to_le_bytes());
+        for s in 0..self.spt {
+            p.extend_from_slice(&[cyl as u8, head as u8, s as u8 + 1, n]);
+        }
+        let mut d = [0u8];
+        self.cache.borrow_mut().remove(&track);
+        self.ioctl(DSK_FORMATVERIFY, &mut p, &mut d)
+    }
+
+    /// Tracks on the medium.
+    pub fn tracks(&self) -> u64 {
+        self.sectors.div_ceil(self.spt)
     }
 
     fn ioctl(&self, function: u32, params: &mut [u8], data: &mut [u8]) -> u32 {

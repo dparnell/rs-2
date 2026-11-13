@@ -531,7 +531,11 @@ pub const IOCTL_DISK: u32 = 8;
 pub const DSK_LOCKDRIVE: u32 = 0x00;
 pub const DSK_UNLOCKDRIVE: u32 = 0x01;
 pub const DSK_REDETERMINEMEDIA: u32 = 0x02;
+pub const DSK_BLOCKREMOVABLE: u32 = 0x20;
+pub const DSK_SETDEVICEPARAMS: u32 = 0x43;
 pub const DSK_WRITETRACK: u32 = 0x44;
+pub const DSK_FORMATVERIFY: u32 = 0x45;
+pub const DSK_QUERYMEDIASENSE: u32 = 0x60;
 pub const DSK_GETDEVICEPARAMS: u32 = 0x63;
 pub const DSK_READTRACK: u32 = 0x64;
 

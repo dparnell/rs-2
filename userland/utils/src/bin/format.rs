@@ -1,5 +1,11 @@
 //! FORMAT: create a file system. FORMAT drive: [/FS:FAT|FAT32|HPFS|JFS]
-//! [/V[:label]] [/Q] [/ONCE]
+//! [/V[:label]] [/Q] [/ONCE] [/F:size]
+//!
+//! A diskette (DSK_BLOCKREMOVABLE) is formatted track by track with
+//! DSK_FORMATVERIFY in the drive's own format or the /F: one (360, 720,
+//! 1200, 1440, 2880 KB, set with DSK_SETDEVICEPARAMS), and gets FAT12
+//! with the standard layout of its size; FORMAT then offers to format
+//! another unless /ONCE is given.
 //!
 //! The volume is locked and written through DASD track IOCtls (the same
 //! FAT and HPFS code the kernel uses), then the system is told to
@@ -67,6 +73,8 @@ fn main(s: &os2::Startup) -> u32 {
     let mut fs = None;
     let mut label: Option<String> = None;
     let mut quick = false;
+    let mut once = false;
+    let mut size: Option<u32> = None;
     for a in args(s) {
         let u = a.to_ascii_uppercase();
         if let Some(v) = u.strip_prefix("/FS:") {
@@ -88,8 +96,20 @@ fn main(s: &os2::Startup) -> u32 {
             PM.store(true, Ordering::Relaxed);
         } else if u == "/Q" {
             quick = true;
-        } else if u == "/ONCE" || u == "/L" || u.starts_with("/BS:") || u.starts_with("/F:") {
-            // Diskette and optical options: nothing to do on a hard disk.
+        } else if u == "/ONCE" {
+            once = true;
+        } else if let Some(v) = u.strip_prefix("/F:") {
+            // Diskette size in KB (/F:1.44 and the like too).
+            size = Some(match v.trim_end_matches("KB").trim_end_matches('K') {
+                "360" => 360,
+                "720" => 720,
+                "1200" | "1.2" => 1200,
+                "1440" | "1.44" => 1440,
+                "2880" | "2.88" => 2880,
+                _ => return usage_error(),
+            });
+        } else if u == "/L" || u.starts_with("/BS:") {
+            // Optical options: nothing to do on a hard disk.
         } else if u.starts_with('/') {
             return usage_error();
         } else if drive.is_none() {
@@ -129,6 +149,9 @@ fn main(s: &os2::Startup) -> u32 {
             return rc;
         }
     };
+    if disk.removable() {
+        return format_diskettes(d, disk, size, label, quick, once);
+    }
     let bytes = disk.sectors * disk.bps as u64;
     let fs = fs.unwrap_or(match cur.as_str() {
         "HPFS" => Fs::Hpfs,
@@ -266,6 +289,200 @@ fn main(s: &os2::Startup) -> u32 {
     }
     disk.unlock();
     0
+}
+
+/// The diskette formats FORMAT /F: knows: size in KB, sectors, sectors
+/// per cluster, root entries, media byte, sectors per FAT, sectors per
+/// track.
+const FORMATS: [(u32, u16, u8, u16, u8, u16, u16); 5] = [
+    (360, 720, 2, 112, 0xfd, 2, 9),
+    (720, 1440, 2, 112, 0xf9, 3, 9),
+    (1200, 2400, 1, 224, 0xf9, 7, 15),
+    (1440, 2880, 1, 224, 0xf0, 9, 18),
+    (2880, 5760, 2, 240, 0xf0, 9, 36),
+];
+
+/// The standard BPB of a diskette of `sectors` sectors.
+fn diskette_bpb(sectors: u16) -> Option<BiosParameterBlock> {
+    let f = FORMATS.iter().find(|f| f.1 == sectors)?;
+    Some(BiosParameterBlock {
+        bytes_per_sector: 512,
+        sectors_per_cluster: f.2,
+        reserved_sectors: 1,
+        fats: 2,
+        root_entries: f.3,
+        sectors: f.1,
+        media: f.4,
+        sectors_per_fat: f.5,
+        sectors_per_track: f.6,
+        heads: 2,
+        ..Default::default()
+    })
+}
+
+/// Write an empty FAT12 file system in the diskette format `b`.
+fn write_fat12(disk: &Disk, b: &BiosParameterBlock, label: &str, serial: u32) -> Result<(), u32> {
+    let mut bs = alloc::vec![0u8; 512];
+    bs[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+    bs[3..11].copy_from_slice(b"RS2 4.52");
+    bs[11..13].copy_from_slice(&512u16.to_le_bytes());
+    bs[13] = b.sectors_per_cluster;
+    bs[14..16].copy_from_slice(&1u16.to_le_bytes());
+    bs[16] = 2;
+    bs[17..19].copy_from_slice(&{ b.root_entries }.to_le_bytes());
+    bs[19..21].copy_from_slice(&{ b.sectors }.to_le_bytes());
+    bs[21] = b.media;
+    bs[22..24].copy_from_slice(&{ b.sectors_per_fat }.to_le_bytes());
+    bs[24..26].copy_from_slice(&{ b.sectors_per_track }.to_le_bytes());
+    bs[26..28].copy_from_slice(&{ b.heads }.to_le_bytes());
+    bs[38] = 0x29;
+    bs[39..43].copy_from_slice(&serial.to_le_bytes());
+    let mut lab = *b"NO NAME    ";
+    if !label.is_empty() {
+        lab = [b' '; 11];
+        for (d, s) in lab.iter_mut().zip(label.bytes()) {
+            *d = s;
+        }
+    }
+    bs[43..54].copy_from_slice(&lab);
+    bs[54..62].copy_from_slice(b"FAT12   ");
+    bs[510] = 0x55;
+    bs[511] = 0xaa;
+    disk.write(0, &bs)?;
+    let spf = b.sectors_per_fat as u64;
+    let root = (b.root_entries as u64 * 32).div_ceil(512);
+    disk.zero(1, 2 * spf + root)?;
+    let mut fat = alloc::vec![0u8; 512];
+    fat[0..3].copy_from_slice(&[b.media, 0xff, 0xff]);
+    disk.write(1, &fat)?;
+    disk.write(1 + spf, &fat)?;
+    if !label.is_empty() {
+        let mut sec = alloc::vec![0u8; 512];
+        sec[0..11].copy_from_slice(&lab);
+        sec[11] = 0x08;
+        disk.write(1 + 2 * spf, &sec)?;
+    }
+    Ok(())
+}
+
+/// FORMAT on a diskette drive: each diskette is formatted track by
+/// track (DSK_FORMATVERIFY) in the drive's own format or the /F: one,
+/// then gets an empty FAT file system; then the next, unless /ONCE.
+fn format_diskettes(d: u8, mut disk: Disk, size: Option<u32>, label: Option<String>, quick: bool, once: bool) -> u32 {
+    let letter = (b'A' + d) as char;
+    loop {
+        if !pm() {
+            ask(&alloc::format!("Insert a new diskette in drive {letter}:\r\nand press Enter when ready..."));
+        }
+        let native = match disk.device_params(0) {
+            Ok(b) => b,
+            Err(rc) => {
+                error(rc);
+                return rc;
+            }
+        };
+        let sectors = match size {
+            Some(kb) => match FORMATS.iter().find(|f| f.0 == kb) {
+                Some(f) if f.1 <= native.sectors => f.1,
+                _ => {
+                    fail(1284, "", &alloc::format!("SYS1284: Drive {letter}: cannot format a diskette of {} KB.\r\n", kb));
+                    return 1;
+                }
+            },
+            None => native.sectors,
+        };
+        let Some(bpb) = diskette_bpb(sectors) else {
+            fail(1279, "", "SYS1279: The format was unsuccessful.\r\n");
+            return 1;
+        };
+        if disk.lock() != 0 {
+            fail(1303, &alloc::format!("{letter}:"), &alloc::format!("SYS1303: The system is currently unable to format drive {letter}:\r\n(files on it are in use).\r\n"));
+            return 108;
+        }
+        let rc = disk.set_medium(bpb);
+        if rc != 0 {
+            disk.unlock();
+            error(rc);
+            return rc;
+        }
+        let tracks = disk.tracks();
+        let mut last = u64::MAX;
+        for t in 0..if quick { 0 } else { tracks } {
+            let pct = t * 100 / tracks;
+            if pct != last {
+                if pm() {
+                    pm_msg(1312, &alloc::format!("{pct}"));
+                } else {
+                    out(&alloc::format!("\r{pct} percent of disk formatted "));
+                }
+                last = pct;
+            }
+            let rc = disk.format_track(t);
+            if rc != 0 {
+                disk.unlock();
+                if !pm() {
+                    outln("");
+                }
+                if rc == 19 {
+                    error(rc);
+                } else {
+                    fail(1279, "", "SYS1279: The format was unsuccessful.\r\n");
+                }
+                return rc;
+            }
+        }
+        if !pm() && !quick {
+            out("\r100 percent of disk formatted ");
+        }
+        let lab = label.as_deref().map(|l| l.to_ascii_uppercase()).unwrap_or_default();
+        let lab = &lab[..lab.len().min(11)];
+        let mut dt = DateTime::default();
+        unsafe { DosGetDateTime(&mut dt) };
+        let ser = ((dt.day as u32) << 24 | (dt.month as u32) << 16 | (dt.seconds as u32) << 8 | dt.hundredths as u32)
+            .wrapping_add((dt.year as u32) << 16 | (dt.hours as u32) << 8 | dt.minutes as u32);
+        let written = write_fat12(&disk, &bpb, lab, ser);
+        disk.redetermine();
+        disk.unlock();
+        if written.is_err() {
+            fail(1279, "", "SYS1296: FORMAT cannot write the file system to the target disk.\r\n");
+            return 1;
+        }
+        if pm() {
+            pm_msg(1294, "");
+        } else {
+            outln("\r\n\r\nFormat completed successfully.\r\n");
+        }
+        if label.is_none() && !pm() {
+            let l = ask("Enter up to 11 characters for the volume label\r\nor press Enter for no volume label. ");
+            if !l.is_empty() {
+                let rc = set_volume_label(d, &l.to_ascii_uppercase());
+                if rc != 0 {
+                    error(rc);
+                }
+            }
+        }
+        let mut a = FsAllocate::default();
+        let rc = unsafe { DosQueryFSInfo(d as u32 + 1, FSIL_ALLOC, &mut a as *mut _ as *mut u8, core::mem::size_of::<FsAllocate>() as u32) };
+        if rc == 0 {
+            let unit = a.sectors_per_unit as u64 * a.bytes_per_sector as u64;
+            if pm() {
+                pm_msg(1283, &alloc::format!("{}", a.units as u64 * unit));
+                pm_msg(1286, &alloc::format!("{}", a.units_avail as u64 * unit));
+                return 0;
+            }
+            outln(&alloc::format!("\r\n{} bytes total disk space", num(a.units as u64 * unit, 12)));
+            outln(&alloc::format!("{} bytes available on disk", num(a.units_avail as u64 * unit, 12)));
+            outln(&alloc::format!("\r\n{} bytes in each allocation unit.", num(unit, 12)));
+            outln(&alloc::format!("{} total allocation units.", num(a.units as u64, 12)));
+            outln(&alloc::format!("{} available allocation units on disk.", num(a.units_avail as u64, 12)));
+        }
+        if let Ok((_, s)) = volume_label(d) {
+            outln(&alloc::format!("\r\nThe Volume Serial Number is {}.", serial(s)));
+        }
+        if once || pm() || !yes("\r\nFormat another diskette (Y/N)? ") {
+            return 0;
+        }
+    }
 }
 
 /// Read every track (what a full format does on a hard disk), showing

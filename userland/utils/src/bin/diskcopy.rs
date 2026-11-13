@@ -1,10 +1,11 @@
 //! DISKCOPY: copy a whole diskette. DISKCOPY [source [target]]
 //!
-//! Source and target are diskette drives (`A:`) or, in rs2, which has no
-//! diskette drives, also diskette image files: `DISKCOPY A: DISK1.IMG`
-//! makes an image, `DISKCOPY DISK1.IMG A:` writes one, and a drive here
-//! is any volume of diskette size (an unpartitioned 1.44 MB disk). Hard
-//! disks are refused, as by OS/2's DISKCOPY.
+//! Source and target are diskette drives (`A:`) or, in rs2, also
+//! diskette image files: `DISKCOPY A: DISK1.IMG` makes an image,
+//! `DISKCOPY DISK1.IMG A:` writes one, and a drive here is any volume of
+//! diskette size (an unpartitioned 1.44 MB disk). A target diskette gets
+//! the source's format; tracks that cannot be written are formatted
+//! first. Hard disks are refused, as by OS/2's DISKCOPY.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -39,7 +40,7 @@ fn one(src: &str, dst: &str) -> u32 {
     };
     let (t, spt, sides) = geometry(&data);
     say(1260, &[&alloc::format!("{t}"), &alloc::format!("{spt}"), &alloc::format!("{sides}")], "Copying %1 tracks %2 sectors per track, %3 side(s).\r\n");
-    let d = match Medium::open(dst, true) {
+    let mut d = match Medium::open(dst, true) {
         Ok(m) => m,
         Err(1231) => {
             err(1231, &[], "The drive given cannot be used: it is a hard disk.\r\n");

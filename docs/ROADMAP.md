@@ -15,7 +15,9 @@ What is still to do. Everything already finished is in
   other BARs (NetMos 9835/9845 serial+parallel)
 - DOS sessions: the sharing retries and INT 24h for lock violations on
   compatibility-mode and FCB opens
-- DOSCALLS.443 (SYSINST2.EXE), diskette IOCtls, APM suspend and events
+- APM suspend and standby: ACPI S3/S1 with the firmware's waking vector
+  and every device set up again on resume (APM$ refuses them now); the
+  diskette driver's DMA mode (real controllers without non-DMA support)
 
 ## Milestone 2: storage and installed systems
 

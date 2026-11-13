@@ -147,6 +147,7 @@ const DOSCALLS: &[(u16, &str)] = &[
     (215, "p"),        // DosPageSize
     (423, ""),         // DosFlatToSel: register based (EAX in and out)
     (424, ""),         // DosSelToFlat: register based (EAX in and out)
+    (443, "d"),        // DosQueryABIOSSupport (kernel-only 16-bit gate; SYSINST2)
     (567, "pppddwwdpp"), // Dos16OpenL (from CMD.EXE call sites)
     (568, "wddcp"),    // Dos16SetFilePtrL (LONGLONG as two dwords)
     (570, "wdd"),      // Dos16SetFileSizeL

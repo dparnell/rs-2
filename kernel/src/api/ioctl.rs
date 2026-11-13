@@ -13,6 +13,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec;
+use alloc::vec::Vec;
 
 use super::{err, Ctx};
 use crate::fs::block::BlockDev;
@@ -23,7 +24,7 @@ const SPT: u64 = 63;
 
 /// Arguments common to the 16- and 32-bit forms.
 pub(crate) struct Req {
-    handle: u32,
+    pub handle: u32,
     pub category: u32,
     pub function: u32,
     pub params: u32,
@@ -445,6 +446,11 @@ fn phys_request(c: &Ctx, d: Arc<dyn BlockDev>, r: &Req) -> u32 {
 /// the start of the volume; the BPB reports it.
 fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
     use core::sync::atomic::Ordering;
+    if let Some(fd) = crate::drivers::floppy::unit(d.drive) {
+        if let Some(rc) = diskette(c, d, &fd, r) {
+            return rc;
+        }
+    }
     match r.function {
         // DSK_LOCKDRIVE / DSK_UNLOCKDRIVE
         0x00 => match crate::fs::lock_drive(d.drive) {
@@ -535,8 +541,24 @@ fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
             // Sector numbers (1-based) come from the track table.
             let Some(t) = c.read_vec(r.params + 9, (first + count) * 4) else { return err::INVALID_ADDRESS };
             let num = |i: u32| u16::from_le_bytes([t[i as usize * 4], t[i as usize * 4 + 1]]) as u64;
-            let track = (cyl * HEADS + head) * SPT;
-            let ss = d.dev.sector_size() as u32;
+            // A diskette's own format; other volumes the synthetic one.
+            let fd = crate::drivers::floppy::unit(d.drive);
+            let (dev, track) = match &fd {
+                Some(fd) => {
+                    fd.check_change();
+                    let g = match fd.media() {
+                        Ok(g) => g,
+                        Err(e) => return e,
+                    };
+                    if cyl >= g.cyls as u64 || head >= g.heads as u64 {
+                        return dd_error(8, status::INVALID_PARAMETER);
+                    }
+                    let raw: Arc<dyn BlockDev> = fd.clone();
+                    (raw, (cyl * g.heads as u64 + head) * g.spt as u64)
+                }
+                None => (d.dev.clone(), (cyl * HEADS + head) * SPT),
+            };
+            let ss = dev.sector_size() as u32;
             let write = r.function == 0x44;
             // Runs of consecutive sector numbers in one transfer each.
             let mut i = first;
@@ -549,10 +571,15 @@ fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
                 while i + n < first + count && num(i + n) == start + n as u64 {
                     n += 1;
                 }
+                if let Some(g) = fd.as_ref().and_then(|f| f.known_media()) {
+                    if start + n as u64 - 1 > g.spt as u64 {
+                        return 27; // ERROR_SECTOR_NOT_FOUND
+                    }
+                }
                 let e = if r.function == 0x65 {
-                    verify(&d.dev, track + start - 1, n)
+                    verify(&dev, track + start - 1, n)
                 } else {
-                    rw(c, &d.dev, track + start - 1, n, r.data + (i - first) * ss, write)
+                    rw(c, &dev, track + start - 1, n, r.data + (i - first) * ss, write)
                 };
                 if e != 0 {
                     return e;
@@ -567,6 +594,194 @@ fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
         }
         _ => err::INVALID_FUNCTION,
     }
+}
+
+/// The standard BPBs of the diskette formats (31 bytes of
+/// BIOSPARAMETERBLOCK): bytes per sector, sectors per cluster, reserved
+/// sectors, FATs, root entries, sectors, media byte, sectors per FAT,
+/// sectors per track, heads (OS2DASD's table).
+fn diskette_bpb(sectors: u16) -> Option<[u8; 31]> {
+    let (spc, root, media, spf, spt): (u8, u16, u8, u16, u16) = match sectors {
+        720 => (2, 112, 0xfd, 2, 9),
+        1440 => (2, 112, 0xf9, 3, 9),
+        2400 => (1, 224, 0xf9, 7, 15),
+        2880 => (1, 224, 0xf0, 9, 18),
+        5760 => (2, 240, 0xf0, 9, 36),
+        _ => return None,
+    };
+    let mut b = [0u8; 31];
+    b[0..2].copy_from_slice(&512u16.to_le_bytes());
+    b[2] = spc;
+    b[3..5].copy_from_slice(&1u16.to_le_bytes());
+    b[5] = 2;
+    b[6..8].copy_from_slice(&root.to_le_bytes());
+    b[8..10].copy_from_slice(&sectors.to_le_bytes());
+    b[10] = media;
+    b[11..13].copy_from_slice(&spf.to_le_bytes());
+    b[13..15].copy_from_slice(&spt.to_le_bytes());
+    b[15..17].copy_from_slice(&2u16.to_le_bytes());
+    Some(b)
+}
+
+/// The category 8 functions that differ for a diskette drive (IBM's
+/// OS2DASD over IBM1FLPY.ADD): None for those that work as on any
+/// volume.
+fn diskette(c: &Ctx, d: &crate::fs::Dasd, fd: &Arc<crate::drivers::floppy::Drive>, r: &Req) -> Option<u32> {
+    use crate::drivers::floppy::Geom;
+    Some(match r.function {
+        // DSK_REDETERMINEMEDIA: the format is sensed again.
+        0x02 => {
+            fd.set_media(None);
+            d.written.store(false, core::sync::atomic::Ordering::Relaxed);
+            crate::fs::remount(d.drive).err().unwrap_or(0)
+        }
+        // DSK_BLOCKREMOVABLE: removable.
+        0x20 => {
+            c.write_u8(r.data, 0);
+            set_lens(c, r, 1, 1);
+            0
+        }
+        // DSK_QUERYMEDIASENSE: 1 = 720 KB, 2 = 1.44 MB, 3 = 2.88 MB, 0 =
+        // anything else or no diskette.
+        0x60 => {
+            fd.check_change();
+            let sense = match fd.media().map(|g| g.rate) {
+                Ok(crate::drivers::floppy::RATE_250K) => 1,
+                Ok(crate::drivers::floppy::RATE_500K) => 2,
+                Ok(crate::drivers::floppy::RATE_1M) => 3,
+                _ => 0,
+            };
+            put_data(c, r, 1, &[sense])
+        }
+        // DSK_GETLOCKSTATUS: no lock or eject; bit 2 a diskette is in.
+        0x66 => {
+            fd.check_change();
+            let present = fd.media().is_ok();
+            put_data(c, r, 0, &(if present { 4u16 } else { 0 }).to_le_bytes())
+        }
+        // DSK_GETDEVICEPARAMS: 0 the drive's own format, 1 the medium's
+        // (its boot sector's BPB, else the standard one of the format
+        // sensed). The device type follows the drive's own format, as
+        // OS2DASD does it: 720 KB 2, 1.2 MB 1, 1.44 MB 7, 2.88 MB 9,
+        // others 0; attributes removable (bit 4) with a change line (bit 1).
+        0x63 => {
+            let which = c.read_u8(r.params).unwrap_or(0);
+            let native = fd.kind.native();
+            let set = BPBS.lock().iter().find(|b| b.0 == d.drive && b.1 == (which != 0)).map(|b| b.2);
+            let mut b = match set {
+                Some(b) => b,
+                None => {
+                    let mut b = [0u8; 36];
+                    let bpb = if which == 0 {
+                        diskette_bpb(native.sectors() as u16)
+                    } else {
+                        fd.check_change();
+                        let g = match fd.media() {
+                            Ok(g) => g,
+                            Err(e) => return Some(e),
+                        };
+                        let raw: Arc<dyn BlockDev> = fd.clone();
+                        let mut bs = vec![0u8; 512];
+                        let boot = raw.read(0, &mut bs).is_ok()
+                            && u16::from_le_bytes([bs[11], bs[12]]) == 512
+                            && bs[13] != 0
+                            && bs[16] != 0
+                            && bs[21] >= 0xf0;
+                        if boot {
+                            let mut x = [0u8; 31];
+                            x[..13].copy_from_slice(&bs[11..24]);
+                            x[13..17].copy_from_slice(&bs[24..28]);
+                            Some(x)
+                        } else {
+                            diskette_bpb(g.sectors() as u16)
+                        }
+                    };
+                    if let Some(x) = bpb {
+                        b[..31].copy_from_slice(&x);
+                    }
+                    b
+                }
+            };
+            b[31..33].copy_from_slice(&native.cyls.to_le_bytes());
+            b[33] = match native.sectors() {
+                1440 => 2,
+                2400 => 1,
+                2880 => 7,
+                5760 => 9,
+                _ => 0,
+            };
+            b[34..36].copy_from_slice(&0x12u16.to_le_bytes());
+            if !c.write(r.data, &b) {
+                return Some(err::INVALID_ADDRESS);
+            }
+            set_lens(c, r, 1, b.len() as u32);
+            0
+        }
+        // DSK_SETDEVICEPARAMS: as for any volume; the medium's BPB also
+        // sets the format the driver reads and writes (formatting a 720
+        // KB diskette in a 1.44 MB drive), 0 has it sensed again.
+        0x43 => {
+            let Some(cmd) = c.read_u8(r.params) else { return Some(err::INVALID_ADDRESS) };
+            match cmd {
+                0 => fd.set_media(None),
+                2 => {
+                    let Some(b) = c.read_vec(r.data, 31) else { return Some(err::INVALID_ADDRESS) };
+                    let le = |o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
+                    let sectors = if le(8) != 0 { le(8) as u32 } else { u32::from_le_bytes([b[21], b[22], b[23], b[24]]) };
+                    if let Some(g) = Geom::from_bpb(fd.kind, sectors, le(13), le(15)) {
+                        fd.set_media(Some(g));
+                    }
+                }
+                _ => {}
+            }
+            return None;
+        }
+        // DSK_FORMATVERIFY: TRACKFORMAT { bCommand, usHead, usCylinder,
+        // usReserved, cSectors, (C, H, R, N)[cSectors] }. Command 0
+        // formats with any sector table, 1 only with sectors 1..n of 512
+        // or 1024 bytes; 3 (verify several tracks) is not done on
+        // diskettes: usReserved comes back 0x4000, as from OS2DASD.
+        0x45 => {
+            let Some(p) = c.read_vec(r.params, 9) else { return Some(err::INVALID_ADDRESS) };
+            let le = |o: usize| u16::from_le_bytes([p[o], p[o + 1]]);
+            let (cmd, head, cyl, count) = (p[0], le(1), le(3), le(7));
+            match cmd {
+                3 => {
+                    return Some(if c.write_u16(r.params + 5, 0x4000) { 0 } else { err::INVALID_ADDRESS });
+                }
+                0 | 1 => {}
+                _ => return Some(dd_error(8, status::UNKNOWN_COMMAND)),
+            }
+            fd.check_change();
+            let g = fd.media_or_native();
+            if cyl >= g.cyls || head >= g.heads || count == 0 || count > 64 {
+                return Some(dd_error(8, status::INVALID_PARAMETER));
+            }
+            let Some(t) = c.read_vec(r.params + 9, count as u32 * 4) else { return Some(err::INVALID_ADDRESS) };
+            let ids: Vec<[u8; 4]> = t.chunks(4).map(|x| [x[0], x[1], x[2], x[3]]).collect();
+            let n = ids[0][3];
+            let odd = ids.iter().enumerate().any(|(i, x)| x[2] as usize != i + 1 || x[3] != n) || !(n == 2 || n == 3);
+            if ids.iter().any(|x| x[0] as u16 != cyl || x[1] as u16 != head) || (cmd == 1 && odd) {
+                return Some(dd_error(8, status::INVALID_PARAMETER));
+            }
+            if let Err(e) = fd.format_track(cyl, head, n, &ids) {
+                return Some(e);
+            }
+            // Verify: the sectors of a standard track must read.
+            if n == 2 && !odd {
+                let raw: Arc<dyn BlockDev> = fd.clone();
+                let lba = (cyl as u64 * g.heads as u64 + head as u64) * g.spt as u64;
+                let e = verify(&raw, lba, (count as u32).min(g.spt as u32));
+                if e != 0 {
+                    return Some(e);
+                }
+            }
+            d.written.store(true, core::sync::atomic::Ordering::Relaxed);
+            set_lens(c, r, 9 + count as u32 * 4, 0);
+            0
+        }
+        _ => return None,
+    })
 }
 
 /// BPBs set by DSK_SETDEVICEPARAMS: drive, for the medium (else the

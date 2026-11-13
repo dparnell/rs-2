@@ -3,6 +3,7 @@
 pub mod ac97;
 pub mod ahci;
 pub mod e1000;
+pub mod floppy;
 pub mod es137x;
 pub mod hda;
 pub mod hid;
@@ -368,4 +369,8 @@ pub fn init() {
         }
     }
     *DISKS.lock() = disks;
+    // Diskette drives are A: and B:.
+    for d in floppy::probe() {
+        crate::fs::mount(d.unit, crate::fs::removable::Removable::new(d));
+    }
 }

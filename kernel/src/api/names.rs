@@ -23,7 +23,7 @@ pub fn is16(module: u8, ordinal: u16) -> bool {
     let (module, ordinal) = canonical(module, ordinal);
     // DOSCALLS.567 (Dos16OpenL) is a forwarder in DOSCALL1, absent from
     // the generated table.
-    if module == 0 && ordinal == 567 {
+    if module == 0 && (ordinal == 567 || KERNEL16.iter().any(|k| k.0 == ordinal)) {
         return true;
     }
     match find(module, ordinal) {
@@ -37,8 +37,18 @@ pub fn display(module: u8, ordinal: u16) -> &'static str {
     if module == 9 {
         return MONCALLS.iter().find(|m| m.1 == ordinal).map_or("?", |m| m.0);
     }
+    if module == 0 {
+        if let Some(k) = KERNEL16.iter().find(|k| k.0 == ordinal) {
+            return k.1;
+        }
+    }
     find(module, ordinal).map_or("?", |e| e.3)
 }
+
+/// 16-bit DOSCALLS entries that IBM's kernel exports itself (call gates in
+/// its DOSCALLS entry table) and that are neither in DOSCALL1 nor in the
+/// Toolkit import libraries. Undocumented; found by reading the table.
+const KERNEL16: [(u16, &str); 1] = [(443, "DOSQUERYABIOSSUPPORT")];
 
 /// MONCALLS (not in the Toolkit 4.5 import libraries).
 const MONCALLS: [(&str, u16); 5] = [("DosMonWrite", 1), ("DosMonRead", 2), ("DosMonClose", 3), ("DosMonOpen", 4), ("DosMonReg", 5)];

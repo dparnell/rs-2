@@ -13,7 +13,9 @@
 //!   by a driver in the resource manager are refused, as IBM's driver's
 //!   exclusive RMAllocResource refuses them.
 //! * `APM$` (category 0xC, IBM's APM.SYS interface) on rs2's ACPI power
-//!   code: power status (AC power, no battery), the power-off event.
+//!   code: power status (AC power, no battery), the power-off event, and
+//!   power events for programs (event semaphores and queues, broadcasts,
+//!   the daemon's confirmation). Suspend and standby are refused.
 //!
 //! IBM's drivers write their whole data structure whatever the data
 //! length the caller gave (they only check that the memory is writable),
@@ -386,9 +388,12 @@ mod rc {
 /// | function | parameters |
 /// |----------|------------|
 /// | 0x40 send power event | USHORT subid, reserved, data1, data2: 3/4 enable/disable, 5 restore defaults, 6 set power state (data1 device, data2 state: 0 ready, 1 standby, 2 suspend, 3 off), 0xB/0xC engage/disengage |
-/// | 0x41 set event semaphore | — |
+/// | 0x41 set event semaphore | USHORT flags, ULONG semaphore, ULONG event mask (see "power events") |
+/// | 0x42 confirm event (APM daemon) | USHORT subid 6, reserved, device 1, state 2/3, reserved |
+/// | 0x43 broadcast event | USHORT subid, reserved, data1, data2 (to the event clients only) |
+/// | 0x44 register daemon thread | — |
 /// | 0x60 query power status | length, flags, AC, battery status, battery life, time form, USHORT time, battery flags, unit, count |
-/// | 0x61 query power event | length, events pending (none) |
+/// | 0x61 query power event | length, events pending, subid, reserved, data1, data2 |
 /// | 0x62 query power info | length, BIOS flags, BIOS major, minor, driver major, minor, APM level major, minor |
 /// | 0x63 query power state | length, device, state |
 /// | 0x64 query capabilities | length, ... |
@@ -420,9 +425,14 @@ pub fn apm(c: &Ctx, r: &Req) -> u32 {
     let len = word(&p, 0);
     let result = match r.function {
         0x40 => send_event(word(&p, 0), word(&p, 2), word(&p, 4), word(&p, 6)),
-        // Event semaphores, daemon registration, broadcasts: accepted;
-        // rs2 raises no APM events.
-        0x41..=0x44 => 0,
+        0x41 => set_event_sem(c, r.handle, &p),
+        0x42 => confirm_event(&p),
+        0x43 => broadcast_event(&p),
+        // The APM daemon (APMDAEMN): it confirms suspend requests.
+        0x44 => {
+            DAEMON.store(c.process.pid, Ordering::Relaxed);
+            0
+        }
         0x45 | 0x46 | 0x65 | 0x66 => rc::NOT_SUPPORTED,
         0x60 if len < 7 => {
             set(&mut p, 0, 0x0d);
@@ -448,11 +458,7 @@ pub fn apm(c: &Ctx, r: &Req) -> u32 {
             set(&mut p, 0, 0x0c);
             rc::BAD_LENGTH
         }
-        0x61 => {
-            set(&mut p, 0, 4);
-            set(&mut p, 2, 0);
-            0
-        }
+        0x61 => query_event(c, r.handle, &mut p),
         0x62 if len < 8 => {
             set(&mut p, 0, 0x0a);
             rc::BAD_LENGTH
@@ -508,50 +514,277 @@ fn send_event(subid: u16, reserved: u16, data1: u16, data2: u16) -> u16 {
     if reserved != 0 {
         return rc::BAD_RESERVED;
     }
+    // Check the request first: valid ones reach the event clients
+    // before the system acts on them, as in APM.SYS.
+    let check = match subid {
+        3..=5 | 8..=0x0a | 0x0b | 0x0c => 0,
+        6 if state & 1 == 0 => rc::DISABLED,
+        6 if !valid_device(data1) => rc::BAD_DEVICE,
+        6 if data2 > 3 => rc::BAD_STATE,
+        6 => 0,
+        0x13 | 0x14 if data1 > 1 => rc::BAD_FLAG,
+        0x13 | 0x14 => 0,
+        _ => rc::BAD_SUBID,
+    };
+    if check != 0 {
+        return check;
+    }
+    broadcast(subid, data1, data2);
     match subid {
         3 | 4 => {
-            let on = subid == 3;
-            if on { APM_STATE.fetch_or(1, Ordering::Relaxed) } else { APM_STATE.fetch_and(!1, Ordering::Relaxed) };
+            if subid == 3 { APM_STATE.fetch_or(1, Ordering::Relaxed) } else { APM_STATE.fetch_and(!1, Ordering::Relaxed) };
             0
         }
         5 => {
             APM_STATE.store(3, Ordering::Relaxed);
             0
         }
-        6 => {
-            if state & 1 == 0 {
-                return rc::DISABLED;
-            }
-            if !valid_device(data1) {
-                return rc::BAD_DEVICE;
-            }
-            match data2 {
-                0 => 0,
-                // Off: what the shutdown's power-off does.
-                3 if data1 <= 1 => {
-                    crate::drivers::flush_disks();
-                    crate::power::try_power_off();
-                    rc::GEN_FAILURE
-                }
-                1..=3 => rc::CANNOT_ENTER_STATE,
-                _ => rc::BAD_STATE,
-            }
-        }
-        // Resume notifications.
-        8..=0x0a => 0,
-        0x0b | 0x0c => {
-            let on = subid == 0x0b;
-            if on { APM_STATE.fetch_or(2, Ordering::Relaxed) } else { APM_STATE.fetch_and(!2, Ordering::Relaxed) };
-            0
-        }
-        // Timer-based requests, resume on ring: off or on.
-        0x13 | 0x14 => {
-            if data1 > 1 {
-                rc::BAD_FLAG
-            } else {
+        6 => match data2 {
+            0 => 0,
+            // A suspend of the whole system waits for the APM daemon's
+            // confirmation when one runs; else rs2 acts at once.
+            2 if data1 == 1 && crate::task::process::by_pid(DAEMON.load(Ordering::Relaxed)).is_some() => {
+                PENDING.store(2, Ordering::Relaxed);
                 0
             }
+            3 if data1 > 1 => rc::CANNOT_ENTER_STATE,
+            s if data1 <= 1 => enter_state(s).err().unwrap_or(0),
+            _ => rc::CANNOT_ENTER_STATE,
+        },
+        0x0b | 0x0c => {
+            if subid == 0x0b { APM_STATE.fetch_or(2, Ordering::Relaxed) } else { APM_STATE.fetch_and(!2, Ordering::Relaxed) };
+            0
         }
-        _ => rc::BAD_SUBID,
+        // Resume notifications; timer-based requests, resume on ring.
+        _ => 0,
+    }
+}
+
+/// 0x43: { sub-ID, reserved, data1, data2 }: an event for the clients
+/// only (sub-ID 6 for all devices, state 0-3; others with no data).
+fn broadcast_event(p: &[u8]) -> u16 {
+    let w = |o: usize| u16::from_le_bytes([p[o], p[o + 1]]);
+    let (subid, data1, data2) = (w(0), w(4), w(6));
+    if subid > 0x15 {
+        return rc::BAD_SUBID;
+    }
+    if w(2) != 0 {
+        return rc::BAD_RESERVED;
+    }
+    if subid == 6 {
+        if data1 != 1 {
+            return rc::BAD_DEVICE;
+        }
+        if data2 > 3 {
+            return rc::BAD_STATE;
+        }
+    } else if data1 != 0 {
+        return rc::BAD_DEVICE;
+    } else if data2 != 0 {
+        return rc::BAD_STATE;
+    }
+    broadcast(subid, data1, data2);
+    0
+}
+
+// ---- APM$ power events ----
+//
+// As IBM's APM.SYS keeps them: up to six application clients, one per
+// open APM$ handle that registered an event semaphore (0x41) or an event
+// mask; each gets the events whose bit is in its mask (bit n - 1 for
+// sub-ID n) in a queue of five, the semaphore posted (a 32-bit shared
+// event semaphore, or a 16-bit system semaphore cleared), and reads them
+// with 0x61. A full queue loses the event and the next query says so
+// (0x0E). Events reach the clients when a program sends one (0x40,
+// before the system acts on it), broadcasts one (0x43), or confirms a
+// suspend (0x42, then the resume).
+
+struct Client {
+    pid: u32,
+    handle: u32,
+    /// 4 a 16-bit system semaphore, 8 a 32-bit event semaphore, 0 none.
+    kind: u16,
+    sem: u32,
+    mask: u32,
+    events: alloc::collections::VecDeque<[u16; 3]>,
+    lost: bool,
+}
+
+static CLIENTS: crate::sync::SpinLock<Vec<Client>> = crate::sync::SpinLock::new(Vec::new());
+
+/// A suspend or standby request waiting for the APM daemon's
+/// confirmation (0x42): the state asked for.
+static PENDING: AtomicU16 = AtomicU16::new(0);
+/// Process that registered as the APM daemon (0x44), 0 none.
+static DAEMON: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Whether handle `h` of process `pid` is still open on APM$.
+fn client_alive(pid: u32, h: u32) -> bool {
+    let Some(p) = crate::task::process::by_pid(pid) else { return false };
+    let hs = p.handles.lock();
+    matches!(hs.get(h as usize), Some(Some(crate::fs::Handle::Char(crate::fs::CharDev::Apm))))
+}
+
+/// Queue a power event for the clients that asked for it and post their
+/// semaphores.
+pub fn broadcast(subid: u16, data1: u16, data2: u16) {
+    if subid == 0 || subid > 0x16 {
+        return;
+    }
+    let bit = 1u32 << (subid - 1);
+    let mut post = Vec::new();
+    {
+        let mut cl = CLIENTS.lock();
+        for c in cl.iter_mut().filter(|c| c.mask & bit != 0) {
+            if c.events.len() >= 5 {
+                c.lost = true;
+            } else {
+                c.events.push_back([subid, data1, data2]);
+            }
+            post.push((c.pid, c.handle, c.kind, c.sem));
+        }
+    }
+    let mut gone = Vec::new();
+    for (pid, h, kind, sem) in post {
+        if !client_alive(pid, h) {
+            gone.push((pid, h));
+            continue;
+        }
+        match kind {
+            8 => super::sem::post_event_handle(pid, sem),
+            4 => super::sem::clear_sys16(sem),
+            _ => {}
+        }
+    }
+    if !gone.is_empty() {
+        CLIENTS.lock().retain(|c| !gone.contains(&(c.pid, c.handle)));
+    }
+}
+
+/// 0x41: { USHORT flags, ULONG semaphore, ULONG event mask }. Flags: 1
+/// register, 2 deregister, 0x10 set the mask only; with 4 (16-bit system
+/// semaphore) or 8 (32-bit event semaphore).
+fn set_event_sem(c: &Ctx, handle: u32, p: &[u8]) -> u16 {
+    let w = |o: usize| u16::from_le_bytes([p[o], p[o + 1]]);
+    let flags = w(0);
+    let sem = u32::from_le_bytes([p[2], p[3], p[4], p[5]]);
+    let mask = u32::from_le_bytes([p[6], p[7], p[8], p[9]]);
+    if flags & 0xffe0 != 0 {
+        return 6;
+    }
+    // Sub-IDs 1-3 and 0x17-0x18 are no events.
+    if mask & 7 != 0 || mask & 0x00c0_0000 != 0 {
+        return rc::BAD_RESERVED;
+    }
+    let pid = c.process.pid;
+    // Clients whose handle was closed make room first.
+    let stale: Vec<(u32, u32)> = CLIENTS.lock().iter().map(|x| (x.pid, x.handle)).collect();
+    let stale: Vec<(u32, u32)> = stale.into_iter().filter(|&(p, h)| !client_alive(p, h)).collect();
+    let mut cl = CLIENTS.lock();
+    cl.retain(|x| !stale.contains(&(x.pid, x.handle)));
+    let at = cl.iter().position(|x| x.pid == pid && x.handle == handle);
+    let kind = flags & 0xc;
+    match flags & 0x13 {
+        1 => {
+            if kind != 4 && kind != 8 {
+                return 6;
+            }
+            if at.is_some() {
+                return 5;
+            }
+            if cl.len() >= 6 {
+                return 0x0b;
+            }
+            if kind == 8 && !super::sem::is_event_handle(c, sem) {
+                return 0x0d;
+            }
+            cl.push(Client { pid, handle, kind, sem, mask, events: Default::default(), lost: false });
+            0
+        }
+        2 => match at {
+            Some(i) if cl[i].sem == sem => {
+                cl.remove(i);
+                0
+            }
+            Some(_) => 7,
+            None => 0x0a,
+        },
+        0x10 if kind == 0 => match at {
+            Some(i) => {
+                cl[i].mask = mask;
+                0
+            }
+            None if cl.len() >= 6 => 0x0b,
+            None => {
+                cl.push(Client { pid, handle, kind: 0, sem: 0, mask, events: Default::default(), lost: false });
+                0
+            }
+        },
+        _ => 6,
+    }
+}
+
+/// 0x61: the next event of this handle's queue: { length 0x0C, events
+/// still pending, sub-ID, reserved, data1, data2 }, or length 4 and none.
+fn query_event(c: &Ctx, handle: u32, p: &mut [u8]) -> u16 {
+    let pid = c.process.pid;
+    let mut cl = CLIENTS.lock();
+    let Some(x) = cl.iter_mut().find(|x| x.pid == pid && x.handle == handle) else { return 0x0a };
+    let Some(e) = x.events.pop_front() else {
+        p[0..2].copy_from_slice(&4u16.to_le_bytes());
+        p[2..4].copy_from_slice(&0u16.to_le_bytes());
+        return 0;
+    };
+    p[0..2].copy_from_slice(&0x0cu16.to_le_bytes());
+    p[2..4].copy_from_slice(&(x.events.len() as u16).to_le_bytes());
+    p[4..6].copy_from_slice(&e[0].to_le_bytes());
+    p[6..8].copy_from_slice(&0u16.to_le_bytes());
+    p[8..10].copy_from_slice(&e[1].to_le_bytes());
+    p[10..12].copy_from_slice(&e[2].to_le_bytes());
+    if core::mem::take(&mut x.lost) { 0x0e } else { 0 }
+}
+
+/// 0x42 (the APM daemon): { sub-ID 6, reserved, device 1, state 2 or 3,
+/// reserved }: carry out the suspend or power-off that was requested.
+fn confirm_event(p: &[u8]) -> u16 {
+    let w = |o: usize| u16::from_le_bytes([p[o], p[o + 1]]);
+    let r = if w(0) != 6 {
+        rc::BAD_SUBID
+    } else if w(2) != 0 {
+        rc::BAD_RESERVED
+    } else if w(4) != 1 {
+        rc::BAD_DEVICE
+    } else if w(6) != 2 && w(6) != 3 {
+        rc::BAD_STATE
+    } else if w(8) != 0 {
+        6
+    } else if PENDING.load(Ordering::Relaxed) == 0 {
+        rc::CANNOT_ENTER_STATE
+    } else {
+        let target = PENDING.swap(0, Ordering::Relaxed);
+        match enter_state(target) {
+            Ok(()) => {
+                // Back from the suspend: a normal resume.
+                broadcast(8, w(4), w(6));
+                0
+            }
+            Err(e) => e,
+        }
+    };
+    r
+}
+
+/// Put the system into power state `state` (1 standby, 2 suspend, 3
+/// off). rs2 turns the computer off through ACPI S5; standby and suspend
+/// (ACPI S1/S3) would need the firmware's waking vector and every device
+/// set up anew afterwards, which rs2 cannot do yet: they are refused.
+fn enter_state(state: u16) -> Result<(), u16> {
+    match state {
+        3 => {
+            crate::drivers::flush_disks();
+            crate::power::try_power_off();
+            Err(rc::GEN_FAILURE)
+        }
+        _ => Err(rc::CANNOT_ENTER_STATE),
     }
 }

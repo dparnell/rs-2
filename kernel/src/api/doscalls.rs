@@ -197,6 +197,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 995) => super::sysctl::dos_system_service,
         (0, 112) => super::sysctl::dos_query_ras_info,
         (0, 371) => super::sysctl::dos_query_abios_support,
+        // The 16-bit DosQueryABIOSSupport(ULONG reserved): an export of
+        // IBM's kernel itself (not of DOSCALL1), used by SYSINST2.EXE.
+        (0, 443) => super::sysctl::dos_query_abios_support,
         (0, 976) => super::sysctl::dos_perf_sys_call,
         (0, 364) => super::perf::dos_alias_perf_ctrs,
         (0, 365) => super::perf::dos_configure_perf,
@@ -1170,7 +1173,9 @@ fn dos_dev_config(c: &mut Ctx) -> u32 {
     let v: u8 = match item {
         0 => 0,    // DEVINFO_PRINTER
         1 => 1,    // DEVINFO_RS232
-        2 => 1,    // DEVINFO_FLOPPY
+        // DEVINFO_FLOPPY: the diskette drives (DISKCOPY A: B: copies
+        // with one drive when there is only one).
+        2 => (0..2).filter(|&d| crate::drivers::floppy::unit(d).is_some()).count() as u8,
         3 => 1,    // DEVINFO_COPROCESSOR
         4 => 0,    // DEVINFO_SUBMODEL
         5 => 0xfc, // DEVINFO_MODEL (AT)

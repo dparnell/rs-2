@@ -36,7 +36,7 @@ pub struct CachedFs {
 /// `fs` with a cache in front of it, if it is a local volume that can have
 /// one.
 pub fn wrap(fs: Arc<dyn FileSystem>) -> Arc<dyn FileSystem> {
-    if fs.remote_name().is_some() || !matches!(fs.name(), "FAT" | "HPFS" | "JFS") {
+    if fs.remote_name().is_some() || fs.removable() || !matches!(fs.name(), "FAT" | "HPFS" | "JFS") {
         return fs;
     }
     let short = fs.max_component() <= 12;

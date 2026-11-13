@@ -16,6 +16,7 @@ pub mod iso9660;
 pub mod jfsfs;
 pub mod path;
 pub mod redir;
+pub mod removable;
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -131,6 +132,13 @@ pub trait FileSystem: Send + Sync {
     fn remote_name(&self) -> Option<String> {
         None
     }
+    /// A drive for removable media that mounts each medium itself
+    /// (`removable::Removable`).
+    fn removable(&self) -> bool {
+        false
+    }
+    /// Such a drive: forget the volume mounted, the medium may differ.
+    fn forget_medium(&self) {}
 }
 
 pub trait FsFile: Send + Sync {
@@ -319,7 +327,15 @@ pub fn sync_volume(p: &FullPath) -> Result<(), u32> {
 pub fn remount(d: u8) -> Result<(), u32> {
     // No unmount, mount or other remount of the letter meanwhile.
     let _m = MOUNTING.lock();
-    let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;
+    let cur = DRIVES.lock()[d as usize].clone().ok_or(err::INVALID_DRIVE)?;
+    if cur.removable() {
+        // A diskette drive mounts the medium itself when next used.
+        cur.forget_medium();
+        crate::trace!("drive {}: medium forgotten", (b'A' + d) as char);
+        return Ok(());
+    }
+    let dev = cur.device().ok_or(err::INVALID_DRIVE)?;
+    drop(cur);
     // A new medium, or a volume rewritten behind the file system's back.
     if let Some(c) = dev.cache() {
         let _ = c.sync_invalidate();
