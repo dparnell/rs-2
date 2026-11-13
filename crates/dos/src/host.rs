@@ -88,6 +88,12 @@ pub trait Host {
     fn seek(&mut self, h: u32, off: i64, whence: u8) -> Result<u64, u16>;
     /// Truncate or extend the file to `size` bytes.
     fn set_size(&mut self, h: u32, size: u64) -> Result<(), u16>;
+    /// INT 21h AH=5Ch: lock (or unlock) `len` bytes at `off` of an open
+    /// file, no waiting (OS/2: DosSetFileLocks, mandatory for every
+    /// session and OS/2 program). Hosts without locks accept it.
+    fn lock(&mut self, _h: u32, _unlock: bool, _off: u32, _len: u32) -> Result<(), u16> {
+        Ok(())
+    }
     /// (date, time) of an open file.
     fn file_time(&mut self, h: u32) -> Result<(u16, u16), u16>;
     fn set_file_time(&mut self, h: u32, date: u16, time: u16) -> Result<(), u16>;

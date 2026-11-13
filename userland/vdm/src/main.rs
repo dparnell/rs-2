@@ -29,6 +29,8 @@ use os2::*;
 os2::entry!(main);
 
 unsafe extern "C" {
+    #[link_name = "DOSCALLS.428"]
+    fn DosSetFileLocks(hf: u32, unlock: *const u32, lock: *const u32, timeout: u32, flags: u32) -> APIRET;
     #[link_name = "RS2API.4"]
     fn Rs2DebugTrace(text: *const u8) -> u32;
     #[link_name = "RS2API.13"]
@@ -125,6 +127,11 @@ struct Os2Host {
     print_separate: bool,
     /// WINOS2_SCREEN=WxH: the size of a windowed Win-OS/2 desktop.
     display: Option<(u32, u32)>,
+    /// A 64 KB-aligned buffer for DOS file reads and writes: a 32-bit
+    /// DosRead/DosWrite goes in pieces at the buffer's 64 KB boundaries,
+    /// and a byte-range lock must fail a DOS call (one piece on OS/2)
+    /// entirely.
+    io: *mut u8,
 }
 
 fn convert(e: &VdmEvent) -> Option<Event> {
@@ -137,6 +144,21 @@ fn convert(e: &VdmEvent) -> Option<Event> {
 }
 
 impl Os2Host {
+    /// The aligned I/O buffer for a transfer of `len` bytes (one piece).
+    fn io_buffer(&mut self, len: usize) -> Option<*mut u8> {
+        if len == 0 || len > 0xffff {
+            return None;
+        }
+        if self.io.is_null() {
+            let mut p = core::ptr::null_mut();
+            if unsafe { DosAllocMem(&mut p, 0x10000, PAG_COMMIT | PAG_READ | PAG_WRITE) } != 0 {
+                return None;
+            }
+            self.io = p;
+        }
+        Some(self.io)
+    }
+
     fn read_input(&mut self, ms: u32) {
         let mut buf = [VdmEvent::default(); 64];
         let mut n = 0;
@@ -476,13 +498,27 @@ impl Host for Os2Host {
     }
     fn read(&mut self, h: u32, buf: &mut [u8]) -> Result<usize, u16> {
         let mut n = 0;
-        let rc = unsafe { DosRead(h, buf.as_mut_ptr(), buf.len() as u32, &mut n) };
+        let io = self.io_buffer(buf.len());
+        let rc = unsafe { DosRead(h, io.unwrap_or(buf.as_mut_ptr()), buf.len() as u32, &mut n) };
+        if let Some(p) = io {
+            unsafe { core::ptr::copy_nonoverlapping(p, buf.as_mut_ptr(), n as usize) };
+        }
         if rc != 0 { Err(rc as u16) } else { Ok(n as usize) }
     }
     fn write(&mut self, h: u32, buf: &[u8]) -> Result<usize, u16> {
         let mut n = 0;
-        let rc = unsafe { DosWrite(h, buf.as_ptr(), buf.len() as u32, &mut n) };
+        let io = self.io_buffer(buf.len());
+        if let Some(p) = io {
+            unsafe { core::ptr::copy_nonoverlapping(buf.as_ptr(), p, buf.len()) };
+        }
+        let rc = unsafe { DosWrite(h, io.unwrap_or(buf.as_ptr() as *mut u8), buf.len() as u32, &mut n) };
         if rc != 0 { Err(rc as u16) } else { Ok(n as usize) }
+    }
+    fn lock(&mut self, h: u32, unlock: bool, off: u32, len: u32) -> Result<(), u16> {
+        let r = [off, len];
+        let (pu, pl) = if unlock { (r.as_ptr(), core::ptr::null()) } else { (core::ptr::null(), r.as_ptr()) };
+        let rc = unsafe { DosSetFileLocks(h, pu, pl, 0, 0) };
+        if rc != 0 { Err(rc as u16) } else { Ok(()) }
     }
     fn seek(&mut self, h: u32, off: i64, whence: u8) -> Result<u64, u16> {
         let mut pos = 0;
@@ -812,7 +848,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { audio: 0, audio_written: 0, pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new(), lpt: [(0, 0); 3], print_timeout: cfg.print_timeout as u64 * 1_000_000, print_separate: cfg.print_separate };
+    let mut host = Os2Host { audio: 0, audio_written: 0, pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new(), lpt: [(0, 0); 3], print_timeout: cfg.print_timeout as u64 * 1_000_000, print_separate: cfg.print_separate, io: core::ptr::null_mut() };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

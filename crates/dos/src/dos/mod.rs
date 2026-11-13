@@ -69,6 +69,7 @@ pub mod err {
     pub const NOT_SAME_DEVICE: u16 = 17;
     pub const NO_MORE_FILES: u16 = 18;
     pub const SHARING_VIOLATION: u16 = 32;
+    pub const LOCK_VIOLATION: u16 = 33;
     pub const FILE_EXISTS: u16 = 80;
 }
 
