@@ -182,6 +182,17 @@ fn is_device(h: &Handle) -> bool {
 /// the low words and never the lengths a driver used); handlers that know
 /// how much they used store that afterwards.
 fn ioctl(c: &mut Ctx, r: &Req) -> u32 {
+    if super::tracing() {
+        crate::trace!("    handle {} category {:#x} function {:#x} parameters {:#x}+{:#x} data {:#x}+{:#x}", r.handle, r.category, r.function, r.params, r.params_len, r.data, r.data_len);
+    }
+    // Category 8 with handle -1: the drive is the parameters' second byte
+    // (0 = A:), as IBM's kernel takes it.
+    if r.category == 8 && r.handle & 0xffff == 0xffff {
+        let Some(d) = c.read_u8(r.params + 1) else { return err::INVALID_PARAMETER };
+        let Some(dev) = crate::fs::drive(d).and_then(|fs| fs.device()) else { return 15 }; // ERROR_INVALID_DRIVE
+        let rc = logical(c, &crate::fs::Dasd::new(d, dev), r);
+        return if rc == err::INVALID_FUNCTION { dd_error(8, status::UNKNOWN_COMMAND) } else { rc };
+    }
     let Some(h) = super::file::get(c, r.handle) else { return err::INVALID_HANDLE };
     if !is_device(&h) {
         return dispatch(c, r);
@@ -192,6 +203,8 @@ fn ioctl(c: &mut Ctx, r: &Req) -> u32 {
             8 => matches!(r.function, 0..=4 | 0x20..=0x22),
             // rs2's LBA functions (0xA0-0xA2) included.
             9 => matches!(r.function, 0 | 1 | 0xa0..=0xa2),
+            // (Category 9 function 0x6A, rediscover, is the kernel's too,
+            // above 0x40.)
             0xb => matches!(r.function, 1 | 2),
             _ => false,
         };
@@ -314,6 +327,20 @@ fn phys_request(c: &Ctx, n: u32, r: &Req) -> u32 {
                 crate::fs::namecache::clear_all();
             }
             0
+        }
+        // Rediscover (LVM; the kernel's own, IBM's w_DynamicRediscover):
+        // parameter the number of drive letters to make for new volumes
+        // (at most 24), data a word; both lengths must be non-zero. rs2
+        // gives volumes their letters as it finds them.
+        0x6a => {
+            if r.params_len == 0 || r.data_len == 0 {
+                return err::INVALID_PARAMETER;
+            }
+            match c.read_u8(r.params) {
+                Some(n) if n >= 0x19 => 13, // ERROR_INVALID_DATA
+                Some(_) => 0,
+                None => err::INVALID_ADDRESS,
+            }
         }
         // PDSK_VERIFYPHYSTRACK: TRACKLAYOUT; the sectors must read.
         0x65 => {

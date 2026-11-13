@@ -540,8 +540,10 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   is refused: rs2 has no ring-0 pointer draw routine to give a mouse
   driver); 4 all; 7 all of IBM MOUSE.SYS's on the session's mouse state
   (MOU_VER answers without data, as IBM's does); 8 all but the diskette
-  ones (DSK_UNLOCKEJECTMEDIA, DSK_DISKETTECONTROL, DSK_QUERYMEDIASENSE);
-  9 lock, unlock, verify and the track functions; 0xA
+  ones (DSK_UNLOCKEJECTMEDIA, DSK_DISKETTECONTROL, DSK_QUERYMEDIASENSE),
+  also on handle -1 with the drive in the parameters; 9 lock, unlock,
+  verify, the track functions and the kernel's rediscover (0x6A, which
+  IBM's LVM VCU.EXE calls); 0xA
   MON_REGISTERMONITOR on KBD$ and MOUSE$; 0xB flush input/output and
   DEV_QUERYMONSUPPORT on the character devices; 0xC on `APM$` (IBM
   APM.SYS's interface on rs2's ACPI power code: power status on line
@@ -553,7 +555,8 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   fonts under UEFI) and `TESTCFG$` (IBM TESTCFG.SYS's: ISA bus, copies
   of the adapter ROM area C0000-FFFFF, port IN/OUT at 0x100 and above,
   refused on ports a driver owns and on PCI configuration 0xCF8-0xCFF;
-  no POS or EISA IDs; an empty SCSI inquiry). APITEST checks them.
+  no POS or EISA IDs; the SCSI inquiry lists the CD drives, which IBM's
+  CDINST.EXE needs to go on to ask for the CD). APITEST checks them.
 
 ## DOS sessions
 

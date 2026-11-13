@@ -862,6 +862,12 @@ fn ioctls(b: &Buf) {
         check("DSK_VERIFYTRACK", r == 0);
         unsafe { DosClose(hd) };
     }
+    // Category 8 with handle -1: the drive in the parameters' second byte.
+    let mut bpb = [0u8; 36];
+    let r1 = ioctl(0xffff_ffff, 8, 0x63, &mut [0, 2], &mut bpb).0;
+    let r2 = ioctl(0xffff_ffff, 8, 0x69, &mut [0, 2, 0, 0, 0, 0, 0, 0], &mut [0u8; 5]).0;
+    let r3 = ioctl(0xffff_ffff, 8, 0x63, &mut [0, 25], &mut [0u8; 36]).0;
+    check("category 8 on handle -1 (drive C:, unknown function, no drive)", r1 == 0 && u16::from_le_bytes([bpb[0], bpb[1]]) == 512 && r2 == 22 && r3 == 15);
     let mut hp = [0u8; 2];
     if unsafe { DosPhysicalDisk(2, hp.as_mut_ptr(), 2, b"1:\0".as_ptr() as *mut u8, 3) } == 0 {
         let h = u16::from_le_bytes(hp) as u32;
@@ -872,6 +878,10 @@ fn ioctls(b: &Buf) {
         let r3 = ioctl(h, 9, 1, &mut [0], &mut []).0;
         let r4 = ioctl(h, 9, 0x30, &mut [0], &mut []).0;
         check("PDSK lock, verify track, unlock, kernel function", r1 == 0 && r2 == 0 && r3 == 0 && r4 == 1);
+        // Rediscover (as IBM's VCU.EXE calls it): no new drive letters.
+        let r1 = ioctl(h, 9, 0x6a, &mut [0], &mut [0u8; 2]).0;
+        let r2 = ioctl(h, 9, 0x6a, &mut [0x30], &mut [0u8; 2]).0;
+        check("PDSK rediscover", r1 == 0 && r2 == 13);
         unsafe { DosPhysicalDisk(3, null_mut(), 0, hp.as_mut_ptr(), 2) };
     }
 }

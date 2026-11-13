@@ -84,7 +84,9 @@ fn ioctl(h: u32, cat: u32, func: u32, params: &[u8], data: &mut [u8]) -> Result<
     let mut p = Vec::from(b"CD01".as_slice());
     p.extend_from_slice(params);
     let (mut pl, mut dl) = (p.len() as u32, data.len() as u32);
-    let rc = unsafe { DosDevIOCtl(h, cat, func, p.as_mut_ptr(), pl, &mut pl, data.as_mut_ptr(), dl, &mut dl) };
+    // No data: a NULL buffer (DosDevIOCtl refuses a buffer of length 0).
+    let dp = if data.is_empty() { core::ptr::null_mut() } else { data.as_mut_ptr() };
+    let rc = unsafe { DosDevIOCtl(h, cat, func, p.as_mut_ptr(), pl, &mut pl, dp, dl, &mut dl) };
     if rc == 0 { Ok(dl) } else { Err(rc) }
 }
 
