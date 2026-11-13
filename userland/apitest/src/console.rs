@@ -778,6 +778,13 @@ fn ioctls(b: &Buf) {
             let r2 = ioctl(h, 0x80, 0x50, &mut [0u8; 4], &mut [0u8; 4]).0;
             let r3 = ioctl(h, 0x8, 0x60, &mut [0u8; 4], &mut [0u8; 4]).0;
             check("TESTCFG$ no POS IDs, unknown function, other category", r1 == 0xff13 && r2 == 0xff13 && r3 == 87);
+            // SCSI inquiry of the CD-ROM units (type 5): a count, then
+            // 36-byte INQUIRY records.
+            let mut q = [0u8; 0x482];
+            let rc = ioctl(h, 0x80, 0x63, &mut [0, 0, 0, 0, 5], &mut q).0;
+            let n = u16::from_le_bytes([q[0], q[1]]);
+            println!("TESTCFG$ CD-ROM units: {n}");
+            check("TESTCFG$ SCSI inquiry of CD-ROM units", rc == 0 && n <= 32 && (n == 0 || q[2] & 0x1f == 5));
             unsafe { DosClose(h) };
         }
         Err(e) => check(&alloc::format!("TESTCFG$ open ({e})"), false),

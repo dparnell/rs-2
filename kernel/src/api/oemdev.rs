@@ -316,13 +316,45 @@ pub fn testcfg(c: &Ctx, r: &Req) -> u32 {
         }
         0x61 | 0x62 => bad,
         0x63 => {
-            if !zero_param() || c.read_u8(r.params + 4).is_none() {
+            let Some(kind) = c.read_u8(r.params + 4) else { return bad };
+            if !zero_param() {
                 return bad;
             }
-            if c.write_u16(r.data, 0) { 0 } else { bad }
+            let found = if kind == 5 { cd_inquiry() } else { Vec::new() };
+            let mut out = Vec::with_capacity(2 + found.len() * 36);
+            out.extend_from_slice(&(found.len() as u16).to_le_bytes());
+            for q in &found {
+                out.extend_from_slice(q);
+            }
+            if c.write(r.data, &out) { 0 } else { bad }
         }
         _ => bad,
     }
+}
+
+/// SCSI INQUIRY data (36 bytes) of the CD drives (at most 32), asked of
+/// the drives; one that cannot be asked gets a plain CD-ROM record.
+/// IBM's TESTCFG.SYS asks the units of that SCSI type the adapter
+/// drivers have; CDINST.EXE takes none as "no CD-ROM drive".
+fn cd_inquiry() -> Vec<[u8; 36]> {
+    let mut v = Vec::new();
+    for d in 0..26u8 {
+        let Some(dev) = crate::fs::drive(d).and_then(|fs| fs.device()) else { continue };
+        if dev.sector_size() != 2048 || v.len() == 32 {
+            continue;
+        }
+        let mut q = [0u8; 36];
+        let asked = dev.packet(&[0x12, 0, 0, 0, 36, 0], &mut q).is_ok_and(|n| n >= 5) && q[0] & 0x1f == 5;
+        if !asked {
+            q = [0x20; 36];
+            q[..8].copy_from_slice(&[5, 0x80, 2, 2, 31, 0, 0, 0]);
+            q[8..11].copy_from_slice(b"rs2");
+            q[16..22].copy_from_slice(b"CD-ROM");
+            q[32..36].copy_from_slice(b"1.0 ");
+        }
+        v.push(q);
+    }
+    v
 }
 
 // ---- APM$ ----
