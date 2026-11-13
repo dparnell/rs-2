@@ -211,7 +211,7 @@ pub fn reprioritize(t: &Arc<Thread>) {
 pub fn wake(t: &Arc<Thread>) {
     let i = {
         let mut s = SCHED.lock();
-        if t.state() == State::Ready || t.state() == State::Running || t.state() == State::Dead {
+        if matches!(t.state(), State::Ready | State::Running | State::Dead | State::New) {
             return;
         }
         t.set_state(State::Ready);
@@ -229,9 +229,31 @@ pub fn start(t: Arc<Thread>) {
 
 /// Block the current thread until woken (or until `deadline` tick).
 pub fn block(deadline: Option<u64>) {
+    block_inner(deadline, false);
+}
+
+/// [`block`] that does not go to sleep when the thread has been told to
+/// end or interrupted. The flag is looked at under the scheduler lock:
+/// whoever sets it then calls [`wake`], which takes the same lock, so one
+/// of the two sees the other (a check before marking the thread blocked
+/// alone can miss a kill made on another CPU in between).
+pub fn block_interruptible(deadline: Option<u64>) {
+    block_inner(deadline, true);
+}
+
+fn block_inner(deadline: Option<u64>, interruptible: bool) {
     let t = current();
     {
         let mut s = SCHED.lock();
+        if interruptible && (t.exit_requested() || t.interrupted()) {
+            if t.state() == State::Ready {
+                for q in s.ready.iter_mut() {
+                    q.retain(|x| !Arc::ptr_eq(x, &t));
+                }
+            }
+            t.set_state(State::Running);
+            return;
+        }
         // Woken between deciding to block and getting here (callers mark
         // themselves blocked under their wait queue's lock): it is already
         // on the run queue. Take it off again and carry on, so it is never
@@ -268,7 +290,7 @@ pub fn sleep_ms(ms: u64) {
     let deadline = irq::ticks().saturating_add(ms.saturating_mul(irq::HZ) / 1000);
     let t = current();
     while irq::ticks() < deadline && !t.exit_requested() && !t.interrupted() {
-        block(Some(deadline));
+        block_interruptible(Some(deadline));
     }
 }
 
@@ -303,9 +325,8 @@ pub fn exit_current() -> ! {
 /// next return to user mode.
 pub fn kill(t: &Arc<Thread>) {
     t.request_exit();
-    if t.state() == State::Blocked || t.state() == State::Suspended {
-        wake(t);
-    }
+    // Always through the scheduler lock (see `block_interruptible`).
+    wake(t);
 }
 
 /// Called from the timer interrupt on every CPU.
@@ -515,12 +536,10 @@ fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     let (pp, np) = (prev.process(), next.process());
     crate::api::debug::switch_in(np.as_deref());
     let same = matches!((&pp, &np), (Some(a), Some(b)) if Arc::ptr_eq(a, b));
-    if let Some(pp) = &pp {
-        if !same {
-            // This CPU leaves the previous address space (TLB shootdowns).
-            pp.cpus.fetch_and(!smp::this().bit(), Ordering::SeqCst);
-        }
-    }
+    // This CPU leaves the previous address space (TLB shootdowns) once
+    // CR3 no longer points at it: the space's tables may be freed by
+    // another CPU as soon as the bit is clear (vm.rs, AddressSpace::drop).
+    let leave = pp.as_ref().filter(|_| !same).map(|pp| pp.cpus.clone());
     match np {
         Some(p) => {
             // With thread-local memory this CPU runs on its own copies of
@@ -548,5 +567,8 @@ fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
                 unsafe { crate::arch::write_cr3(k) };
             }
         }
+    }
+    if let Some(cpus) = leave {
+        cpus.fetch_and(!smp::this().bit(), Ordering::SeqCst);
     }
 }

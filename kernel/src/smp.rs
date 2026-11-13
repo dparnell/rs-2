@@ -59,6 +59,10 @@ pub struct PerCpu {
     pub space_root: AtomicU64,
     /// Debug registers hold a process's watchpoints (api/debug.rs).
     pub dr7_loaded: AtomicBool,
+    /// TLB flushes asked of this CPU (a generation count) and the last one
+    /// it did: see [`tlb_shootdown`].
+    pub tlb_req: AtomicU64,
+    pub tlb_done: AtomicU64,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
@@ -85,6 +89,8 @@ impl PerCpu {
             cur_class: AtomicU8::new(IDLE_CLASS),
             space_root: AtomicU64::new(0),
             dr7_loaded: AtomicBool::new(false),
+            tlb_req: AtomicU64::new(0),
+            tlb_done: AtomicU64::new(0),
             current: UnsafeCell::new(None),
             idle: UnsafeCell::new(None),
             switched_from: UnsafeCell::new(None),
@@ -228,29 +234,56 @@ pub fn kick(c: &PerCpu) {
     }
 }
 
-static SHOOTDOWN: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
-static ACKS: AtomicU32 = AtomicU32::new(0);
-
 /// Flush the TLBs of the CPUs in `mask` (other than this one) and wait
 /// until they have.
+///
+/// Each CPU has a request counter and a done counter. The caller bumps
+/// the target's request count and sends an IPI; the target flushes and
+/// records the count it saw. A CPU that spins for a lock with interrupts
+/// disabled (API code runs with IF=0) cannot take the IPI, and the lock's
+/// holder may be the one waiting here: so every spin loop in the kernel
+/// (`SpinLock::lock`, this wait itself) calls [`service_tlb`], which does
+/// the flush the IPI would have done. Several CPUs may shoot down at once.
 pub fn tlb_shootdown(mask: u64) {
     let me = this().bit();
-    let targets: alloc::vec::Vec<&PerCpu> = online().filter(|c| mask & c.bit() != 0 && c.bit() != me).collect();
-    if targets.is_empty() {
-        return;
+    let mut targets: [(u8, u64); MAX_CPUS] = [(0, 0); MAX_CPUS];
+    let mut n = 0;
+    for c in online() {
+        if mask & c.bit() != 0 && c.bit() != me {
+            let g = c.tlb_req.fetch_add(1, Ordering::SeqCst) + 1;
+            targets[n] = (c.index() as u8, g);
+            n += 1;
+        }
     }
-    let _g = SHOOTDOWN.lock();
-    ACKS.store(0, Ordering::SeqCst);
-    for c in &targets {
-        send_ipi(c, IPI_TLB_FLUSH);
+    for &(i, _) in &targets[..n] {
+        send_ipi(cpu(i as usize), IPI_TLB_FLUSH);
     }
     let start = arch::rdtsc();
-    while ACKS.load(Ordering::SeqCst) < targets.len() as u32 {
-        core::hint::spin_loop();
-        if arch::rdtsc().wrapping_sub(start) > 20_000_000_000 {
-            crate::log::print_unlocked(format_args!("[smp: TLB shootdown not acknowledged]\n"));
-            break;
+    let mut warned = false;
+    for &(i, g) in &targets[..n] {
+        let c = cpu(i as usize);
+        while c.tlb_done.load(Ordering::Acquire) < g {
+            core::hint::spin_loop();
+            service_tlb();
+            if !warned && arch::rdtsc().wrapping_sub(start) > 20_000_000_000 {
+                warned = true;
+                crate::log::print_unlocked(format_args!("[smp: TLB shootdown of cpu {i} not acknowledged yet]\n"));
+            }
         }
+    }
+}
+
+/// Do a TLB flush other CPUs asked of this one (see [`tlb_shootdown`]).
+#[inline]
+pub fn service_tlb() {
+    if !GS_READY.load(Ordering::Relaxed) {
+        return;
+    }
+    let c = this();
+    let r = c.tlb_req.load(Ordering::Acquire);
+    if c.tlb_done.load(Ordering::Relaxed) < r {
+        unsafe { arch::write_cr3(arch::read_cr3()) };
+        c.tlb_done.store(r, Ordering::Release);
     }
 }
 
@@ -258,10 +291,7 @@ pub fn tlb_shootdown(mask: u64) {
 pub fn ipi(vector: u8, f: &crate::arch::idt::TrapFrame) {
     match vector {
         IPI_DUMP => crate::debug::dump_cpu(f),
-        IPI_TLB_FLUSH => {
-            unsafe { arch::write_cr3(arch::read_cr3()) };
-            ACKS.fetch_add(1, Ordering::SeqCst);
-        }
+        IPI_TLB_FLUSH => service_tlb(),
         IPI_HALT => {
             arch::disable_interrupts();
             arch::halt_forever();

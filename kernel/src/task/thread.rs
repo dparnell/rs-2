@@ -21,6 +21,8 @@ pub enum State {
     Blocked = 2,
     Suspended = 3,
     Dead = 4,
+    /// Created, not yet started (`sched::start`): wake-ups pass it by.
+    New = 5,
 }
 
 #[repr(C, align(16))]
@@ -212,7 +214,7 @@ impl Thread {
             NEXT_ID.fetch_add(1, Ordering::Relaxed),
             tid,
             Some(Arc::downgrade(process)),
-            State::Blocked,
+            State::New,
             2 << 8,
             false,
         ));
@@ -263,7 +265,8 @@ impl Thread {
             1 => State::Running,
             2 => State::Blocked,
             3 => State::Suspended,
-            _ => State::Dead,
+            4 => State::Dead,
+            _ => State::New,
         }
     }
 

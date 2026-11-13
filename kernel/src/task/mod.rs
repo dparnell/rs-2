@@ -67,7 +67,11 @@ impl WaitQueue {
                 // here and block() is not lost.
                 me.set_state(State::Blocked);
             }
-            sched::block(deadline);
+            if interruptible {
+                sched::block_interruptible(deadline);
+            } else {
+                sched::block(deadline);
+            }
             self.waiters.lock().retain(|t| !Arc::ptr_eq(t, &me));
             if interruptible && (me.exit_requested() || me.interrupted()) {
                 return ready();

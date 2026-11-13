@@ -40,9 +40,12 @@ impl<T> SpinLock<T> {
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            // Wait on plain reads (test and test-and-set).
+            // Wait on plain reads (test and test-and-set). Interrupts are
+            // off: answer TLB shootdowns meanwhile (the holder may be
+            // waiting for this CPU's flush).
             while self.locked.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
+                crate::smp::service_tlb();
             }
         }
         held().fetch_add(1, Ordering::Relaxed);

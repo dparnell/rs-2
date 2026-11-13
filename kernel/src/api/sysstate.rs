@@ -297,7 +297,7 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
                 o.u32(0);
                 o.u8(match t.state() {
                     State::Ready => 1,
-                    State::Blocked => 2,
+                    State::Blocked | State::New => 2,
                     State::Suspended => 3,
                     State::Running => 5,
                     State::Dead => 0,

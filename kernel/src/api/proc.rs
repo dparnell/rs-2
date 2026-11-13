@@ -450,9 +450,7 @@ pub fn dos_kill_thread(c: &mut Ctx) -> u32 {
             // SIGCHLD. With no handler taking it the thread ends.
             t.kill_pending.store(true, Ordering::Release);
             t.interrupt();
-            if t.state() == State::Blocked || t.state() == State::Suspended {
-                sched::wake(&t);
-            }
+            sched::wake(&t);
             0
         }
         None => err::INVALID_THREADID,
