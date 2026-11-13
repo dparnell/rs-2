@@ -208,7 +208,11 @@ impl Drop for SharedMem {
                 phys::free(f);
             }
         }
-        shared_arena().lock().remove(&self.base);
+        // Device objects and aliases sit in a private arena (never reserved
+        // here): their base may be another object's reservation by now.
+        if !self.device {
+            shared_arena().lock().remove(&self.base);
+        }
     }
 }
 
@@ -649,6 +653,12 @@ impl AddressSpace {
         };
         if base >= HIGH_BASE {
             let a = shared_arena().lock();
+            // A shared reservation made since the check above (another
+            // CPU) takes precedence.
+            let span = size.next_multiple_of(TILE);
+            if a.iter().any(|(&b, &s)| base < b + s && b < base + span) {
+                return Err(VmError::InvalidAddress);
+            }
             let mut ends = high_private_ends().lock();
             let e = ends.entry(self.root).or_insert(0);
             *e = (*e).max(base + size.next_multiple_of(TILE));

@@ -24,6 +24,11 @@ const DOSSUB_GROW: u32 = 0x02;
 const DOSSUB_SPARSE_OBJ: u32 = 0x04;
 const DOSSUB_SERIALIZE: u32 = 0x08;
 
+/// The heaps' lists live in user memory, read and written a word at a
+/// time: every operation runs under this lock (threads, or processes
+/// sharing a heap, on other CPUs). DOSSUB_SERIALIZE asks for no more.
+static SUB: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+
 struct Heap {
     base: u32,
     size: u32,
@@ -91,6 +96,7 @@ fn insert_free(c: &Ctx, h: &Heap, off: u32, len: u32) -> Result<(), u32> {
 
 /// DosSubSetMem(pbBase, flag, cb)
 pub fn dos_sub_set_mem(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (base, flags, cb) = (c.arg(0), c.arg(1), c.arg(2));
     set_mem(c, base, flags, cb)
 }
@@ -139,6 +145,7 @@ fn set_mem(c: &Ctx, base: u32, flags: u32, cb: u32) -> u32 {
 
 /// DosSubAllocMem(pbBase, ppb, cb)
 pub fn dos_sub_alloc_mem(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (base, ppb, cb) = (c.arg(0), c.arg(1), c.arg(2));
     match alloc(c, base, cb) {
         Ok(a) => {
@@ -182,6 +189,7 @@ fn alloc(c: &Ctx, base: u32, cb: u32) -> Result<u32, u32> {
 
 /// DosSubFreeMem(pbBase, pb, cb)
 pub fn dos_sub_free_mem(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (base, pb, cb) = (c.arg(0), c.arg(1), c.arg(2));
     free(c, base, pb, cb)
 }
@@ -203,6 +211,7 @@ fn free(c: &Ctx, base: u32, pb: u32, cb: u32) -> u32 {
 
 /// DosSubUnsetMem(pbBase)
 pub fn dos_sub_unset_mem(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     match open(c, c.arg(0)) {
         Ok(_) => 0,
         Err(e) => e,
@@ -230,6 +239,7 @@ fn round4(cb: u32) -> u32 {
 /// DosSubSet(sel, fFlags, usSize): 1 = initialise, 0 = new (larger)
 /// size; a size of 0 is 64 KB, at least 12 bytes.
 pub fn dos16_sub_set(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (sel, flags, cb) = (c.arg(0), c.arg(1), c.arg(2));
     if flags & 0xfffe != 0 {
         return err::DOSSUB_BADFLAG;
@@ -277,6 +287,7 @@ pub fn dos16_sub_set(c: &mut Ctx) -> u32 {
 
 /// DosSubAlloc(sel, pusOffset, usSize): the first free block large enough.
 pub fn dos16_sub_alloc(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (sel, poff, cb) = (c.arg(0), c.ptr(1), c.arg(2));
     let base = seg_base(c, sel);
     let rd = |o: u16| c.read_u16(base + o as u32).unwrap_or(0);
@@ -313,6 +324,7 @@ pub fn dos16_sub_alloc(c: &mut Ctx) -> u32 {
 /// DosSubFree(sel, usOffset, usSize): back into the free list, merged
 /// with its neighbours.
 pub fn dos16_sub_free(c: &mut Ctx) -> u32 {
+    let _g = SUB.lock();
     let (sel, off, cb) = (c.arg(0), c.arg(1) as u16, c.arg(2));
     let base = seg_base(c, sel);
     let rd = |o: u16| c.read_u16(base + o as u32).unwrap_or(0);

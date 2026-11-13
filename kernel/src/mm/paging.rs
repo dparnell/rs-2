@@ -38,12 +38,18 @@ fn walk(root: u64, va: u64, create: bool, inter: u64) -> Option<&'static mut u64
                 return None;
             }
             let p = phys::alloc()?;
-            *e = p | PRESENT | WRITABLE | inter;
+            // The zeroed table before the entry that publishes it (other
+            // CPUs walk the tables without the space lock).
+            core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::Release);
+            unsafe { (e as *mut u64).write_volatile(p | PRESENT | WRITABLE | inter) };
         } else {
             if *e & HUGE != 0 {
                 return None;
             }
-            *e |= inter;
+            // Lookups (inter 0) do not write.
+            if *e & inter != inter {
+                *e |= inter;
+            }
         }
         t = *e & ADDR_MASK;
     }
