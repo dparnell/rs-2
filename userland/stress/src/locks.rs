@@ -13,8 +13,27 @@ use os2::*;
 use crate::api::*;
 use crate::{check, counters, join, ms, start_child, thread, wait_child};
 
-const FILE: &[u8] = b"C:\\STRESSL2.TMP\0";
-const COPY: &[u8] = b"C:\\STRESSL3.TMP\0";
+/// The test files, on drive C: or in the directory STRESSDIR names (to
+/// run the checks on another file system).
+fn file(name: &str) -> alloc::vec::Vec<u8> {
+    let mut v = alloc::vec::Vec::new();
+    let mut p: *const u8 = null();
+    if unsafe { DosScanEnv(b"STRESSDIR\0".as_ptr(), &mut p) } == 0 && !p.is_null() {
+        let mut i = 0;
+        while unsafe { *p.add(i) } != 0 {
+            v.push(unsafe { *p.add(i) });
+            i += 1;
+        }
+    } else {
+        v.extend_from_slice(b"C:");
+    }
+    if !v.ends_with(b"\\") {
+        v.push(b'\\');
+    }
+    v.extend_from_slice(name.as_bytes());
+    v.push(0);
+    v
+}
 const HELD: &[u8] = b"\\SEM32\\STRESSLK\\HELD\0";
 const GO: &[u8] = b"\\SEM32\\STRESSLK\\GO\0";
 const SIZE: u32 = 200_000;
@@ -23,7 +42,7 @@ const SIZE: u32 = 200_000;
 fn open(create: bool) -> u32 {
     let (mut h, mut act) = (0, 0);
     let flags = if create { 0x12 } else { 0x01 };
-    let rc = unsafe { DosOpen(FILE.as_ptr(), &mut h, &mut act, 0, 0, flags, 0x42, null_mut()) };
+    let rc = unsafe { DosOpen(file("STRESSL2.TMP").as_ptr(), &mut h, &mut act, 0, 0, flags, 0x42, null_mut()) };
     if rc != 0 {
         println!("  DosOpen rc {rc}");
     }
@@ -107,6 +126,25 @@ pub fn child_inherited(args: &[alloc::string::String]) -> u32 {
     if n != 0 { 1000 + n } else { rc }
 }
 
+/// `STRESS -child lockwait PATH MS`: lock the first 100 bytes of PATH
+/// exclusively for MS milliseconds (to try other programs, such as
+/// IBM CMD's COPY and TYPE, against a lock: `DETACH`).
+pub fn child_wait(args: &[alloc::string::String]) -> u32 {
+    let (Some(path), Some(t)) = (args.first(), args.get(1).and_then(|s| s.parse::<u32>().ok())) else { return 87 };
+    let mut name = alloc::vec::Vec::from(path.as_bytes());
+    name.push(0);
+    let (mut h, mut act) = (0, 0);
+    // Read-only, deny none: other programs may open it to write too.
+    let rc = unsafe { DosOpen(name.as_ptr(), &mut h, &mut act, 0, 0, 0x01, 0x40, null_mut()) };
+    if rc != 0 {
+        return rc;
+    }
+    let rc = lock(h, 0, 100, 0);
+    println!("lockwait: {} locked ({rc}) for {t} ms", path);
+    unsafe { DosSleep(t) };
+    rc
+}
+
 pub fn run() {
     let before = counters().file_locks;
     let mut mem: *mut u8 = null_mut();
@@ -116,6 +154,7 @@ pub fn run() {
         return;
     }
     let buf = mem;
+    let (f, g) = (file("STRESSL2.TMP"), file("STRESSL3.TMP"));
     let h1 = open(true);
     let (rc, n) = wr(h1, 0, buf, SIZE);
     check("locks: test file written", rc == 0 && n == SIZE);
@@ -182,11 +221,11 @@ pub fn run() {
     WAIT_TIMEOUT.store(u32::MAX, Ordering::Relaxed);
     let t = thread(waiter, h2);
     unsafe { DosSleep(200) };
-    let f = [100u32, 10];
-    let rc = unsafe { DosCancelLockRequest(h2, f.as_ptr()) };
+    let cr = [100u32, 10];
+    let rc = unsafe { DosCancelLockRequest(h2, cr.as_ptr()) };
     join(t);
     check("DosCancelLockRequest ends the wait with ERROR_INTERRUPT", rc == 0 && WAIT_RC.load(Ordering::Relaxed) == 95);
-    check("DosCancelLockRequest with nothing waiting", unsafe { DosCancelLockRequest(h2, f.as_ptr()) } == 173);
+    check("DosCancelLockRequest with nothing waiting", unsafe { DosCancelLockRequest(h2, cr.as_ptr()) } == 173);
     WAIT_TIMEOUT.store(5000, Ordering::Relaxed);
     let t0 = ms();
     let t = thread(waiter, h2);
@@ -211,10 +250,10 @@ pub fn run() {
     check("owner sets the size", unsafe { DosSetFileSize(h1, 99_000) } == 0 && unsafe { DosSetFileSize(h1, SIZE) } == 0);
 
     // DosCopy reads through a handle of its own.
-    check("DosCopy of a locked file", unsafe { DosCopy(FILE.as_ptr(), COPY.as_ptr(), 1) } == 33);
+    check("DosCopy of a locked file", unsafe { DosCopy(f.as_ptr(), g.as_ptr(), 1) } == 33);
     check("unlock [100000,100010)", unlock(h1, 100_000, 10) == 0);
-    check("DosCopy once unlocked", unsafe { DosCopy(FILE.as_ptr(), COPY.as_ptr(), 1) } == 0);
-    unsafe { DosDelete(COPY.as_ptr()) };
+    check("DosCopy once unlocked", unsafe { DosCopy(f.as_ptr(), g.as_ptr(), 1) } == 0);
+    unsafe { DosDelete(g.as_ptr()) };
 
     // Locks go with the last handle to the open file.
     let mut h1b = u32::MAX;
@@ -262,7 +301,7 @@ pub fn run() {
     unsafe {
         DosClose(h2);
         DosClose(h1);
-        DosDelete(FILE.as_ptr());
+        DosDelete(f.as_ptr());
         DosFreeMem(mem);
     }
     check("locks: none left", counters().file_locks == before);

@@ -115,6 +115,7 @@ pub struct FileLocks {
 
 impl Drop for FileLocks {
     fn drop(&mut self) {
+        TOTAL.fetch_sub(*self.held.get_mut(), Ordering::Relaxed);
         let mut m = FILES.lock();
         if m.get(&self.key).is_some_and(|w| w.strong_count() == 0) {
             m.remove(&self.key);
@@ -128,6 +129,8 @@ static FILES: SpinLock<BTreeMap<String, Weak<FileLocks>>> = SpinLock::new(BTreeM
 /// it with a `State` lock held: its waiters' checks take that lock.
 static RELEASED: WaitQueue = WaitQueue::new();
 static NEXT_WAITER: AtomicU64 = AtomicU64::new(1);
+/// Locks held in the whole system (process exit skips the search at 0).
+static TOTAL: AtomicUsize = AtomicUsize::new(0);
 
 /// The lock list for a file being opened (key: upper-case full path).
 pub fn for_file(key: &str) -> Arc<FileLocks> {
@@ -194,8 +197,10 @@ impl FileLocks {
     fn add_held(&self, n: isize) {
         if n > 0 {
             self.held.fetch_add(n as usize, Ordering::Relaxed);
+            TOTAL.fetch_add(n as usize, Ordering::Relaxed);
         } else if n < 0 {
             self.held.fetch_sub((-n) as usize, Ordering::Relaxed);
+            TOTAL.fetch_sub((-n) as usize, Ordering::Relaxed);
         }
     }
 
@@ -289,6 +294,9 @@ pub fn handle_closed(p: &Process, of: &Arc<OpenFile>) {
 
 /// The process ended: all its locks go.
 pub fn process_ended(pid: u32) {
+    if TOTAL.load(Ordering::Relaxed) == 0 {
+        return;
+    }
     let mut any = false;
     for f in all_files() {
         if f.held.load(Ordering::Relaxed) != 0 && f.release(|l| l.pid == pid) {

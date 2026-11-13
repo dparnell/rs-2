@@ -46,6 +46,7 @@ pub fn child(args: &[String]) -> u32 {
         "npserver" => crate::more::child_npserver(),
         "lockhold" => crate::locks::child_hold(),
         "lockinh" => crate::locks::child_inherited(rest),
+        "lockwait" => crate::locks::child_wait(rest),
         _ => 255,
     }
 }
