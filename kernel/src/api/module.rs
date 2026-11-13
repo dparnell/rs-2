@@ -262,6 +262,8 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
         crate::trace!("    load {name}");
     }
     let _ = loader::take_fail();
+    // Until the module is recorded as this process's (loader.rs).
+    let loading = loader::lock();
     // What this process uses now: a DLL it let go of comes back with fresh
     // data, as OS/2 reads it in again.
     let used: Vec<u16> = in_use(&c.process).iter().map(|m| m.hmte).collect();
@@ -284,6 +286,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
             None => l.push((m.clone(), 1)),
         }
     }
+    drop(loading);
     let calls = init_order(core::slice::from_ref(&m), &c.process);
     if calls.is_empty() {
         if c.is16 { c.write_u16(phmod, m.hmte) } else { c.write_u32(phmod, m.hmte as u32) };
@@ -306,6 +309,7 @@ pub fn dos_load_module(c: &mut Ctx) -> u32 {
 
 pub fn dos_free_module(c: &mut Ctx) -> u32 {
     let h = c.arg(0) as u16;
+    let _loading = loader::lock();
     let freed = {
         let mut l = c.process.loaded.lock();
         let Some(i) = l.iter().position(|(m, _)| m.hmte == h) else { return err::INVALID_HANDLE };

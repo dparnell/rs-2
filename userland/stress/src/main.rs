@@ -21,6 +21,7 @@ mod sched;
 mod procs;
 mod sems;
 mod signals;
+mod smp;
 mod threads;
 mod xcpt;
 
@@ -225,6 +226,7 @@ const SECTIONS: &[(&str, fn())] = &[
     ("locks", locks::run),
     ("more", more::run),
     ("sched", sched::run),
+    ("smp", smp::run),
 ];
 
 fn words(s: &[u8]) -> Vec<String> {

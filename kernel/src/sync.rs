@@ -21,6 +21,8 @@ pub fn held_spin_locks() -> u32 {
 /// shared between thread context and interrupt handlers.
 pub struct SpinLock<T> {
     locked: AtomicBool,
+    /// Where it was made: its class for lock-order checking (lockdep.rs).
+    class: crate::lockdep::Class,
     value: UnsafeCell<T>,
 }
 
@@ -28,24 +30,34 @@ unsafe impl<T: Send> Sync for SpinLock<T> {}
 unsafe impl<T: Send> Send for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
+    #[track_caller]
     pub const fn new(value: T) -> Self {
-        Self { locked: AtomicBool::new(false), value: UnsafeCell::new(value) }
+        Self { locked: AtomicBool::new(false), class: core::panic::Location::caller(), value: UnsafeCell::new(value) }
     }
 
     pub fn lock(&self) -> SpinGuard<'_, T> {
         let irq = arch::interrupts_enabled();
         arch::disable_interrupts();
+        if cfg!(debug_assertions) {
+            crate::lockdep::spin_acquire(self as *const _ as *const u8 as usize, self.class, true);
+        }
         while self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            // Wait on plain reads (test and test-and-set).
+            // Wait on plain reads (test and test-and-set). Interrupts are
+            // off: answer TLB shootdowns meanwhile (the holder may be
+            // waiting for this CPU's flush).
             while self.locked.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
+                crate::smp::service_tlb();
             }
         }
         held().fetch_add(1, Ordering::Relaxed);
+        if cfg!(debug_assertions) {
+            crate::lockdep::spin_acquired(self as *const _ as *const u8 as usize, self.class);
+        }
         SpinGuard { lock: self, irq }
     }
 
@@ -54,6 +66,10 @@ impl<T> SpinLock<T> {
         arch::disable_interrupts();
         if self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
             held().fetch_add(1, Ordering::Relaxed);
+            if cfg!(debug_assertions) {
+                crate::lockdep::spin_acquire(self as *const _ as *const u8 as usize, self.class, false);
+                crate::lockdep::spin_acquired(self as *const _ as *const u8 as usize, self.class);
+            }
             Some(SpinGuard { lock: self, irq })
         } else {
             if irq {
@@ -89,6 +105,9 @@ impl<T> DerefMut for SpinGuard<'_, T> {
 
 impl<T> Drop for SpinGuard<'_, T> {
     fn drop(&mut self) {
+        if cfg!(debug_assertions) {
+            crate::lockdep::spin_release(self.lock as *const _ as *const u8 as usize);
+        }
         held().fetch_sub(1, Ordering::Relaxed);
         self.lock.locked.store(false, Ordering::Release);
         if self.irq {
@@ -124,6 +143,7 @@ impl<T> Once<T> {
 /// A sleeping lock for thread context (may be held across blocking I/O).
 pub struct Mutex<T> {
     locked: AtomicBool,
+    class: crate::lockdep::Class,
     waiters: crate::task::WaitQueue,
     value: UnsafeCell<T>,
 }
@@ -132,18 +152,38 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 unsafe impl<T: Send> Send for Mutex<T> {}
 
 impl<T> Mutex<T> {
+    #[track_caller]
     pub const fn new(value: T) -> Self {
-        Self { locked: AtomicBool::new(false), waiters: crate::task::WaitQueue::new(), value: UnsafeCell::new(value) }
+        Self {
+            locked: AtomicBool::new(false),
+            class: core::panic::Location::caller(),
+            waiters: crate::task::WaitQueue::new(),
+            value: UnsafeCell::new(value),
+        }
+    }
+
+    fn addr(&self) -> usize {
+        self as *const _ as *const u8 as usize
     }
 
     /// The lock, if nobody holds it.
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok().then(|| MutexGuard { m: self })
+        let ok = self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok();
+        if ok && cfg!(debug_assertions) {
+            crate::lockdep::mutex_acquire(self.addr(), self.class, false, true);
+        }
+        ok.then(|| MutexGuard { m: self })
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
+        if cfg!(debug_assertions) {
+            crate::lockdep::mutex_acquire(self.addr(), self.class, true, false);
+        }
         loop {
             if self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                if cfg!(debug_assertions) {
+                    crate::lockdep::mutex_acquire(self.addr(), self.class, true, true);
+                }
                 return MutexGuard { m: self };
             }
             // Before the scheduler runs (early boot) just spin.
@@ -175,6 +215,9 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
+        if cfg!(debug_assertions) {
+            crate::lockdep::mutex_release(self.m.addr());
+        }
         self.m.locked.store(false, Ordering::Release);
         self.m.waiters.wake_one();
     }

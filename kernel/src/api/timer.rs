@@ -47,12 +47,14 @@ fn add(pid: u32, ms: u32, repeat: bool, action: Action) -> u32 {
     h
 }
 
-/// Called from the timer interrupt.
+/// Called from the timer interrupt. The actions run with the timer list
+/// locked, so a DosStopTimer on another CPU that returned has seen the
+/// last of its timer (its semaphore handle may be reused right after).
 pub fn tick() {
     let now = irq::ticks();
     let mut fire = Vec::new();
+    let mut ts = TIMERS.lock();
     {
-        let mut ts = TIMERS.lock();
         if ts.is_empty() {
             return;
         }
@@ -86,6 +88,7 @@ pub fn tick() {
             Action::ClearSys(h) => super::sem::clear_sys16(h),
         }
     }
+    drop(ts);
 }
 
 pub fn process_ended(pid: u32) {

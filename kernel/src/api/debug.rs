@@ -458,11 +458,13 @@ pub extern "C" fn first_user_return(f: &mut TrapFrame) {
     if !debugged {
         return;
     }
-    crate::smp::bkl_acquire();
+    if crate::smp::bkl_forced() {
+        crate::smp::legacy_acquire();
+    }
     if crate::task::before_user_return(f) {
         crate::task::sched::exit_current();
     }
-    crate::smp::bkl_release();
+    crate::smp::legacy_release();
 }
 
 pub(crate) fn connected(p: &Process) -> bool {
@@ -1388,8 +1390,11 @@ fn map_alias(c: &Ctx, p: &Process, u: &mut Udb, write: bool) {
     match vm::alias(&p.space, &c.process.space, addr, len, write) {
         Ok(a) => {
             let first = addr & !(vm::PAGE - 1);
+            // The space lock comes before ALIASES (vm::free calls
+            // memory_freed with it held).
+            let root = p.space.lock().root;
             ALIASES.lock().push(Alias {
-                root: p.space.lock().root,
+                root,
                 start: first,
                 end: addr + len,
                 pid: p.pid,

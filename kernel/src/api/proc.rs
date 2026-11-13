@@ -187,24 +187,30 @@ pub fn dos_wait_child(c: &mut Ctx) -> u32 {
         return if pid == 0 { err::WAIT_NO_CHILDREN } else { err::INVALID_PROCID };
     }
     let done = || children().into_iter().find(|p| p.finished.load(Ordering::Acquire));
-    let found = if nowait != 0 {
-        match done() {
-            Some(p) => p,
-            None => return err::CHILD_NOT_COMPLETE,
-        }
-    } else {
-        let mut got = None;
-        c.process.child_waiters.wait_until(None, || {
-            got = done();
-            got.is_some()
-        });
-        match got {
-            Some(p) => p,
-            None => return err::INTERRUPT,
+    // Another thread of this process may collect the same child first:
+    // only the one that takes it out of the table reports it.
+    let (found, info) = loop {
+        let found = if nowait != 0 {
+            match done() {
+                Some(p) => p,
+                None => return err::CHILD_NOT_COMPLETE,
+            }
+        } else {
+            let mut got = None;
+            c.process.child_waiters.wait_until(None, || {
+                got = done();
+                got.is_some()
+            });
+            match got {
+                Some(p) => p,
+                None => return err::INTERRUPT,
+            }
+        };
+        let info = found.exit_info().unwrap();
+        if process::reap(found.pid) {
+            break (found, info);
         }
     };
-    let info = found.exit_info().unwrap();
-    process::reap(found.pid);
     write_result(c, pres, info.cause, info.code);
     if c.is16 { c.write_u16(ppid, found.pid as u16) } else { c.write_u32(ppid, found.pid) };
     0
@@ -376,10 +382,7 @@ fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspe
 pub fn thread_returned(c: &mut Ctx) -> u32 {
     let code = c.f.rax as u32;
     c.thread.sync_exit.store(true, Ordering::Relaxed);
-    let live = c.process.threads.lock().iter().filter(|t| t.state() != State::Dead).count();
-    if live > 1 {
-        c.thread.request_exit();
-    } else {
+    if !c.process.end_thread(&c.thread) {
         c.process.exit(0, code);
     }
     0
@@ -394,19 +397,24 @@ pub fn dos_wait_thread(c: &mut Ctx) -> u32 {
         return err::INVALID_THREADID;
     }
     let p = c.process.clone();
+    // A dead thread found is collected under the same lock: two waiters
+    // must not both get it.
     let find = |want: u32| -> Result<Option<u32>, u32> {
-        let ts = p.threads.lock();
+        let mut ts = p.threads.lock();
         if want == 0 {
-            if let Some(t) = ts.iter().find(|t| t.state() == State::Dead && t.tid != 1) {
-                return Ok(Some(t.tid));
+            if let Some(i) = ts.iter().position(|t| t.state() == State::Dead && t.tid != 1) {
+                return Ok(Some(ts.remove(i).tid));
             }
             if ts.iter().filter(|t| t.state() != State::Dead).count() <= 1 {
                 return Err(err::INVALID_THREADID);
             }
             return Ok(None);
         }
-        match ts.iter().find(|t| t.tid == want) {
-            Some(t) if t.state() == State::Dead => Ok(Some(want)),
+        match ts.iter().position(|t| t.tid == want) {
+            Some(i) if ts[i].state() == State::Dead => {
+                ts.remove(i);
+                Ok(Some(want))
+            }
             Some(_) => Ok(None),
             None => Err(err::INVALID_THREADID),
         }
@@ -423,7 +431,6 @@ pub fn dos_wait_thread(c: &mut Ctx) -> u32 {
     }
     match result {
         Ok(Some(tid)) => {
-            p.threads.lock().retain(|t| t.tid != tid);
             c.write_u32(ptid, tid);
             0
         }
@@ -450,9 +457,7 @@ pub fn dos_kill_thread(c: &mut Ctx) -> u32 {
             // SIGCHLD. With no handler taking it the thread ends.
             t.kill_pending.store(true, Ordering::Release);
             t.interrupt();
-            if t.state() == State::Blocked || t.state() == State::Suspended {
-                sched::wake(&t);
-            }
+            sched::wake(&t);
             0
         }
         None => err::INVALID_THREADID,
@@ -490,10 +495,9 @@ pub fn dos_resume_thread(c: &mut Ctx) -> u32 {
     let t = c.process.threads.lock().iter().find(|t| t.tid == tid).cloned();
     match t {
         Some(t) => {
-            if t.suspend.load(Ordering::Relaxed) == 0 {
+            if t.suspend.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)).is_err() {
                 return 90; // ERROR_NOT_FROZEN
             }
-            t.suspend.fetch_sub(1, Ordering::Relaxed);
             c.process.thread_waiters.wake_all();
             0
         }
@@ -546,7 +550,7 @@ fn stop_other_threads(c: &Ctx) {
         return;
     }
     // Make every other CPU pass through the kernel, then wait without the
-    // kernel lock so they can reach the point where they are held.
+    // CPU so they can reach the point where they are held.
     let me = crate::smp::this().bit();
     for cpu in crate::smp::online() {
         if cpu.bit() != me {

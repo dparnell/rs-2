@@ -213,6 +213,8 @@ pub struct ExecParams<'a> {
 }
 
 pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
+    // Until the process is listed (its modules count as in use from then).
+    let _loading = loader::lock();
     let data = crate::fs::read_file(p.path).ok_or(loader::err::FILE_NOT_FOUND)?;
     let mut space = AddressSpace::new().ok_or(loader::err::NOT_ENOUGH_MEMORY)?;
     let exe = loader::load_exe(p.path, data, &mut space)?;
@@ -430,23 +432,32 @@ impl Process {
         // Thread IDs are reused as on OS/2: the lowest one not in the list
         // (ended threads stay there until DosWaitThread collects them); when
         // all are taken, ended threads nobody collected give theirs up.
-        let tid = {
+        // The ID is chosen and the thread listed in one critical section
+        // (two threads of the process may create threads at once). A
+        // thread created while the process is ending ends too.
+        let t = {
             let mut ts = self.threads.lock();
             let free = |ts: &Vec<Arc<Thread>>| (1..=info::MAX_THREADS).find(|&n| !ts.iter().any(|t| t.tid == n));
-            match free(&ts) {
+            let tid = match free(&ts) {
                 Some(n) => n,
                 None => {
                     ts.retain(|t| t.state() != super::thread::State::Dead);
                     free(&ts).ok_or(164u32)? // ERROR_MAX_THRDS_REACHED
                 }
+            };
+            let t = Thread::new_user(self, tid, frame);
+            t.set_tib(self.info + info::TIB0 + tid * info::TIB_STRIDE);
+            t.stack_base.store(stack_bottom, Ordering::Relaxed);
+            t.stack_top.store(stack_top, Ordering::Relaxed);
+            if self.exit.lock().is_some() && self.exitlist_tid.load(Ordering::Relaxed) == 0 {
+                t.request_exit();
             }
+            ts.push(t.clone());
+            t
         };
+        let tid = t.tid;
         self.next_tid.store(tid + 1, Ordering::Relaxed);
-        let t = Thread::new_user(self, tid, frame);
-        let tib = self.info + info::TIB0 + tid * info::TIB_STRIDE;
-        t.set_tib(tib);
-        t.stack_base.store(stack_bottom, Ordering::Relaxed);
-        t.stack_top.store(stack_top, Ordering::Relaxed);
+        let tib = t.tib();
         let tib2 = tib + info::TIB2;
         {
             let mut sp = self.space.lock();
@@ -455,8 +466,23 @@ impl Process {
             write_u32s(&mut sp, tib, &[0xffff_ffff, stack_bottom, stack_top, tib2, 20, t.id]);
             write_u32s(&mut sp, tib2, &[tid, t.priority(), 20, 0]);
         }
-        self.threads.lock().push(t.clone());
         Ok(t)
+    }
+
+    /// A thread ends by itself (DosExit EXIT_THREAD, its function
+    /// returned): true if other threads go on (`t` is told to end), false
+    /// if it is the last one, which ends the process. Decided under the
+    /// thread list's lock: two last threads ending at once on two CPUs
+    /// must not both leave it to the other.
+    pub fn end_thread(&self, t: &Arc<Thread>) -> bool {
+        let ts = self.threads.lock();
+        let others = ts
+            .iter()
+            .any(|o| !Arc::ptr_eq(o, t) && o.state() != super::thread::State::Dead && !o.exit_requested());
+        if others {
+            t.request_exit();
+        }
+        others
     }
 
     pub fn main_thread(&self) -> Option<Arc<Thread>> {
@@ -548,13 +574,18 @@ impl Process {
             }
         }
         self.thread_waiters.wake_all();
-        let alive = self
-            .threads
-            .lock()
-            .iter()
-            .filter(|t| t.state() != super::thread::State::Dead)
-            .count();
-        if alive > 0 {
+        // Whether this was the last thread is decided under one lock: the
+        // last two may die on two CPUs at once, and only one may finish.
+        let last = {
+            let mut ts = self.threads.lock();
+            let alive = ts.iter().any(|t| t.state() != super::thread::State::Dead);
+            let last = !alive && !ts.is_empty();
+            if last {
+                ts.clear();
+            }
+            last
+        };
+        if !last {
             crate::api::debug::thread_ended(self, sched::current().tid);
             return;
         }
@@ -564,11 +595,15 @@ impl Process {
                 *e = Some(ExitInfo { cause: 0, code: 0 });
             }
         }
-        self.threads.lock().clear();
         // The rest can wait for things (a file closing, the disk), which a
         // thread already dead must not: it would come back to life.
         let p = self.clone();
-        crate::task::kthread::spawn("procexit", move || p.finish());
+        crate::task::kthread::spawn("procexit", move || {
+            // Its session's end (switching the screen, ending pop-ups) is
+            // in the corner still under the legacy lock (smp.rs).
+            crate::smp::legacy_acquire();
+            p.finish();
+        });
     }
 
     /// The last thread is gone: everything else the process had.
@@ -625,6 +660,16 @@ impl Process {
 
 /// Remove a terminated process from the table (its memory is released once
 /// nothing references it any more).
-pub fn reap(pid: u32) {
-    PROCESSES.lock().retain(|p| p.pid != pid);
+pub fn reap(pid: u32) -> bool {
+    // The last reference may go with it: drop it after the table lock
+    // (freeing an address space takes other locks and may wait).
+    let gone: Vec<Arc<Process>> = {
+        let mut ps = PROCESSES.lock();
+        let (gone, keep) = core::mem::take(&mut *ps).into_iter().partition(|p| p.pid == pid);
+        *ps = keep;
+        gone
+    };
+    let found = !gone.is_empty();
+    drop(gone);
+    found
 }

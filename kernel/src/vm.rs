@@ -208,7 +208,11 @@ impl Drop for SharedMem {
                 phys::free(f);
             }
         }
-        shared_arena().lock().remove(&self.base);
+        // Device objects and aliases sit in a private arena (never reserved
+        // here): their base may be another object's reservation by now.
+        if !self.device {
+            shared_arena().lock().remove(&self.base);
+        }
     }
 }
 
@@ -649,6 +653,12 @@ impl AddressSpace {
         };
         if base >= HIGH_BASE {
             let a = shared_arena().lock();
+            // A shared reservation made since the check above (another
+            // CPU) takes precedence.
+            let span = size.next_multiple_of(TILE);
+            if a.iter().any(|(&b, &s)| base < b + s && b < base + span) {
+                return Err(VmError::InvalidAddress);
+            }
             let mut ends = high_private_ends().lock();
             let e = ends.entry(self.root).or_insert(0);
             *e = (*e).max(base + size.next_multiple_of(TILE));
@@ -796,6 +806,10 @@ impl AddressSpace {
 
     /// Flush the TLBs of the other CPUs that have this space loaded.
     fn shootdown(&self) {
+        // The page-table stores before must be visible before the mask is
+        // read (a CPU joining sets its bit, then loads CR3 and walks the
+        // tables): a full fence, which a SeqCst load alone is not on x86.
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
         let mask = self.cpus.load(core::sync::atomic::Ordering::SeqCst);
         if mask & !crate::smp::this().bit() != 0 {
             crate::smp::tlb_shootdown(mask);
@@ -1157,6 +1171,19 @@ impl Drop for AddressSpace {
         if paging::current_root() == self.root {
             crate::smp::this().space_root.store(0, core::sync::atomic::Ordering::Relaxed);
             unsafe { crate::arch::write_cr3(paging::kernel_root()) };
+        }
+        // Another CPU may still be switching away from the last thread of
+        // the process (it clears its bit once CR3 has moved on).
+        let me = crate::smp::this().bit();
+        let start = crate::arch::rdtsc();
+        let mut warned = false;
+        while self.cpus.load(core::sync::atomic::Ordering::Acquire) & !me != 0 {
+            core::hint::spin_loop();
+            crate::smp::service_tlb();
+            if !warned && crate::arch::rdtsc().wrapping_sub(start) > 20_000_000_000 {
+                warned = true;
+                crate::log::print_unlocked(format_args!("[vm: address space still loaded on another CPU]\n"));
+            }
         }
         let bases: Vec<u32> = self.regions.keys().copied().collect();
         for b in bases {

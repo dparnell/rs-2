@@ -19,10 +19,18 @@ struct Entry {
 
 static OBJECTS: SpinLock<Vec<Entry>> = SpinLock::new(Vec::new());
 
-fn register(o: &Arc<SharedMem>) {
+/// List a new object; false if its name is taken (checked under the same
+/// lock, as two processes may create one name at once).
+fn register(o: &Arc<SharedMem>) -> bool {
     let mut v = OBJECTS.lock();
     v.retain(|e| e.obj.strong_count() > 0);
+    if let Some(n) = &o.name {
+        if v.iter().any(|e| e.obj.upgrade().is_some_and(|x| x.name.as_ref() == Some(n))) {
+            return false;
+        }
+    }
     v.push(Entry { obj: Arc::downgrade(o) });
+    true
 }
 
 fn find_named(name: &str) -> Option<Arc<SharedMem>> {
@@ -49,7 +57,9 @@ fn create(c: &Ctx, size: u32, flags: u32, name: Option<String>, seg: SegKind, li
     if flags & pag::COMMIT != 0 {
         obj.pages.lock().fill(PageState::Committed);
     }
-    register(&obj);
+    if !register(&obj) {
+        return Err(183); // ERROR_ALREADY_EXISTS
+    }
     let mut sp = c.space();
     sp.map_shared(obj, flags & (pag::READ | pag::WRITE | pag::EXECUTE), seg);
     if let Some(l) = limit {

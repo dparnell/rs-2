@@ -48,6 +48,9 @@ struct Sem {
     waiters: WaitQueue,
     /// Processes that have the semaphore open (with open counts).
     opens: SpinLock<Vec<(u32, u32)>>,
+    /// Closed for good (taken out of the table): a thread that started to
+    /// wait on it meanwhile gets ERROR_INVALID_HANDLE.
+    closed: core::sync::atomic::AtomicBool,
 }
 
 struct Table {
@@ -89,12 +92,18 @@ fn new_handle(t: &mut Table, shared: bool, pid: u32) -> u32 {
     want
 }
 
-/// Add a semaphore; returns its handle.
-fn insert(shared: bool, pid: u32, s: Arc<Sem>) -> u32 {
+/// Add a semaphore; returns its handle. A name is checked under the same
+/// lock (two processes may create one name at once).
+fn insert(shared: bool, pid: u32, s: Arc<Sem>) -> Result<u32, u32> {
     let mut t = TABLE.lock();
+    if let Some(n) = &s.name {
+        if find_named_in(&t, n).is_some() {
+            return Err(ERROR_DUPLICATE_NAME);
+        }
+    }
     let h = new_handle(&mut t, shared, pid);
     t.sems.insert(key(pid, h), s);
-    h
+    Ok(h)
 }
 
 fn get(c: &Ctx, h: u32) -> Option<Arc<Sem>> {
@@ -120,7 +129,11 @@ fn name_arg(c: &Ctx, p: u32) -> Result<Option<String>, u32> {
 }
 
 fn find_named(name: &str) -> Option<(u32, Arc<Sem>)> {
-    TABLE.lock().sems.iter().find(|(_, s)| s.name.as_deref() == Some(name)).map(|(&h, s)| (h as u32, s.clone()))
+    find_named_in(&TABLE.lock(), name)
+}
+
+fn find_named_in(t: &Table, name: &str) -> Option<(u32, Arc<Sem>)> {
+    t.sems.iter().find(|(_, s)| s.name.as_deref() == Some(name)).map(|(&h, s)| (h as u32, s.clone()))
 }
 
 fn create(c: &mut Ctx, kind: Kind) -> u32 {
@@ -129,11 +142,6 @@ fn create(c: &mut Ctx, kind: Kind) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    if let Some(n) = &name {
-        if find_named(n).is_some() {
-            return ERROR_DUPLICATE_NAME;
-        }
-    }
     let shared = name.is_some() || attr & DC_SEM_SHARED != 0;
     let s = Arc::new(Sem {
         name,
@@ -142,31 +150,48 @@ fn create(c: &mut Ctx, kind: Kind) -> u32 {
         kind: SpinLock::new(kind),
         waiters: WaitQueue::new(),
         opens: SpinLock::new(alloc::vec![(c.process.pid, 1)]),
+        closed: core::sync::atomic::AtomicBool::new(false),
     });
-    let h = insert(shared, c.process.pid, s);
+    let h = match insert(shared, c.process.pid, s) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
     c.write_u32(ph, h);
     0
 }
 
 fn open(c: &mut Ctx, want_event: Option<bool>) -> u32 {
     let (pname, ph) = (c.arg(0), c.arg(1));
-    let (h, s) = if pname != 0 {
-        let name = match name_arg(c, pname) {
-            Ok(Some(n)) => n,
+    let name = if pname != 0 {
+        match name_arg(c, pname) {
+            Ok(Some(n)) => Some(n),
             Ok(None) => return err::INVALID_NAME,
             Err(e) => return e,
-        };
-        match find_named(&name) {
+        }
+    } else {
+        None
+    };
+    let by_handle = if name.is_none() {
+        let Some(h) = c.read_u32(ph) else { return err::INVALID_ADDRESS };
+        h
+    } else {
+        0
+    };
+    // Found and counted under the table lock: a close of the last open
+    // elsewhere cannot take it out of the table in between.
+    let t = TABLE.lock();
+    let (h, s) = if let Some(name) = &name {
+        match find_named_in(&t, name) {
             Some(x) => x,
             None => return err::SEM_NOT_FOUND,
         }
     } else {
-        let Some(h) = c.read_u32(ph) else { return err::INVALID_ADDRESS };
+        let h = by_handle;
         // By handle: a shared semaphore, or a private one of this
         // process (OS/2 counts the open; kLIBC's _fmutex_open opens its
         // own private event semaphores again this way).
         let pid = c.process.pid;
-        match TABLE.lock().sems.get(&key(pid, h)).cloned() {
+        match t.sems.get(&key(pid, h)).cloned() {
             Some(s) if s.shared || (s.creator == pid && s.opens.lock().iter().any(|&(p, _)| p == pid)) => (h, s),
             _ => return err::INVALID_HANDLE,
         }
@@ -191,6 +216,7 @@ fn open(c: &mut Ctx, want_event: Option<bool>) -> u32 {
             None => o.push((pid, 1)),
         }
     }
+    drop(t);
     c.write_u32(ph, h);
     0
 }
@@ -208,7 +234,10 @@ fn close(c: &mut Ctx) -> u32 {
     if s.waiters.has_waiter(|t| t.process().is_some_and(|p| p.pid == pid)) {
         return ERROR_SEM_BUSY;
     }
+    // The last close takes it out of the table in the same critical
+    // section (see open).
     let empty = {
+        let mut t = TABLE.lock();
         let mut o = s.opens.lock();
         if let Some(i) = o.iter().position(|(p, _)| *p == pid) {
             o[i].1 -= 1;
@@ -216,10 +245,16 @@ fn close(c: &mut Ctx) -> u32 {
                 o.remove(i);
             }
         }
-        o.is_empty()
+        let empty = o.is_empty();
+        drop(o);
+        if empty {
+            t.sems.remove(&key(pid, h));
+        }
+        empty
     };
     if empty {
-        TABLE.lock().sems.remove(&key(pid, h));
+        s.closed.store(true, core::sync::atomic::Ordering::Release);
+        s.waiters.wake_all();
     }
     0
 }
@@ -254,11 +289,13 @@ pub fn dos_post_event_sem(c: &mut Ctx) -> u32 {
 /// DCE_POSTONE (each post hands the lock to one waiter); with it ignored
 /// a stale post let a waiter through and Qt Designer crashed unlocking.
 fn post(s: &Sem) -> Option<u32> {
-    let r = {
-        let waiting = s.waiters.has_waiter(|_| true);
+    // Whether threads wait and the post itself are one step (under the
+    // waiters' lock, the order the wait takes them in): a waiter timing
+    // out in between must not make the post release nobody.
+    let r = s.waiters.with_waiters(|waiting| {
         let mut k = s.kind.lock();
         let Kind::Event { posts, mode, round } = &mut *k else { return None };
-        if *mode & DCE_POSTONE == 0 && *mode & DCE_AUTORESET != 0 && waiting && *posts == 0 {
+        Some(if *mode & DCE_POSTONE == 0 && *mode & DCE_AUTORESET != 0 && waiting && *posts == 0 {
             // Release the threads waiting now; the semaphore stays reset.
             *round = round.wrapping_add(1);
             0
@@ -267,8 +304,8 @@ fn post(s: &Sem) -> Option<u32> {
         } else {
             *posts += 1;
             if *posts > 1 { ERROR_ALREADY_POSTED } else { 0 }
-        }
-    };
+        })
+    })?;
     s.waiters.wake_all();
     wake_muxwaits();
     Some(r)
@@ -335,8 +372,9 @@ pub fn dos_wait_event_sem(c: &mut Ctx) -> u32 {
     if ms == 0 {
         return if take_event(&s, g0) { 0 } else { ERROR_TIMEOUT };
     }
-    if s.waiters.wait_until(deadline(ms), || take_event(&s, g0)) {
-        0
+    let closed = || s.closed.load(core::sync::atomic::Ordering::Acquire);
+    if s.waiters.wait_until(deadline(ms), || closed() || take_event(&s, g0)) {
+        if closed() { err::INVALID_HANDLE } else { 0 }
     } else if c.thread.exit_requested() || c.thread.interrupted() {
         err::INTERRUPT
     } else {
@@ -403,6 +441,10 @@ pub fn dos_request_mutex_sem(c: &mut Ctx) -> u32 {
     }
     let mut result = None;
     s.waiters.wait_until(deadline(ms), || {
+        if s.closed.load(core::sync::atomic::Ordering::Acquire) {
+            result = Some(err::INVALID_HANDLE);
+            return true;
+        }
         result = try_mutex(&s, me);
         result.is_some()
     });
@@ -410,6 +452,25 @@ pub fn dos_request_mutex_sem(c: &mut Ctx) -> u32 {
         Some(r) => r,
         None if c.thread.exit_requested() || c.thread.interrupted() => err::INTERRUPT,
         None => ERROR_TIMEOUT,
+    }
+}
+
+/// Undo one try_mutex (a muxwait that could not take every member).
+fn give_back(s: &Sem, me: (u32, u32)) {
+    let freed = {
+        let mut k = s.kind.lock();
+        let Kind::Mutex { owner, count, .. } = &mut *k else { return };
+        if *owner != Some(me) {
+            return;
+        }
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            *owner = None;
+        }
+        *count == 0
+    };
+    if freed {
+        s.waiters.wake_all();
     }
 }
 
@@ -484,7 +545,7 @@ pub fn dos_create_mux_wait_sem(c: &mut Ctx) -> u32 {
         Err(e) => return e,
     };
     let shared = name.is_some() || attr & DC_SEM_SHARED != 0;
-    let h = insert(
+    let h = match insert(
         shared,
         c.process.pid,
         Arc::new(Sem {
@@ -494,8 +555,12 @@ pub fn dos_create_mux_wait_sem(c: &mut Ctx) -> u32 {
             kind: SpinLock::new(Kind::MuxWait { recs, all }),
             waiters: WaitQueue::new(),
             opens: SpinLock::new(alloc::vec![(c.process.pid, 1)]),
+            closed: core::sync::atomic::AtomicBool::new(false),
         }),
-    );
+    ) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
     c.write_u32(ph, h);
     0
 }
@@ -528,15 +593,27 @@ pub fn dos_wait_mux_wait_sem(c: &mut Ctx) -> u32 {
                 Kind::Mutex { owner, .. } => owner.is_none() || *owner == Some(me),
                 _ => false,
             });
-            if ready {
-                for (s, _) in &sems {
-                    if matches!(&*s.kind.lock(), Kind::Mutex { .. }) {
-                        try_mutex(s, me);
+            if !ready {
+                return false;
+            }
+            // Another CPU may take a member between the check and here:
+            // then the ones taken are given back and the wait goes on.
+            let mut taken: Vec<&Arc<Sem>> = Vec::new();
+            for (s, _) in &sems {
+                if matches!(&*s.kind.lock(), Kind::Mutex { .. }) {
+                    match try_mutex(s, me) {
+                        Some(r) if r == 0 || r == ERROR_SEM_OWNER_DIED => taken.push(s),
+                        _ => {
+                            for t in taken {
+                                give_back(t, me);
+                            }
+                            return false;
+                        }
                     }
                 }
-                *done = Some(sems.last().map_or(0, |x| x.1));
             }
-            ready
+            *done = Some(sems.last().map_or(0, |x| x.1));
+            true
         } else {
             for (s, u) in &sems {
                 let hit = match &*s.kind.lock() {
@@ -751,6 +828,9 @@ struct SysSem {
 static SYS16: SpinLock<BTreeMap<u32, SysSem>> = SpinLock::new(BTreeMap::new());
 static SYS16_WAIT: WaitQueue = WaitQueue::new();
 static RAM16_WAIT: WaitQueue = WaitQueue::new();
+/// Held while DosSemRequest tests and claims a RAM semaphore in user
+/// memory (another CPU may be claiming the same one).
+static RAM16: SpinLock<()> = SpinLock::new(());
 
 enum Sem16 {
     Ram(u32),
@@ -869,6 +949,7 @@ pub fn dos16_sem_set_wait(c: &mut Ctx) -> u32 {
 fn try_request(c: &Ctx, s: &Sem16, me: (u32, u32)) -> bool {
     match s {
         Sem16::Ram(l) => {
+            let _g = RAM16.lock();
             if ram_value(c, *l).unwrap_or(1) == 0 {
                 // Owner id in the semaphore word.
                 c.write_u32(*l, me.0 << 16 | me.1);

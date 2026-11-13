@@ -459,6 +459,13 @@ fn setup_irq(n: usize, f: &Info) {
     if IRQ_STATE[n].load(Ordering::Acquire) != 0 {
         return;
     }
+    // Writers on other CPUs may get here at once (DosWrite runs without
+    // the legacy lock): one sets the interrupt up, the others see it done.
+    static SETUP: SpinLock<()> = SpinLock::new(());
+    let _g = SETUP.lock();
+    if IRQ_STATE[n].load(Ordering::Acquire) != 0 {
+        return;
+    }
     let on = if crate::boot_info().cmdline().split_whitespace().any(|w| w.eq_ignore_ascii_case("lptpoll")) {
         false
     } else if let Some(d) = &f.pci {

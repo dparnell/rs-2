@@ -64,22 +64,14 @@ pub fn dos_set_signal_exception_focus(c: &mut Ctx) -> u32 {
     let (flag, ptimes) = (c.arg(0), c.arg(1));
     let f = &c.process.sig_focus;
     let n = match flag {
-        1 => {
-            let n = f.load(Ordering::Relaxed);
-            if n >= MAX_NESTING {
-                return ERROR_NESTING_TOO_DEEP;
-            }
-            f.store(n + 1, Ordering::Relaxed);
-            n + 1
-        }
-        0 => {
-            let n = f.load(Ordering::Relaxed);
-            if n == 0 {
-                return err::ALREADY_RESET;
-            }
-            f.store(n - 1, Ordering::Relaxed);
-            n - 1
-        }
+        1 => match f.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| (n < MAX_NESTING).then_some(n + 1)) {
+            Ok(n) => n + 1,
+            Err(_) => return ERROR_NESTING_TOO_DEEP,
+        },
+        0 => match f.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)) {
+            Ok(n) => n - 1,
+            Err(_) => return err::ALREADY_RESET,
+        },
         _ => return err::INVALID_PARAMETER,
     };
     if ptimes != 0 {
@@ -179,11 +171,7 @@ pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
     if n == 0 || n > 8 {
         return err::INVALID_PARAMETER;
     }
-    let used = c.process.tls_used.load(Ordering::Relaxed);
     let mask = (1u64 << n) - 1;
-    let Some(first) = (0..=TLS_DWORDS as u32 - n).find(|&i| (used as u64 >> i) & mask == 0) else {
-        return err::NOT_ENOUGH_MEMORY;
-    };
     if c.process.tlm.get().is_none() {
         tlm::enable(&c.process);
         // The caller goes on using it on this CPU right away; threads on
@@ -193,9 +181,19 @@ pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
             None => return err::NOT_ENOUGH_MEMORY,
         }
     }
-    c.process.tls_used.store(used | (mask << first) as u32, Ordering::Relaxed);
-    // Allocation sizes, so DosFreeThreadLocalMemory knows how much to free.
-    TLS_RUNS.lock().push((c.process.pid, first, n));
+    // Find and take the dwords in one critical section (threads of the
+    // process may allocate at once); the sizes go along, so
+    // DosFreeThreadLocalMemory knows how much to free.
+    let first = {
+        let mut runs = TLS_RUNS.lock();
+        let used = c.process.tls_used.load(Ordering::Relaxed);
+        let Some(first) = (0..=TLS_DWORDS as u32 - n).find(|&i| (used as u64 >> i) & mask == 0) else {
+            return err::NOT_ENOUGH_MEMORY;
+        };
+        c.process.tls_used.fetch_or((mask << first) as u32, Ordering::Relaxed);
+        runs.push((c.process.pid, first, n));
+        first
+    };
     // Fresh memory reads as zero in every thread.
     for t in c.process.threads.lock().iter() {
         let page = t.tlm_page.load(Ordering::Relaxed);
@@ -288,10 +286,10 @@ pub fn dos_set_max_fh(c: &mut Ctx) -> u32 {
 pub fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
     let (preq, pmax) = (c.arg(0), c.arg(1));
     let delta = c.read_u32(preq).unwrap_or(0) as i32;
-    let cur = c.process.max_fh.load(Ordering::Relaxed) as i64;
     let used = c.process.handles.lock().len() as i64;
-    let want = (cur + delta as i64).clamp(used.max(20), 32768);
-    c.process.max_fh.store(want as u32, Ordering::Relaxed);
+    let want = |cur: u32| (cur as i64 + delta as i64).clamp(used.max(20), 32768) as u32;
+    let cur = c.process.max_fh.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |cur| Some(want(cur))).unwrap_or(0);
+    let want = want(cur);
     c.write_u32(pmax, want as u32);
     0
 }
@@ -419,6 +417,9 @@ const ERROR_EXCL_SEM_ALREADY_OWNED: u32 = 101;
 
 /// Woken when a DOSFSRSEM is released.
 static FSRSEM_FREE: crate::task::WaitQueue = crate::task::WaitQueue::new();
+/// Held while the kernel reads and changes a DOSFSRSEM in user memory
+/// (threads of the process, or of processes sharing it, on other CPUs).
+static FSRSEM: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 
 /// 16-bit DosFSRamSemRequest(pDosFSRSem, lTimeOut): a recursive mutex in
 /// the caller's memory, DOSFSRSEM { cb, pid, tid, cUsage, client, sem }.
@@ -426,6 +427,7 @@ pub fn dos16_fsram_sem_request(c: &mut Ctx) -> u32 {
     let (p, ms) = (c.ptr(0), c.arg(1));
     let me = (c.process.pid as u16, c.thread.tid as u16);
     let try_take = || -> Option<u32> {
+        let _g = FSRSEM.lock();
         let (pid, tid, n) = (c.read_u16(p + 2)?, c.read_u16(p + 4)?, c.read_u16(p + 6)?);
         if n == 0 || (pid, tid) == me {
             c.write_u16(p + 2, me.0);
@@ -470,6 +472,7 @@ pub fn dos16_fsram_sem_request(c: &mut Ctx) -> u32 {
 pub fn dos16_fsram_sem_clear(c: &mut Ctx) -> u32 {
     let p = c.ptr(0);
     let me = (c.process.pid as u16, c.thread.tid as u16);
+    let g = FSRSEM.lock();
     let (Some(pid), Some(tid), Some(n)) = (c.read_u16(p + 2), c.read_u16(p + 4), c.read_u16(p + 6)) else {
         return err::INVALID_ADDRESS;
     };
@@ -480,6 +483,7 @@ pub fn dos16_fsram_sem_clear(c: &mut Ctx) -> u32 {
     if n == 1 {
         c.write_u16(p + 2, 0);
         c.write_u16(p + 4, 0);
+        drop(g);
         FSRSEM_FREE.wake_all();
     }
     0

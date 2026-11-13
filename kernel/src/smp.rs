@@ -1,5 +1,6 @@
 //! Multiprocessor support: per-CPU data, starting the application
-//! processors (APs), inter-processor interrupts and the big kernel lock.
+//! processors (APs), inter-processor interrupts, TLB shootdowns and the
+//! legacy lock.
 //!
 //! Each CPU finds its [`PerCpu`] through the GS base register. User code
 //! uses GS as an ordinary selector (16-bit OS/2 code especially), so the
@@ -7,10 +8,9 @@
 //! mode: in the kernel GS base is the per-CPU block, in user mode it is
 //! whatever the user's GS selector says.
 //!
-//! Kernel code (API calls, exceptions, kernel threads) runs under one big
-//! kernel lock, taken on entry from user mode and dropped when a thread
-//! blocks or returns to user mode; user code runs on all CPUs at once.
-//! Interrupt handlers do not take it: they only use spin locks.
+//! Kernel code runs on all CPUs at once under per-subsystem and per-object
+//! locks (docs/ARCHITECTURE.md, "Locking"); the legacy lock below is what
+//! remains of the big kernel lock.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -59,6 +59,13 @@ pub struct PerCpu {
     pub space_root: AtomicU64,
     /// Debug registers hold a process's watchpoints (api/debug.rs).
     pub dr7_loaded: AtomicBool,
+    /// TLB flushes asked of this CPU (a generation count) and the last one
+    /// it did: see [`tlb_shootdown`].
+    pub tlb_req: AtomicU64,
+    pub tlb_done: AtomicU64,
+    /// Spin locks this CPU holds, for lock-order checks (lockdep.rs).
+    pub spins: UnsafeCell<crate::lockdep::Held>,
+    pub lockdep_busy: AtomicBool,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
@@ -85,6 +92,10 @@ impl PerCpu {
             cur_class: AtomicU8::new(IDLE_CLASS),
             space_root: AtomicU64::new(0),
             dr7_loaded: AtomicBool::new(false),
+            tlb_req: AtomicU64::new(0),
+            tlb_done: AtomicU64::new(0),
+            spins: UnsafeCell::new(crate::lockdep::Held::new()),
+            lockdep_busy: AtomicBool::new(false),
             current: UnsafeCell::new(None),
             idle: UnsafeCell::new(None),
             switched_from: UnsafeCell::new(None),
@@ -166,29 +177,55 @@ pub fn init_bsp() {
     GS_READY.store(true, Ordering::Release);
 }
 
-// ---- The big kernel lock ----
+// ---- The legacy lock ----
+//
+// What is left of the big kernel lock that all kernel code once ran under:
+// a spin lock a thread holds from when it takes it until it blocks (taken
+// back on wake-up) or returns to user mode, so it makes the stretches
+// between blocking points atomic against each other. It now covers only
+// the session and device corner, whose state (the foreground session,
+// pop-ups, the PM session, display modes, debuggees' saved registers,
+// drive letters of USB sticks and network drives) the keyboard's hot keys
+// also change from interrupt context: the calls api/legacy.rs lists,
+// DosDebug's debuggees in the kernel (task::debuggee_lock), a process's
+// final cleanup (procexit) and the hot-plug thread. Everything else runs
+// under the locks of the data it touches (docs/ARCHITECTURE.md,
+// "Locking").
 
-static BKL: AtomicBool = AtomicBool::new(false);
+/// `bkl` on the kernel command line: every path takes the legacy lock
+/// again, which makes it the big kernel lock of before (comparisons, and
+/// hunting a locking bug).
+static FORCED: AtomicBool = AtomicBool::new(false);
 
+pub fn force_bkl() {
+    FORCED.store(true, Ordering::Relaxed);
+}
 
-/// Take the kernel lock for the current thread (no-op if it holds it).
+#[inline]
+pub fn bkl_forced() -> bool {
+    FORCED.load(Ordering::Relaxed)
+}
+
+static LEGACY: AtomicBool = AtomicBool::new(false);
+
+/// Take the legacy lock for the current thread (no-op if it holds it).
 /// Interrupts are enabled while waiting, so this CPU still answers TLB
-/// shootdowns from the holder.
-pub fn bkl_acquire() {
+/// shootdowns from the holder. Never with a spin lock held.
+pub fn legacy_acquire() {
     let Some(t) = crate::task::sched::current_opt() else { return };
-    if t.holds_bkl.load(Ordering::Relaxed) || t.is_idle() {
+    if t.holds_legacy.load(Ordering::Relaxed) || t.is_idle() {
         return;
     }
     let was = arch::interrupts_enabled();
-    if BKL.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+    if LEGACY.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         arch::enable_interrupts();
         // Test and test-and-set: wait on plain reads, so waiting CPUs do
         // not keep the holder's cache line busy.
         loop {
-            while BKL.load(Ordering::Relaxed) {
+            while LEGACY.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
             }
-            if BKL.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            if LEGACY.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
                 break;
             }
         }
@@ -196,18 +233,18 @@ pub fn bkl_acquire() {
             arch::disable_interrupts();
         }
     }
-    t.holds_bkl.store(true, Ordering::Relaxed);
+    t.holds_legacy.store(true, Ordering::Relaxed);
 }
 
-/// Drop the kernel lock if the current thread holds it.
-pub fn bkl_release() {
+/// Drop the legacy lock if the current thread holds it.
+pub fn legacy_release() {
     let Some(t) = crate::task::sched::current_opt() else { return };
-    bkl_release_for(&t);
+    legacy_release_for(&t);
 }
 
-pub fn bkl_release_for(t: &Thread) -> bool {
-    if t.holds_bkl.swap(false, Ordering::Relaxed) {
-        BKL.store(false, Ordering::Release);
+pub fn legacy_release_for(t: &Thread) -> bool {
+    if t.holds_legacy.swap(false, Ordering::Relaxed) {
+        LEGACY.store(false, Ordering::Release);
         true
     } else {
         false
@@ -228,40 +265,64 @@ pub fn kick(c: &PerCpu) {
     }
 }
 
-static SHOOTDOWN: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
-static ACKS: AtomicU32 = AtomicU32::new(0);
-
 /// Flush the TLBs of the CPUs in `mask` (other than this one) and wait
 /// until they have.
+///
+/// Each CPU has a request counter and a done counter. The caller bumps
+/// the target's request count and sends an IPI; the target flushes and
+/// records the count it saw. A CPU that spins for a lock with interrupts
+/// disabled (API code runs with IF=0) cannot take the IPI, and the lock's
+/// holder may be the one waiting here: so every spin loop in the kernel
+/// (`SpinLock::lock`, this wait itself) calls [`service_tlb`], which does
+/// the flush the IPI would have done. Several CPUs may shoot down at once.
 pub fn tlb_shootdown(mask: u64) {
     let me = this().bit();
-    let targets: alloc::vec::Vec<&PerCpu> = online().filter(|c| mask & c.bit() != 0 && c.bit() != me).collect();
-    if targets.is_empty() {
-        return;
+    let mut targets: [(u8, u64); MAX_CPUS] = [(0, 0); MAX_CPUS];
+    let mut n = 0;
+    for c in online() {
+        if mask & c.bit() != 0 && c.bit() != me {
+            let g = c.tlb_req.fetch_add(1, Ordering::SeqCst) + 1;
+            targets[n] = (c.index() as u8, g);
+            n += 1;
+        }
     }
-    let _g = SHOOTDOWN.lock();
-    ACKS.store(0, Ordering::SeqCst);
-    for c in &targets {
-        send_ipi(c, IPI_TLB_FLUSH);
+    for &(i, _) in &targets[..n] {
+        send_ipi(cpu(i as usize), IPI_TLB_FLUSH);
     }
     let start = arch::rdtsc();
-    while ACKS.load(Ordering::SeqCst) < targets.len() as u32 {
-        core::hint::spin_loop();
-        if arch::rdtsc().wrapping_sub(start) > 20_000_000_000 {
-            crate::log::print_unlocked(format_args!("[smp: TLB shootdown not acknowledged]\n"));
-            break;
+    let mut warned = false;
+    for &(i, g) in &targets[..n] {
+        let c = cpu(i as usize);
+        while c.tlb_done.load(Ordering::Acquire) < g {
+            core::hint::spin_loop();
+            service_tlb();
+            if !warned && arch::rdtsc().wrapping_sub(start) > 20_000_000_000 {
+                warned = true;
+                crate::log::print_unlocked(format_args!("[smp: TLB shootdown of cpu {i} not acknowledged yet]\n"));
+            }
         }
     }
 }
 
-/// IPI handlers (called from the trap dispatcher, no kernel lock).
+/// Do a TLB flush other CPUs asked of this one (see [`tlb_shootdown`]).
+#[inline]
+pub fn service_tlb() {
+    if !GS_READY.load(Ordering::Relaxed) {
+        return;
+    }
+    let c = this();
+    let r = c.tlb_req.load(Ordering::Acquire);
+    if c.tlb_done.load(Ordering::Relaxed) < r {
+        unsafe { arch::write_cr3(arch::read_cr3()) };
+        c.tlb_done.store(r, Ordering::Release);
+    }
+}
+
+/// IPI handlers (called from the trap dispatcher).
 pub fn ipi(vector: u8, f: &crate::arch::idt::TrapFrame) {
     match vector {
         IPI_DUMP => crate::debug::dump_cpu(f),
-        IPI_TLB_FLUSH => {
-            unsafe { arch::write_cr3(arch::read_cr3()) };
-            ACKS.fetch_add(1, Ordering::SeqCst);
-        }
+        IPI_TLB_FLUSH => service_tlb(),
         IPI_HALT => {
             arch::disable_interrupts();
             arch::halt_forever();

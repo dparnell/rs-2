@@ -13,14 +13,24 @@
 use crate::task::WaitQueue;
 
 static WAIT: WaitQueue = WaitQueue::new();
+/// Bumped by every change: waiters test only this under the queue's lock
+/// (looking at the screen there would take the screen lock inside the
+/// queue's, the reverse of `changed`, which runs under the screen lock).
+static GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// The screen of a pty session changed, or one ended. Safe with the
 /// screen lock held.
 pub fn changed() {
+    GEN.fetch_add(1, core::sync::atomic::Ordering::Release);
     WAIT.wake_all();
 }
 
-/// Wait until `cond` holds (or `deadline`, in ticks, passes).
-pub fn wait(deadline: Option<u64>, cond: impl Fn() -> bool) -> bool {
-    WAIT.wait_until(deadline, cond)
+/// The change count of all pty sessions together.
+pub fn generation() -> u32 {
+    GEN.load(core::sync::atomic::Ordering::Acquire)
+}
+
+/// Wait until a change after generation `g` (or `deadline`, in ticks).
+pub fn wait(deadline: Option<u64>, g: u32) -> bool {
+    WAIT.wait_until(deadline, || generation() != g)
 }

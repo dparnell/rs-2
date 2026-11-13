@@ -21,6 +21,8 @@ pub enum State {
     Blocked = 2,
     Suspended = 3,
     Dead = 4,
+    /// Created, not yet started (`sched::start`): wake-ups pass it by.
+    New = 5,
 }
 
 #[repr(C, align(16))]
@@ -74,6 +76,8 @@ pub struct Thread {
     pub init_run: crate::sync::SpinLock<Option<crate::api::module::InitRun>>,
     /// Saved FPU/SSE state while the thread is switched out.
     pub fpu: UnsafeCell<Box<FpuState>>,
+    /// Mutexes this thread holds, for lock-order checks (lockdep.rs).
+    pub mutexes: UnsafeCell<crate::lockdep::Held>,
     /// Kernel threads: the function to run (taken when the thread starts)
     /// and a name for messages.
     pub kentry: crate::sync::SpinLock<Option<Box<dyn FnOnce() + Send>>>,
@@ -81,8 +85,8 @@ pub struct Thread {
     /// Running on a CPU, or still on its stack while being switched away
     /// from: no other CPU may resume it.
     pub on_cpu: AtomicBool,
-    /// Holds the big kernel lock (smp.rs).
-    pub holds_bkl: AtomicBool,
+    /// Holds the legacy lock (smp.rs).
+    pub holds_legacy: AtomicBool,
     /// Tick at which the thread last became ready (starvation boost).
     pub ready_since: AtomicU64,
     /// Temporarily raised for having waited MAXWAIT seconds to run.
@@ -159,11 +163,12 @@ impl Thread {
             interrupted: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
+            mutexes: UnsafeCell::new(crate::lockdep::Held::new()),
             init_run: crate::sync::SpinLock::new(None),
             kentry: crate::sync::SpinLock::new(None),
             kname: "",
             on_cpu: AtomicBool::new(idle),
-            holds_bkl: AtomicBool::new(false),
+            holds_legacy: AtomicBool::new(false),
             ready_since: AtomicU64::new(0),
             boosted: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),
@@ -212,7 +217,7 @@ impl Thread {
             NEXT_ID.fetch_add(1, Ordering::Relaxed),
             tid,
             Some(Arc::downgrade(process)),
-            State::Blocked,
+            State::New,
             2 << 8,
             false,
         ));
@@ -263,7 +268,8 @@ impl Thread {
             1 => State::Running,
             2 => State::Blocked,
             3 => State::Suspended,
-            _ => State::Dead,
+            4 => State::Dead,
+            _ => State::New,
         }
     }
 

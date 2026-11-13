@@ -733,7 +733,7 @@ fn build() -> Tree {
                 text = alloc::format!("{text} LPT{}", i + 1);
                 lpts |= 1 << i;
             }
-            "FDC" if crate::rtc::cmos(0x10) == 0 => continue,
+            "FDC" if crate::rtc::cmos_read(0x10) == 0 => continue,
             "PS2M" if !crate::mouse::ps2_present() => continue,
             _ => {}
         }
@@ -911,7 +911,7 @@ fn child_devices(t: &mut Tree, prefix: &str, n: usize) {
             t.device(n, s("MOUSE_0 Mouse"), DS_TYPE_IO, 0);
         }
         "FDC" => {
-            let types = crate::rtc::cmos(0x10);
+            let types = crate::rtc::cmos_read(0x10);
             for (i, ty) in [types >> 4, types & 0xf].iter().enumerate() {
                 if *ty != 0 {
                     t.device(n, alloc::format!("DSKT_{i} Diskette drive {}:", (b'A' + i as u8) as char), DS_TYPE_DISK, DS_REMOVABLE_MEDIA);

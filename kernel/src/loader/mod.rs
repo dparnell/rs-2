@@ -264,6 +264,62 @@ impl Module {
     }
 }
 
+// ---- The loader lock ----
+//
+// Loading is check-then-act over several tables (is the module loaded? read
+// it, register it; is it in use? reset its data; PENDING and WAITING while
+// its imports load) with disk reads in between, so one load runs at a time,
+// as under IBM's loader semaphore. The lock sleeps and is recursive: a load
+// loads its imports. Held from the lookup until the module is attached and
+// recorded in the process that wanted it (exec, DosLoadModule), so a load
+// on another CPU does not take it for unused meanwhile. Lock order: loader
+// lock before the file systems' and every spin lock.
+
+struct LoaderLock {
+    /// Thread id + 1 of the holder, 0 = free.
+    owner: core::sync::atomic::AtomicU32,
+    depth: core::sync::atomic::AtomicU32,
+    wait: crate::task::WaitQueue,
+}
+
+static LOADER: LoaderLock = LoaderLock {
+    owner: core::sync::atomic::AtomicU32::new(0),
+    depth: core::sync::atomic::AtomicU32::new(0),
+    wait: crate::task::WaitQueue::new(),
+};
+
+/// The loader lock while it lives.
+pub struct LoaderGuard(bool);
+
+/// Take the loader lock (again, if this thread holds it).
+pub fn lock() -> LoaderGuard {
+    use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed};
+    let Some(t) = crate::task::sched::current_opt() else { return LoaderGuard(false) };
+    let me = t.id + 1;
+    drop(t);
+    if LOADER.owner.load(Acquire) == me {
+        LOADER.depth.fetch_add(1, Relaxed);
+        return LoaderGuard(true);
+    }
+    loop {
+        if LOADER.owner.compare_exchange(0, me, AcqRel, Acquire).is_ok() {
+            LOADER.depth.store(1, Relaxed);
+            return LoaderGuard(true);
+        }
+        LOADER.wait.wait_uninterruptible(|| LOADER.owner.load(Acquire) == 0);
+    }
+}
+
+impl Drop for LoaderGuard {
+    fn drop(&mut self) {
+        use core::sync::atomic::Ordering::{Relaxed, Release};
+        if self.0 && LOADER.depth.fetch_sub(1, Relaxed) == 1 {
+            LOADER.owner.store(0, Release);
+            LOADER.wait.wake_one();
+        }
+    }
+}
+
 struct Registry {
     modules: Vec<Arc<Module>>,
     next_hmte: u16,
@@ -379,6 +435,7 @@ pub fn take_fail() -> Option<String> {
 /// were found by name, and a path the module of that file: a DLL loaded by
 /// its path may have the name of another, and both stay loaded.
 pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
+    let _l = lock();
     let mname = module_name(name);
     let by_path = name.contains(['\\', '/', ':']);
     let found = {
@@ -484,6 +541,7 @@ fn reset(m: &Module) {
 /// locks. Loading reads files, which may wait for the disk, so the
 /// address space (a spin lock) is only locked for the attaching.
 pub fn load_dll<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, space: impl FnOnce() -> G) -> Result<Arc<Module>, u32> {
+    let _l = lock();
     let m = load_global(name)?;
     attach(&m, &mut space())?;
     Ok(m)
@@ -494,6 +552,7 @@ pub fn load_dll<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, space
 /// over: the C runtime of a DLL freed its heap at termination and keeps the
 /// pointers in that data (RXULS.DLL, loaded by REXX for each RxFuncAdd).
 pub fn load_dll_again<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, used: &[u16], space: impl FnOnce() -> G) -> Result<Arc<Module>, u32> {
+    let _l = lock();
     let m = load_global(name)?;
     let mut sp = space();
     refresh_instance(&m, used, &mut Vec::new(), &mut sp);

@@ -27,6 +27,7 @@ mod infoseg;
 mod irq;
 mod kbd;
 mod loader;
+mod lockdep;
 mod pipe;
 mod power;
 mod resmgr;
@@ -94,6 +95,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     task::sched::init();
     fs::init(info);
     vmware::init();
+    if info.cmdline().split_whitespace().any(|w| w == "bkl") {
+        smp::force_bkl();
+    }
     if info.cmdline().split_whitespace().any(|w| w == "nocache") {
         fs::cache::DISABLED.store(true, core::sync::atomic::Ordering::Relaxed);
     }

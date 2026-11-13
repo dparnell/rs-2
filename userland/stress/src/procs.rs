@@ -47,6 +47,8 @@ pub fn child(args: &[String]) -> u32 {
         "lockhold" => crate::locks::child_hold(),
         "lockinh" => crate::locks::child_inherited(rest),
         "lockwait" => crate::locks::child_wait(rest),
+        "smpmutex" => crate::smp::child_mutex(num(rest, 0)),
+        "smpmix" => crate::smp::child_mix(num(rest, 0)),
         _ => 255,
     }
 }

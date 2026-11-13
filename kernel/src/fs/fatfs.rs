@@ -89,19 +89,21 @@ impl FatFs {
         Ok(Arc::new(FatFs { inner: Arc::new(Inner { vol: Mutex::new(vol), open: SpinLock::new(BTreeMap::new()) }) }))
     }
 
+    /// The one file object of a directory entry. Callers hold the volume
+    /// lock from the lookup that found `e` (no other open, write or close
+    /// can come between), and the map is searched and filled under one lock.
     fn file_for(&self, e: fat::Entry) -> Arc<FatFile> {
         let key = slot_key(&e);
-        if let Some(k) = key {
-            if let Some(f) = self.inner.open.lock().get(&k).and_then(|w| w.upgrade()) {
-                return f;
-            }
+        let Some(k) = key else {
+            return Arc::new(FatFile { fs: self.inner.clone(), entry: Mutex::new(e) });
+        };
+        let mut o = self.inner.open.lock();
+        if let Some(f) = o.get(&k).and_then(|w| w.upgrade()) {
+            return f;
         }
         let f = Arc::new(FatFile { fs: self.inner.clone(), entry: Mutex::new(e) });
-        if let Some(k) = key {
-            let mut o = self.inner.open.lock();
-            o.retain(|_, w| w.strong_count() > 0);
-            o.insert(k, Arc::downgrade(&f));
-        }
+        o.retain(|_, w| w.strong_count() > 0);
+        o.insert(k, Arc::downgrade(&f));
         f
     }
 }
@@ -144,7 +146,8 @@ impl FileSystem for FatFs {
     }
 
     fn open(&self, path: &str) -> Result<Arc<dyn FsFile>, u32> {
-        let e = self.inner.vol.lock().lookup(path).map_err(map)?;
+        let v = self.inner.vol.lock();
+        let e = v.lookup(path).map_err(map)?;
         if e.is_dir() {
             return Err(err::ACCESS_DENIED);
         }
@@ -152,7 +155,8 @@ impl FileSystem for FatFs {
     }
 
     fn create(&self, path: &str, attr: u32) -> Result<Arc<dyn FsFile>, u32> {
-        let e = self.inner.vol.lock().create_file(path, attr as u8 & 0x27, now()).map_err(|e| {
+        let mut v = self.inner.vol.lock();
+        let e = v.create_file(path, attr as u8 & 0x27, now()).map_err(|e| {
             if e == fat::Error::Exists { err::FILE_EXISTS } else { map(e) }
         })?;
         Ok(self.file_for(e))
