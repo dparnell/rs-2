@@ -994,13 +994,14 @@ pub fn use_del(name: &str, force: bool) -> Result<(), u32> {
     let target = if name.starts_with("\\\\") || name.starts_with("//") {
         let (sv, sh) = split_unc(name).ok_or(NERR_USE_NOT_FOUND)?;
         let r = alloc::format!("\\\\{sv}\\{sh}");
-        USES.lock().iter().position(|u| u.local == Local::None && u.remote == r).or_else(|| USES.lock().iter().position(|u| u.remote == r))
+        let us = USES.lock();
+        us.iter().position(|u| u.local == Local::None && u.remote == r).or_else(|| us.iter().position(|u| u.remote == r)).map(|i| us[i].clone())
     } else {
         let l = Local::parse(name).map_err(|_| NERR_USE_NOT_FOUND)?;
-        USES.lock().iter().position(|u| u.local == l)
+        let us = USES.lock();
+        us.iter().position(|u| u.local == l).map(|i| us[i].clone())
     };
-    let i = target.ok_or(NERR_USE_NOT_FOUND)?;
-    let u = USES.lock()[i].clone();
+    let u = target.ok_or(NERR_USE_NOT_FOUND)?;
     if let Local::Drive(d) = u.local {
         if !force && super::open_count(d) > 0 {
             return Err(NERR_OPEN_FILES);

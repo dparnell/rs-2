@@ -1443,7 +1443,9 @@ fn find_next(c: &mut Ctx, h: u32, buf: u32, cb: u32, pcount: u32) -> u32 {
     let Some(want) = want else { return err::INVALID_ADDRESS };
     let Some(mut s) = c.process.searches.lock().remove(&h) else { return err::INVALID_HANDLE };
     let r = if s.next >= s.results.len() { Err(err::NO_MORE_FILES) } else { fill(c, &mut s, buf, cb, want.max(1)) };
-    c.process.searches.lock().insert(h, s);
+    // Back, unless another thread's DosFindFirst took the number while it
+    // was out (its search must not be overwritten).
+    c.process.searches.lock().entry(h).or_insert(s);
     match r {
         Ok((n, rc)) => {
             if c.is16 { c.write_u16(pcount, n as u16) } else { c.write_u32(pcount, n) };
