@@ -25,6 +25,8 @@ pub const VROM: u16 = 0xc000;
 /// System callbacks (beyond the 256 interrupt services).
 pub const CB_TERMINATED: u16 = 0x100;
 pub const CB_MOUSE_RET: u16 = 0x104;
+/// An INT 24h handler returned (crate::dos crit.rs).
+pub const CB_I24_RET: u16 = 0x105;
 
 /// Offsets of special code in the ROM segment.
 pub const INT8_CODE: u16 = SPECIAL;
@@ -33,6 +35,7 @@ pub const MOUSE_RET_CODE: u16 = SPECIAL + 0x30;
 pub const XMS_CODE: u16 = SPECIAL + 0x40;
 pub const SHELL_CODE: u16 = SPECIAL + 0x50;
 pub const IRET_CODE: u16 = SPECIAL + 0x60;
+pub const I24_RET_CODE: u16 = SPECIAL + 0x70;
 pub const DPMI_CODE: u16 = SPECIAL + 0x100;
 
 const BDA: u32 = 0x400;
@@ -142,6 +145,8 @@ impl Machine {
         put(self, MOUSE_RET_CODE, &[0xfe, 0x38, CB_MOUSE_RET as u8, (CB_MOUSE_RET >> 8) as u8]);
         put(self, XMS_CODE, &[0xeb, 0x03, 0x90, 0x90, 0x90, 0xfe, 0x38, crate::xms::CB_XMS as u8, (crate::xms::CB_XMS >> 8) as u8, 0xcb]);
         put(self, IRET_CODE, &[0xcf]);
+        // INT 24h's return into DOS, then INT 21h's IRET.
+        put(self, I24_RET_CODE, &[0xfe, 0x38, CB_I24_RET as u8, (CB_I24_RET >> 8) as u8, 0xcf]);
         // Vectors that are data or do nothing.
         for v in [0x1cu8, 0x1b, 0x23, 0x28, 0x2a, 0x05] {
             self.set_vector(v, ROM, IRET_CODE);

@@ -298,9 +298,10 @@ impl Machine {
         let s = match name {
             Name::Dev(d) => Sft { refs: 1, dev: Some(*d), host: 0, path: String::new(), mode, info: d.info(), owner: psp },
             Name::File(f) => {
+                // Sharing violations are tried again (440Bh).
                 let h = match create {
-                    Some((attr, how)) => host.create(f, attr, how)?,
-                    None => host.open(f, OpenMode(mode))?,
+                    Some((attr, how)) => self.share_retry(host, |h| h.create(f, attr, how))?,
+                    None => self.share_retry(host, |h| h.open(f, OpenMode(mode)))?,
                 };
                 let drive = (f.as_bytes()[0] - b'A') as u16;
                 Sft { refs: 1, dev: None, host: h, path: f.clone(), mode, info: drive | 0x40, owner: psp }
@@ -320,7 +321,16 @@ impl Machine {
     }
 
     fn open_handle<H: Host>(&mut self, host: &mut H, name: &Name, mode: u8, create: Option<(u8, Create)>) -> Result<u16, u16> {
-        let i = self.open_name(host, name, mode, create)?;
+        let i = match self.open_name(host, name, mode, create) {
+            Ok(i) => i,
+            Err(e) => {
+                let drive = match name {
+                    Name::File(f) => f.as_bytes()[0] - b'A',
+                    Name::Dev(_) => self.dos.drive,
+                };
+                return Err(self.share_error(e, mode, false, drive));
+            }
+        };
         match self.new_handle(i) {
             Ok(h) => Ok(h),
             Err(e) => {
@@ -371,7 +381,8 @@ impl Machine {
                     return Err(err::ACCESS_DENIED);
                 }
                 let mut buf = alloc::vec![0u8; n.min(0x10000)];
-                let k = host.read(s.host, &mut buf)?;
+                // Lock violations are tried again (440Bh).
+                let k = self.share_retry(host, |h| h.read(s.host, &mut buf))?;
                 self.hw.write_bytes(a, &buf[..k]);
                 Ok(Some(k))
             }
@@ -400,7 +411,7 @@ impl Machine {
                     host.set_size(s.host, pos)?;
                     return Ok(0);
                 }
-                let k = host.write(s.host, data)?;
+                let k = self.share_retry(host, |h| h.write(s.host, data))?;
                 if let Some(Some(e)) = self.dos.sft.get_mut(i) {
                     e.info &= !0x40;
                 }
@@ -476,7 +487,7 @@ impl Machine {
                 }
                 0x3f => {
                     let (h, n, a) = (self.cpu.bx(), self.cpu.cx() as usize, self.ds_dx());
-                    match self.read_handle(host, h, a, n)? {
+                    match self.read_handle(host, h, a, n).map_err(|e| self.handle_share_error(h, e, false))? {
                         Some(k) => {
                             self.cpu.set_ax(k as u16);
                             Ok(())
@@ -488,7 +499,7 @@ impl Machine {
                     let (h, n, a) = (self.cpu.bx(), self.cpu.cx() as usize, self.ds_dx());
                     let mut buf = alloc::vec![0u8; n];
                     self.hw.read_bytes(a, &mut buf);
-                    let k = self.write_handle(host, h, &buf)?;
+                    let k = self.write_handle(host, h, &buf).map_err(|e| self.handle_share_error(h, e, true))?;
                     self.cpu.set_ax(k as u16);
                     Ok(())
                 }
@@ -704,9 +715,20 @@ impl Machine {
         match r {
             Ok(()) => self.ok(),
             Err(0xffff) => return Cb::Retry,
+            Err(super::crit::RAISED) => return self.raise_crit(host, super::FailWith::Handle),
             Err(e) => self.fail(e),
         }
         Cb::Done
+    }
+
+    /// A read or write error `e` of handle `h`: a lock violation of a
+    /// compatibility-mode file becomes a critical error.
+    fn handle_share_error(&mut self, h: u16, e: u16, write: bool) -> u16 {
+        let Some(s) = self.sft_of(h).and_then(|i| self.dos.sft[i].clone()) else { return e };
+        if s.dev.is_some() {
+            return e;
+        }
+        self.share_error(e, s.mode, write, (s.info & 0x1f) as u8)
     }
 
     fn ioctl<H: Host>(&mut self, host: &mut H) -> Result<(), u16> {
@@ -777,7 +799,7 @@ impl Machine {
                 self.cpu.set_dx(0);
                 Ok(())
             }
-            0x0b => Ok(()),
+            0x0b => self.set_retries(),
             0x0e => {
                 self.cpu.set_al(0);
                 Ok(())

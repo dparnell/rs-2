@@ -4,6 +4,7 @@
 //! layout; the rest (open files, searches) is kept here.
 
 mod con;
+mod crit;
 mod fcb;
 mod file;
 mod mem;
@@ -23,6 +24,7 @@ use x86emu::{DS, ES};
 use crate::{Cb, Host, Machine};
 
 pub use file::Device;
+pub use crit::{FailWith, FAIL_I24};
 
 /// DOS's own data segment (list of lists, SDA, CDS, SFT mirror).
 pub const DOSSEG: u16 = 0x0070;
@@ -148,6 +150,15 @@ pub struct Dos {
     pub codepage: u16,
     /// FCB find first/next: drive, entries, position.
     pub fcb_search: Option<(u8, Vec<crate::DirEntry>, usize)>,
+    /// Sharing and lock violations: tries and the delay between them
+    /// (440Bh).
+    pub retries: u16,
+    pub retry_delay: u16,
+    /// The registers (general, DS, ES) of the INT 21h call in progress.
+    pub entry: ([u32; 8], u16, u16),
+    /// A critical error to raise, and one in progress (crit.rs).
+    pub(crate) crit_req: Option<crit::Req>,
+    pub(crate) crit: Option<crit::Crit>,
 }
 
 impl Dos {
@@ -180,6 +191,11 @@ impl Dos {
             present: [false; 26],
             codepage: 437,
             fcb_search: None,
+            retries: crit::RETRIES,
+            retry_delay: crit::DELAY,
+            entry: ([0; 8], 0, 0),
+            crit_req: None,
+            crit: None,
         }
     }
 }
@@ -218,6 +234,13 @@ impl Machine {
             h[10..18].copy_from_slice(&n[..]);
             put(self, ds, off, &h);
         }
+        // A block device header for INT 24h's BP:SI (not in the chain).
+        let mut blk = [0u8; 18];
+        blk[0..4].copy_from_slice(&[0xff; 4]);
+        blk[6..8].copy_from_slice(&retf.to_le_bytes());
+        blk[8..10].copy_from_slice(&retf.to_le_bytes());
+        blk[10] = 26;
+        put(self, ds, crit::BLOCK_DEV, &blk);
         // The list of lists.
         let sv = SYSVARS;
         let w16 = |m: &mut Machine, off: u16, v: u16| put(m, ds, sv.wrapping_add(off), &v.to_le_bytes());
@@ -363,7 +386,9 @@ impl Machine {
         let (class, action, locus) = match code {
             2 | 3 | 15 | 18 => (8, 3, 2),
             4 | 8 => (1, 4, 1),
-            5 | 12 | 32 | 33 => (3, 3, 2),
+            5 | 12 => (3, 3, 2),
+            // Locked: retry after a delay.
+            32 | 33 => (10, 2, 2),
             6 | 9 => (7, 4, 1),
             80 => (12, 3, 2),
             _ => (13, 4, 1),
@@ -404,11 +429,7 @@ impl Machine {
                 self.dos_exit(host, 0, 1);
                 Cb::Done
             }
-            0x24 => {
-                // Critical error: fail the call.
-                self.cpu.set_al(3);
-                Cb::Done
-            }
+            0x24 => self.crit_default(),
             0x25 | 0x26 => {
                 // Absolute disk read/write: not allowed.
                 self.cpu.set_ax(0x0207);
@@ -513,6 +534,7 @@ impl Machine {
             return self.ctrl_c(host);
         }
         self.hw.wr(Machine::indos_addr(), 1);
+        self.dos.entry = (self.cpu.regs, self.cpu.seg[DS].sel, self.cpu.seg[ES].sel);
         let r = self.int21_fn(host, ah);
         self.hw.wr(Machine::indos_addr(), 0);
         r

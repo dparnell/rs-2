@@ -496,6 +496,7 @@ impl Machine {
                 Cb::Done
             }
             shell::CB_SHELL => self.shell_step(host),
+            bios::CB_I24_RET => self.crit_done(host),
             bios::CB_MOUSE_RET => {
                 self.mouse_handler_done();
                 Cb::Done
