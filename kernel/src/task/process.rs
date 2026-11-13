@@ -586,7 +586,9 @@ impl Process {
         // The program's module (and the file image it keeps).
         loader::unregister_exe(&self.exe);
         crate::session::process_ended(self.pid, self.exit_info().map_or(0, |e| e.code));
-        // Close handles (pipes see their writers disappear).
+        // Its byte-range file locks go, then its handles (pipes see
+        // their writers disappear).
+        crate::api::filelock::process_ended(self.pid);
         let hs = core::mem::take(&mut *self.handles.lock());
         drop(hs);
         self.finished.store(true, Ordering::Release);
