@@ -28,7 +28,10 @@ fn ioctl(hf: u32, f: u32, data: &[u8], out: usize) -> (u32, Vec<u8>) {
     buf[..data.len()].copy_from_slice(data);
     let mut parm = [0u8; 1];
     let (mut pl, mut dl) = (1u32, buf.len() as u32);
-    let rc = unsafe { DosDevIOCtl(hf, 5, f, parm.as_mut_ptr(), 1, &mut pl, buf.as_mut_ptr(), buf.len() as u32, &mut dl) };
+    // A buffer with a zero maximum length must be NULL (ERROR_INVALID_PARAMETER
+    // otherwise, as IBM's kernel checks).
+    let pdata = if buf.is_empty() { null_mut() } else { buf.as_mut_ptr() };
+    let rc = unsafe { DosDevIOCtl(hf, 5, f, parm.as_mut_ptr(), 1, &mut pl, pdata, buf.len() as u32, &mut dl) };
     buf.truncate(if rc == 0 { (dl as usize).min(buf.len()) } else { 0 });
     (rc, buf)
 }
