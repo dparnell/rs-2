@@ -600,8 +600,8 @@ impl Process {
         let p = self.clone();
         crate::task::kthread::spawn("procexit", move || {
             // Its session's end (switching the screen, ending pop-ups) is
-            // in the corner still under the big kernel lock (smp.rs).
-            crate::smp::bkl_acquire();
+            // in the corner still under the legacy lock (smp.rs).
+            crate::smp::legacy_acquire();
             p.finish();
         });
     }

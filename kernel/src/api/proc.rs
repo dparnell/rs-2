@@ -550,7 +550,7 @@ fn stop_other_threads(c: &Ctx) {
         return;
     }
     // Make every other CPU pass through the kernel, then wait without the
-    // kernel lock so they can reach the point where they are held.
+    // CPU so they can reach the point where they are held.
     let me = crate::smp::this().bit();
     for cpu in crate::smp::online() {
         if cpu.bit() != me {

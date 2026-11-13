@@ -458,13 +458,13 @@ pub extern "C" fn first_user_return(f: &mut TrapFrame) {
     if !debugged {
         return;
     }
-    if crate::smp::BKL_USER_RETURN || crate::smp::bkl_forced() {
-        crate::smp::bkl_acquire();
+    if crate::smp::bkl_forced() {
+        crate::smp::legacy_acquire();
     }
     if crate::task::before_user_return(f) {
         crate::task::sched::exit_current();
     }
-    crate::smp::bkl_release();
+    crate::smp::legacy_release();
 }
 
 pub(crate) fn connected(p: &Process) -> bool {

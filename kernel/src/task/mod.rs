@@ -201,13 +201,13 @@ pub fn timer_tick(_f: &mut TrapFrame) {
 }
 
 /// A program under DosDebug runs its exceptions and returns to user mode
-/// under the big kernel lock, as DosDebug itself does: the debugger
+/// under the legacy lock, as DosDebug itself does: the debugger
 /// changes a stopped thread's saved registers and FPU state, which that
 /// thread reads and writes on its own way out of the kernel. The trap path
 /// drops the lock when the thread returns to user mode.
 fn debuggee_lock(p: &Process) {
     if p.debugged.load(core::sync::atomic::Ordering::Relaxed) {
-        crate::smp::bkl_acquire();
+        crate::smp::legacy_acquire();
     }
 }
 

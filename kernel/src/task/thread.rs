@@ -85,8 +85,8 @@ pub struct Thread {
     /// Running on a CPU, or still on its stack while being switched away
     /// from: no other CPU may resume it.
     pub on_cpu: AtomicBool,
-    /// Holds the big kernel lock (smp.rs).
-    pub holds_bkl: AtomicBool,
+    /// Holds the legacy lock (smp.rs).
+    pub holds_legacy: AtomicBool,
     /// Tick at which the thread last became ready (starvation boost).
     pub ready_since: AtomicU64,
     /// Temporarily raised for having waited MAXWAIT seconds to run.
@@ -168,7 +168,7 @@ impl Thread {
             kentry: crate::sync::SpinLock::new(None),
             kname: "",
             on_cpu: AtomicBool::new(idle),
-            holds_bkl: AtomicBool::new(false),
+            holds_legacy: AtomicBool::new(false),
             ready_since: AtomicU64::new(0),
             boosted: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),

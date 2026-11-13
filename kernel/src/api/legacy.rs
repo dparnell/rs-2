@@ -1,12 +1,12 @@
-//! Which API calls still run under the big kernel lock (smp.rs) while the
-//! kernel moves to finer locks: a call is converted when every piece of
-//! shared state it touches has its own lock.
+//! Which API calls still run under the legacy lock (smp.rs, what is left
+//! of the big kernel lock): those of the session and device corner. Every
+//! other call runs under the locks of the data it touches.
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::loader::gate::{MODULES, ORDINALS};
 
-/// API names (prefixes, any case) that run without the big kernel lock.
+/// API names (prefixes, any case) that run without the legacy lock.
 const FREE: &[&str] = &[
     // Processes, threads, exceptions and signals.
     "DOSCREATETHREAD", "DOSEXIT", "DOSENTERCRITSEC", "DOSENTERMUSTCOMPLETE", "DOSWAITTHREAD", "DOSKILLTHREAD",
@@ -58,7 +58,7 @@ const FREE: &[&str] = &[
     "DOSREPLACEMODULE", "DOSSETEXTLIBPATH", "DOSQUERYEXTLIBPATH", "DOSGETENV", "DOSLIBINIT",
 ];
 
-/// Calls still under the big kernel lock in modules that are otherwise
+/// Calls still under the legacy lock in modules that are otherwise
 /// free: the session switching corner (pop-ups, display mode, the PM
 /// session, windowed sessions' control), which the keyboard's hot keys
 /// also reach from interrupt context.
@@ -83,8 +83,8 @@ const FREE_MODULES: &[u8] = &[1, 2, 3, 4, 5, 7, 8, 9];
 /// 0 not decided yet, 1 under the lock, 2 free.
 static CACHE: [AtomicU8; MODULES.len() * ORDINALS as usize] = [const { AtomicU8::new(0) }; MODULES.len() * ORDINALS as usize];
 
-/// Whether the API (canonical module and ordinal) needs the big kernel lock.
-pub fn needs_bkl(module: u8, ordinal: u16) -> bool {
+/// Whether the API (canonical module and ordinal) needs the legacy lock.
+pub fn needs_legacy(module: u8, ordinal: u16) -> bool {
     if crate::smp::bkl_forced() {
         return true;
     }

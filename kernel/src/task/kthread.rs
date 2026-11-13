@@ -3,8 +3,9 @@
 //!
 //! A kernel thread runs on the kernel page tables with interrupts enabled,
 //! is scheduled like any other thread (class regular) and is only switched
-//! out when it blocks or yields, as the kernel is not preemptive. It ends
-//! when its function returns.
+//! out when it blocks or yields, as the kernel is not preemptive. It runs
+//! concurrently with other kernel code under the same locks as API calls.
+//! It ends when its function returns.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -22,11 +23,11 @@ pub fn spawn(name: &'static str, f: impl FnOnce() + Send + 'static) -> Arc<Threa
 /// First code a kernel thread runs (switch_stacks returns here).
 pub extern "C" fn kthread_start() -> ! {
     // A new thread does not return through schedule(): finish the switch
-    // and take the kernel lock (kernel threads run kernel code), then
-    // enable interrupts (schedule() disabled them before switching).
+    // (with `bkl`, take the legacy lock), then enable interrupts
+    // (schedule() disabled them before switching).
     sched::finish_switch();
-    if crate::smp::BKL_KTHREADS || crate::smp::bkl_forced() {
-        crate::smp::bkl_acquire();
+    if crate::smp::bkl_forced() {
+        crate::smp::legacy_acquire();
     }
     crate::arch::enable_interrupts();
     {

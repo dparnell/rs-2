@@ -1,5 +1,6 @@
 //! Multiprocessor support: per-CPU data, starting the application
-//! processors (APs), inter-processor interrupts and the big kernel lock.
+//! processors (APs), inter-processor interrupts, TLB shootdowns and the
+//! legacy lock.
 //!
 //! Each CPU finds its [`PerCpu`] through the GS base register. User code
 //! uses GS as an ordinary selector (16-bit OS/2 code especially), so the
@@ -7,10 +8,9 @@
 //! mode: in the kernel GS base is the per-CPU block, in user mode it is
 //! whatever the user's GS selector says.
 //!
-//! Kernel code (API calls, exceptions, kernel threads) runs under one big
-//! kernel lock, taken on entry from user mode and dropped when a thread
-//! blocks or returns to user mode; user code runs on all CPUs at once.
-//! Interrupt handlers do not take it: they only use spin locks.
+//! Kernel code runs on all CPUs at once under per-subsystem and per-object
+//! locks (docs/ARCHITECTURE.md, "Locking"); the legacy lock below is what
+//! remains of the big kernel lock.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -177,16 +177,24 @@ pub fn init_bsp() {
     GS_READY.store(true, Ordering::Release);
 }
 
-// ---- The big kernel lock ----
+// ---- The legacy lock ----
+//
+// What is left of the big kernel lock that all kernel code once ran under:
+// a spin lock a thread holds from when it takes it until it blocks (taken
+// back on wake-up) or returns to user mode, so it makes the stretches
+// between blocking points atomic against each other. It now covers only
+// the session and device corner, whose state (the foreground session,
+// pop-ups, the PM session, display modes, debuggees' saved registers,
+// drive letters of USB sticks and network drives) the keyboard's hot keys
+// also change from interrupt context: the calls api/legacy.rs lists,
+// DosDebug's debuggees in the kernel (task::debuggee_lock), a process's
+// final cleanup (procexit) and the hot-plug thread. Everything else runs
+// under the locks of the data it touches (docs/ARCHITECTURE.md,
+// "Locking").
 
-/// Kernel paths still under the big kernel lock while the kernel moves to
-/// finer locks (API calls decide per call: api/legacy.rs).
-pub const BKL_EXCEPTIONS: bool = false;
-pub const BKL_USER_RETURN: bool = false;
-pub const BKL_KTHREADS: bool = false;
-
-/// `bkl` on the kernel command line: every path takes the big kernel lock
-/// again (the old model), for comparing and for hunting a locking bug.
+/// `bkl` on the kernel command line: every path takes the legacy lock
+/// again, which makes it the big kernel lock of before (comparisons, and
+/// hunting a locking bug).
 static FORCED: AtomicBool = AtomicBool::new(false);
 
 pub fn force_bkl() {
@@ -198,27 +206,26 @@ pub fn bkl_forced() -> bool {
     FORCED.load(Ordering::Relaxed)
 }
 
-static BKL: AtomicBool = AtomicBool::new(false);
+static LEGACY: AtomicBool = AtomicBool::new(false);
 
-
-/// Take the kernel lock for the current thread (no-op if it holds it).
+/// Take the legacy lock for the current thread (no-op if it holds it).
 /// Interrupts are enabled while waiting, so this CPU still answers TLB
-/// shootdowns from the holder.
-pub fn bkl_acquire() {
+/// shootdowns from the holder. Never with a spin lock held.
+pub fn legacy_acquire() {
     let Some(t) = crate::task::sched::current_opt() else { return };
-    if t.holds_bkl.load(Ordering::Relaxed) || t.is_idle() {
+    if t.holds_legacy.load(Ordering::Relaxed) || t.is_idle() {
         return;
     }
     let was = arch::interrupts_enabled();
-    if BKL.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+    if LEGACY.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         arch::enable_interrupts();
         // Test and test-and-set: wait on plain reads, so waiting CPUs do
         // not keep the holder's cache line busy.
         loop {
-            while BKL.load(Ordering::Relaxed) {
+            while LEGACY.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
             }
-            if BKL.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            if LEGACY.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
                 break;
             }
         }
@@ -226,18 +233,18 @@ pub fn bkl_acquire() {
             arch::disable_interrupts();
         }
     }
-    t.holds_bkl.store(true, Ordering::Relaxed);
+    t.holds_legacy.store(true, Ordering::Relaxed);
 }
 
-/// Drop the kernel lock if the current thread holds it.
-pub fn bkl_release() {
+/// Drop the legacy lock if the current thread holds it.
+pub fn legacy_release() {
     let Some(t) = crate::task::sched::current_opt() else { return };
-    bkl_release_for(&t);
+    legacy_release_for(&t);
 }
 
-pub fn bkl_release_for(t: &Thread) -> bool {
-    if t.holds_bkl.swap(false, Ordering::Relaxed) {
-        BKL.store(false, Ordering::Release);
+pub fn legacy_release_for(t: &Thread) -> bool {
+    if t.holds_legacy.swap(false, Ordering::Relaxed) {
+        LEGACY.store(false, Ordering::Release);
         true
     } else {
         false
@@ -311,7 +318,7 @@ pub fn service_tlb() {
     }
 }
 
-/// IPI handlers (called from the trap dispatcher, no kernel lock).
+/// IPI handlers (called from the trap dispatcher).
 pub fn ipi(vector: u8, f: &crate::arch::idt::TrapFrame) {
     match vector {
         IPI_DUMP => crate::debug::dump_cpu(f),

@@ -457,8 +457,8 @@ pub fn schedule() {
     arch::disable_interrupts();
     let c = smp::this();
     let me = c.current().clone().expect("no current thread");
-    // Give up the kernel lock while others run; take it back on return.
-    let had_bkl = smp::bkl_release_for(&me);
+    // Give up the legacy lock while others run; take it back on return.
+    let had_legacy = smp::legacy_release_for(&me);
     let next = {
         let mut s = SCHED.lock();
         // Only threads still marked ready (a thread that died or blocked
@@ -523,8 +523,8 @@ pub fn schedule() {
         me.set_state(State::Running);
         drop(me);
     }
-    if had_bkl {
-        smp::bkl_acquire();
+    if had_legacy {
+        smp::legacy_acquire();
     }
     if was {
         arch::enable_interrupts();

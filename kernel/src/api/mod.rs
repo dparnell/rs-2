@@ -439,11 +439,11 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     match decoded {
         Some((m, o)) if m != 0 || !special_return(o) => {
             let (m8, o16) = names::canonical(m as u8, o as u16);
-            if legacy::needs_bkl(m8, o16) {
-                crate::smp::bkl_acquire();
+            if legacy::needs_legacy(m8, o16) {
+                crate::smp::legacy_acquire();
             }
         }
-        _ => crate::smp::bkl_acquire(),
+        _ => crate::smp::legacy_acquire(),
     }
     let Some((module, ordinal)) = decoded else {
         // int 0x99 executed outside the gate: treat as a protection fault.

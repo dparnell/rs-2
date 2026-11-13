@@ -13,7 +13,7 @@
 //! drivers with a handler and a context word; the trap dispatcher calls
 //! [`dispatch`], which acknowledges the LAPIC and runs the handler. A
 //! handler runs in interrupt context on whatever CPU the message names:
-//! no big kernel lock, only spin locks (try_lock where a thread may hold
+//! only spin locks (try_lock where a thread may hold
 //! the lock), short work, then it wakes the waiting thread ([`Event`]) or
 //! posts to a kernel thread.
 //!
@@ -165,7 +165,10 @@ static LINES: SpinLock<Vec<Line>> = SpinLock::new(Vec::new());
 
 /// Run the handlers of the devices on the INTx line of `vector`.
 fn intx_dispatch(vector: usize) {
-    let Some(g) = LINES.try_lock() else { return };
+    // lock, not try_lock: a holder has interrupts off, so it is never this
+    // CPU's interrupted thread; another CPU dispatching its own line must
+    // not make this one skip its handlers.
+    let g = LINES.lock();
     let hs: Vec<(fn(usize), usize)> = g.iter().filter(|l| l.vector as usize == vector).flat_map(|l| l.handlers.iter().copied()).collect();
     drop(g);
     for (h, c) in hs {
