@@ -4,7 +4,7 @@
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [--desktop]
 //!                  [--type KEYS | --type-file FILE] [--type-at S]
-//!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
+//!                  [--hdd IMG] [--nvme IMG] [--floppy IMG|empty]... [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
@@ -127,6 +127,9 @@ struct Opts {
     hdd: Option<PathBuf>,
     /// Attach this raw disk image as an NVMe drive.
     nvme: Option<PathBuf>,
+    /// Diskette drives A: and B: (an ISA i82077 controller), each with
+    /// a raw image or "empty".
+    floppy: Vec<String>,
     /// `run`: number of processors.
     smp: u32,
     /// Guest RAM (QEMU -m), "512M" unless --mem.
@@ -207,6 +210,7 @@ fn parse(args: &[String]) -> Opts {
         iso: None,
         hdd: None,
         nvme: None,
+        floppy: Vec::new(),
         smp: 2,
         mem: "512M".into(),
         system: false,
@@ -364,6 +368,10 @@ fn parse(args: &[String]) -> Opts {
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
+            }
+            "--floppy" => {
+                i += 1;
+                o.floppy.push(args[i].clone());
             }
             "--nvme" => {
                 i += 1;
@@ -1489,6 +1497,21 @@ fn run(o: &Opts) -> bool {
     }
     if let Some(d) = &o.hdd {
         c.arg("-drive").arg(format!("format=raw,file={}", d.display()));
+    }
+    if !o.floppy.is_empty() {
+        // q35 has no diskette controller of its own.
+        c.args(["-device", "isa-fdc,id=fdc0"]);
+        for (unit, f) in o.floppy.iter().take(2).enumerate() {
+            // The drive's block device is fdN (the monitor's
+            // `change fdN IMG raw` puts another diskette in).
+            if f == "empty" {
+                c.arg("-drive").arg(format!("if=none,id=fd{unit}"));
+                c.arg("-device").arg(format!("floppy,unit={unit},drive=fd{unit},drive-type=144"));
+            } else {
+                c.arg("-drive").arg(format!("if=none,id=fd{unit},format=raw,file={f}"));
+                c.arg("-device").arg(format!("floppy,unit={unit},drive=fd{unit}"));
+            }
+        }
     }
     if let Some(d) = &o.nvme {
         c.arg("-drive").arg(format!("file={},format=raw,if=none,id=nvm0", d.display()));
