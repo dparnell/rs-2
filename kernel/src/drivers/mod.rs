@@ -56,6 +56,8 @@ fn is_fat_type(t: u8) -> bool {
 static WANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 static RESERVED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+/// A free drive letter. Callers hold `fs::MOUNTING` from here until they
+/// have mounted it.
 pub(crate) fn next_letter() -> Option<u8> {
     use core::sync::atomic::Ordering;
     let free = |d: u8| crate::fs::drive(d).is_none();

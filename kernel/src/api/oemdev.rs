@@ -215,8 +215,11 @@ fn pci_ioctl(c: &Ctx, r: &Req) -> u32 {
                 if c.write(r.data, &out) { 0 } else { bad }
             } else {
                 let v = u32::from_le_bytes([p[5], p[6], p[7], p[8]]) & mask;
-                let old = if size == 4 { 0 } else { pci::read32(bus, dev, func, reg) };
-                pci::write32(bus, dev, func, reg, (old & !(mask << shift)) | v << shift);
+                if size == 4 {
+                    pci::write32(bus, dev, func, reg, v);
+                } else {
+                    pci::modify32(bus, dev, func, reg, mask << shift, v << shift);
+                }
                 if c.write_u8(r.data, 0) { 0 } else { bad }
             }
         }
@@ -508,7 +511,7 @@ fn send_event(subid: u16, reserved: u16, data1: u16, data2: u16) -> u16 {
     match subid {
         3 | 4 => {
             let on = subid == 3;
-            APM_STATE.store(if on { state | 1 } else { state & !1 }, Ordering::Relaxed);
+            if on { APM_STATE.fetch_or(1, Ordering::Relaxed) } else { APM_STATE.fetch_and(!1, Ordering::Relaxed) };
             0
         }
         5 => {
@@ -538,7 +541,7 @@ fn send_event(subid: u16, reserved: u16, data1: u16, data2: u16) -> u16 {
         8..=0x0a => 0,
         0x0b | 0x0c => {
             let on = subid == 0x0b;
-            APM_STATE.store(if on { state | 2 } else { state & !2 }, Ordering::Relaxed);
+            if on { APM_STATE.fetch_or(2, Ordering::Relaxed) } else { APM_STATE.fetch_and(!2, Ordering::Relaxed) };
             0
         }
         // Timer-based requests, resume on ring: off or on.

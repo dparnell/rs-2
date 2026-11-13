@@ -174,7 +174,15 @@ pub fn probe_mount(dev: Arc<dyn block::BlockDev>) -> Option<(Arc<dyn FileSystem>
     None
 }
 
+/// Held while drive letters change: mounting, unmounting, remounting, and
+/// by whoever picks a free letter (drivers::next_letter) until it is
+/// mounted (the hot-plug thread, NET USE). Recursive and sleeping: a
+/// remount reads the disk under it. Taken outside the file systems'
+/// locks.
+pub static MOUNTING: crate::sync::RecursiveLock = crate::sync::RecursiveLock::new();
+
 pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
+    let _m = MOUNTING.lock();
     crate::println!("drive {}: {} file system", (b'A' + drive) as char, fs.name());
     // Hard-error pop-ups name the drive; record it now, while no file
     // system lock is held.
@@ -190,6 +198,7 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
 /// Remove drive `d` (its medium went away). Open files keep the file
 /// system object; their I/O fails once the device is gone.
 pub fn unmount(drive: u8) {
+    let _m = MOUNTING.lock();
     let fs = DRIVES.lock()[drive as usize].take();
     if let Some(fs) = fs {
         if let Some(c) = fs.device().as_deref().and_then(|d| d.cache()) {
@@ -246,7 +255,11 @@ pub fn open_count(d: u8) -> usize {
 /// DSK_LOCKDRIVE: fails while files are open on the drive.
 pub fn lock_drive(d: u8) -> Result<(), u32> {
     let prefix = alloc::format!("{}:", (b'A' + d) as char);
-    if SHARES.lock().keys().any(|k| k.starts_with(&prefix)) {
+    // SHARES stays held while LOCKS is set: an open registers its share
+    // under SHARES after checking LOCKS (OpenFile::new), so one or the
+    // other fails.
+    let shares = SHARES.lock();
+    if shares.keys().any(|k| k.starts_with(&prefix)) {
         return Err(err::DRIVE_LOCKED);
     }
     let pid = current_pid();
@@ -304,11 +317,12 @@ pub fn sync_volume(p: &FullPath) -> Result<(), u32> {
 
 /// Mount drive `d` again after its volume was rewritten (FORMAT, CHKDSK /F).
 pub fn remount(d: u8) -> Result<(), u32> {
+    // No unmount, mount or other remount of the letter meanwhile.
+    let _m = MOUNTING.lock();
     let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;
     // A new medium, or a volume rewritten behind the file system's back.
     if let Some(c) = dev.cache() {
-        let _ = c.sync();
-        c.invalidate();
+        let _ = c.sync_invalidate();
     }
     let fs = probe_volume(dev);
     crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
@@ -585,6 +599,10 @@ impl OpenFile {
         let share = open_mode & mode::SHARE_MASK;
         {
             let mut s = SHARES.lock();
+            // Checked again with SHARES held (see lock_drive).
+            if locked_by_other(path.drive) {
+                return Err(err::DRIVE_LOCKED);
+            }
             let v = s.entry(key.clone()).or_default();
             for &(oa, os) in v.iter() {
                 if !allows(os, access) || !allows(share, oa) {
@@ -617,8 +635,9 @@ pub enum Handle {
     Pipe(Arc<crate::pipe::PipeEnd>),
     /// One end of a named pipe instance.
     NPipe(Arc<crate::npipe::End>),
-    /// DosPhysicalDisk IOCtl handle for disk n (0-based).
-    PhysDisk(u32),
+    /// DosPhysicalDisk IOCtl handle for disk n (0-based) and the disk
+    /// itself (hot-plugging renumbers the list).
+    PhysDisk(u32, Arc<dyn block::BlockDev>),
     /// The DOS$ device (reboot IOCtl).
     DosDev,
     /// A logical drive opened for DASD access.

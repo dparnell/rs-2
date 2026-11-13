@@ -49,16 +49,44 @@ fn read_raw() -> [u8; 7] {
 
 /// Serialises the CMOS index/data port pair: the timer interrupt reads the
 /// clock too (tick()), so it only tries the lock.
+/// Held with interrupts off, as a spin lock: a holder that a CPU's timer
+/// interrupt (or another thread) could stop would leave others spinning
+/// with interrupts off. The interrupt flag to restore is kept with it.
 static CMOS_LOCK: AtomicBool = AtomicBool::new(false);
+static CMOS_IF: AtomicBool = AtomicBool::new(false);
 
 fn lock_cmos() {
+    let irq = crate::arch::interrupts_enabled();
+    crate::arch::disable_interrupts();
     while CMOS_LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         core::hint::spin_loop();
+        crate::smp::service_tlb();
     }
+    CMOS_IF.store(irq, Ordering::Relaxed);
+}
+
+/// The lock if free (the timer interrupt: it may have interrupted a holder
+/// on this CPU... which cannot be, interrupts being off while held, but
+/// another CPU may hold it).
+fn try_lock_cmos() -> bool {
+    let irq = crate::arch::interrupts_enabled();
+    crate::arch::disable_interrupts();
+    if CMOS_LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+        CMOS_IF.store(irq, Ordering::Relaxed);
+        return true;
+    }
+    if irq {
+        crate::arch::enable_interrupts();
+    }
+    false
 }
 
 fn unlock_cmos() {
+    let irq = CMOS_IF.load(Ordering::Relaxed);
     CMOS_LOCK.store(false, Ordering::Release);
+    if irq {
+        crate::arch::enable_interrupts();
+    }
 }
 
 /// Read the CMOS clock (to the second).
@@ -70,8 +98,7 @@ fn read_cmos() -> DateTime {
 /// Read the CMOS clock if nobody else is reading it (the timer interrupt
 /// may have interrupted a reader on this processor).
 fn try_read_cmos() -> Option<DateTime> {
-    CMOS_LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).ok()?;
-    Some(read_locked())
+    try_lock_cmos().then(read_locked)
 }
 
 fn read_locked() -> DateTime {
@@ -141,7 +168,7 @@ pub fn tick() {
     if STATE.load(Ordering::Acquire) != 1 {
         return;
     }
-    if CMOS_LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+    if !try_lock_cmos() {
         return;
     }
     let busy = cmos(0x0a) & 0x80 != 0;
@@ -266,6 +293,10 @@ fn write_cmos(t: &DateTime) {
 /// Set the clock (DosSetDateTime, CLOCK$): the CMOS clock and the system
 /// clock, which may go backwards here.
 pub fn set(t: &DateTime, hundredths: u8) {
+    // Two settings at once: the CMOS and the system clock end up with the
+    // same one.
+    static SET: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+    let _g = SET.lock();
     start();
     write_cmos(t);
     let up = mono_ms();

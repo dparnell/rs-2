@@ -206,6 +206,9 @@ struct Debuggee {
     frozen: Vec<u32>,
     /// Threads held in the kernel by the debugger.
     parked: Vec<u32>,
+    /// FPU images DBG_C_WriteCoRegs set, which each thread loads itself
+    /// when it wakes in park (its FPU state is live in a CPU while it runs).
+    fpu_pending: Vec<(u32, alloc::boxed::Box<crate::task::thread::FpuState>)>,
     /// Threads the debugger knows (thread 1, and those it was told of).
     announced: Vec<u32>,
     /// Modules reported with DBG_N_ModuleLoad.
@@ -253,6 +256,7 @@ pub fn traced(p: &Arc<Process>) {
         verdicts: Vec::new(),
         frozen: Vec::new(),
         parked: Vec::new(),
+        fpu_pending: Vec::new(),
         announced: alloc::vec![1],
         modules: Vec::new(),
         last_tid: 1,
@@ -338,7 +342,15 @@ fn park(t: &Arc<Thread>, p: &Arc<Process>) {
     WAIT.wait_uninterruptible_until(deadline, || {
         t.exit_requested() || with(pid, |d| d.released(tid)).unwrap_or(true)
     });
-    let _ = with(pid, |d| d.parked.retain(|&x| x != tid));
+    let fpu = with(pid, |d| {
+        d.parked.retain(|&x| x != tid);
+        d.fpu_pending.iter().position(|x| x.0 == tid).map(|i| d.fpu_pending.remove(i).1)
+    })
+    .flatten();
+    if let Some(img) = fpu {
+        // The debugger's coprocessor registers, loaded on this thread.
+        unsafe { core::arch::asm!("fxrstor64 [{}]", in(reg) img.0.as_ptr(), options(nostack)) };
+    }
     let (debugger, tracer, since) = with(pid, |d| (d.debugger, d.tracer, d.since)).unwrap_or((0, 0, 0));
     let gone = if debugger != 0 {
         process::by_pid(debugger).is_none_or(|q| q.exit_info().is_some())
@@ -458,13 +470,9 @@ pub extern "C" fn first_user_return(f: &mut TrapFrame) {
     if !debugged {
         return;
     }
-    if crate::smp::bkl_forced() {
-        crate::smp::legacy_acquire();
-    }
     if crate::task::before_user_return(f) {
         crate::task::sched::exit_current();
     }
-    crate::smp::legacy_release();
 }
 
 pub(crate) fn connected(p: &Process) -> bool {
@@ -785,6 +793,29 @@ fn set_watch(p: &Process, u: &mut Udb) {
 
 // ---- The debugger's side ----
 
+/// Run `f` on a debuggee thread's saved user registers while that thread
+/// cannot touch them: it is parked (it takes DEBUGGEES before it looks at
+/// its frame again) or blocked in another kernel wait (its frame waits for
+/// the call's return). A thread between two parks is waited for briefly.
+fn with_frame<R>(p: &Process, t: &Thread, f: impl FnOnce(&mut TrapFrame) -> R) -> R {
+    let mut f = Some(f);
+    for _ in 0..100 {
+        let r = with(p.pid, |d| {
+            if d.parked.contains(&t.tid) || t.state() == State::Blocked {
+                Some((f.take().unwrap())(t.user_frame()))
+            } else {
+                None
+            }
+        });
+        match r {
+            Some(Some(r)) => return r,
+            None => break,
+            Some(None) => sched::sleep_ms(1),
+        }
+    }
+    (f.take().unwrap())(t.user_frame())
+}
+
 fn thread_of(p: &Process, tid: u32) -> Option<Arc<Thread>> {
     p.threads.lock().iter().find(|t| t.tid == tid && t.state() != State::Dead).cloned()
 }
@@ -807,7 +838,7 @@ fn put_seg(u: &mut Udb, block: usize, space: &vm::AddressSpace, sel: u16, base: 
 }
 
 fn read_regs(p: &Process, t: &Thread, u: &mut Udb) {
-    let f = *t.user_frame();
+    let f = with_frame(p, t, |f| *f);
     u.set(udb::TID, t.tid);
     u.set(udb::MTE, p.exe.hmte as u32);
     for (o, v) in [
@@ -858,7 +889,7 @@ fn write_regs(p: &Process, t: &Thread, u: &Udb) -> bool {
     if !selectors_ok(&p.space.lock(), u) {
         return false;
     }
-    let f = t.user_frame();
+    with_frame(p, t, |f| {
     f.rax = u.get(udb::EAX) as u64;
     f.rcx = u.get(udb::ECX) as u64;
     f.rdx = u.get(udb::EDX) as u64;
@@ -876,6 +907,7 @@ fn write_regs(p: &Process, t: &Thread, u: &Udb) -> bool {
     f.fs = u.sel(udb::FS) as u64;
     f.gs = u.sel(udb::GS) as u64;
     f.ss = u.sel(udb::SS) as u64;
+    });
     true
 }
 
@@ -997,7 +1029,7 @@ fn run(_c: &Ctx, p: &Arc<Process>, u: &mut Udb, step: u32) {
             u.error(err::INVALID_THREADID);
             return;
         };
-        t.user_frame().rflags |= TF;
+        with_frame(p, &t, |f| f.rflags |= TF);
     }
     let _ = with(pid, |d| {
         d.running = true;
@@ -1339,10 +1371,14 @@ fn thread_command(c: &Ctx, p: &Arc<Process>, u: &mut Udb, cmd: i32, tid: u32, ti
                 u.error(err::INVALID_PARAMETER);
                 return;
             }
-            // The thread is switched out: its saved FPU state is current.
-            let fx = unsafe { &mut (*t.fpu.get()).0 };
+            // The thread is stopped and switched out: its saved FPU state
+            // is current (with one the debugger wrote and the thread has
+            // not loaded yet on top).
+            let mut fx = alloc::boxed::Box::new(crate::task::thread::FpuState([0; 512]));
+            let pending = with(p.pid, |d| d.fpu_pending.iter().find(|x| x.0 == tid).map(|x| x.1 .0)).flatten();
+            fx.0 = pending.unwrap_or_else(|| unsafe { (*t.fpu.get()).0 });
             if cmd == cmd::READ_CO_REGS {
-                let s = fsave_from_fxsave(fx);
+                let s = fsave_from_fxsave(&fx.0);
                 if !c.write(u.get(udb::BUFFER), &s) {
                     u.error(err::INVALID_ADDRESS);
                 }
@@ -1352,7 +1388,11 @@ fn thread_command(c: &Ctx, p: &Arc<Process>, u: &mut Udb, cmd: i32, tid: u32, ti
                     u.error(err::INVALID_ADDRESS);
                     return;
                 }
-                fxsave_from_fsave(fx, &s);
+                fxsave_from_fsave(&mut fx.0, &s);
+                let _ = with(p.pid, |d| {
+                    d.fpu_pending.retain(|x| x.0 != tid);
+                    d.fpu_pending.push((tid, fx));
+                });
             }
         }
         cmd::FREEZE => {

@@ -81,6 +81,13 @@ pub struct Config {
 
 static CONFIG: SpinLock<Option<Config>> = SpinLock::new(None);
 
+/// The requester's administration (start, stop, logon, NET USE add and
+/// delete): one at a time, held across the network I/O of a use, so a
+/// check (the letter is free, the last use of a server goes) stays true
+/// until it is acted on. Taken before fs::MOUNTING and the servers'
+/// connections.
+static ADMIN: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+
 pub fn config() -> Option<Config> {
     CONFIG.lock().clone().filter(|c| c.started)
 }
@@ -88,6 +95,7 @@ pub fn config() -> Option<Config> {
 /// Start the requester. `opts`: `key=value` separated by `;`: wins=a.b.c.d[:port],
 /// smbport=, nbport=, lmhosts=path, othdomains=a,b.
 pub fn start(computer: &str, workgroup: &str, opts: &str) -> Result<(), u32> {
+    let _a = ADMIN.lock();
     let mut c = Config {
         started: true,
         computer: smb::wire::upper(computer),
@@ -126,6 +134,7 @@ pub fn start(computer: &str, workgroup: &str, opts: &str) -> Result<(), u32> {
 
 /// Stop the requester: every use is deleted, every session ends.
 pub fn stop() {
+    let _a = ADMIN.lock();
     let all: Vec<Use> = USES.lock().drain(..).collect();
     for u in all {
         if let Local::Drive(d) = u.local {
@@ -144,6 +153,7 @@ pub fn stop() {
 
 /// LOGON (user, password, domain) or LOGOFF (empty user).
 pub fn logon(user: &str, password: &str, domain: &str) -> Result<(), u32> {
+    let _a = ADMIN.lock();
     let mut g = CONFIG.lock();
     let c = g.as_mut().filter(|c| c.started).ok_or(NERR_WKSTA_NOT_STARTED)?;
     c.user = user.to_string();
@@ -954,6 +964,7 @@ static USES: SpinLock<Vec<Use>> = SpinLock::new(Vec::new());
 /// `\\server\share`. `password`/`user` (None: the logon's) apply to the
 /// server's session.
 pub fn use_add(local: &str, remote: &str, password: Option<&str>, user: Option<&str>) -> Result<(), u32> {
+    let _a = ADMIN.lock();
     let c = config().ok_or(NERR_WKSTA_NOT_STARTED)?;
     let local = Local::parse(local)?;
     let (sv, sh) = split_unc(remote).ok_or(crate::api::err::INVALID_PARAMETER)?;
@@ -981,6 +992,11 @@ pub fn use_add(local: &str, remote: &str, password: Option<&str>, user: Option<&
         (Local::Lpt(_), _) | (Local::Drive(_), _) => return Err(NERR_BAD_DEV),
     }
     if let Local::Drive(d) = local {
+        // The letter may have gone to a USB stick meanwhile.
+        let _m = super::MOUNTING.lock();
+        if super::drive(d).is_some() {
+            return Err(ERROR_ALREADY_ASSIGNED);
+        }
         super::mount(d, RedirFs::new(&sv, &sh));
     }
     let remote = alloc::format!("\\\\{sv}\\{sh}");
@@ -991,6 +1007,7 @@ pub fn use_add(local: &str, remote: &str, password: Option<&str>, user: Option<&
 /// NET USE /D / NetUseDel: `name` is a local device or a UNC name.
 /// Without `force`, a drive with open files is refused.
 pub fn use_del(name: &str, force: bool) -> Result<(), u32> {
+    let _a = ADMIN.lock();
     let target = if name.starts_with("\\\\") || name.starts_with("//") {
         let (sv, sh) = split_unc(name).ok_or(NERR_USE_NOT_FOUND)?;
         let r = alloc::format!("\\\\{sv}\\{sh}");

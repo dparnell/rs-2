@@ -102,6 +102,18 @@ pub fn info(sid: u32, h: u16) -> Result<Info, u32> {
     with(sid, |s| s.kbds.iter().find(|k| k.0 == h).map(|k| k.2).ok_or(ERROR_KBD_INVALID_HANDLE))
 }
 
+/// Change a keyboard handle's settings in place (one critical section:
+/// another thread's change in between is not lost).
+pub fn modify_info(sid: u32, h: u16, f: impl FnOnce(&mut Info)) -> Result<(), u32> {
+    with(sid, |s| match s.kbds.iter_mut().find(|k| k.0 == h) {
+        Some(k) => {
+            f(&mut k.2);
+            Ok(())
+        }
+        None => Err(ERROR_KBD_INVALID_HANDLE),
+    })
+}
+
 pub fn set_info(sid: u32, h: u16, i: Info) -> Result<(), u32> {
     with(sid, |s| match s.kbds.iter_mut().find(|k| k.0 == h) {
         Some(k) => {

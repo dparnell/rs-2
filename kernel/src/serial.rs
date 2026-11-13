@@ -16,7 +16,22 @@ pub fn init() {
     }
 }
 
+/// COM1's registers (chardev.rs takes it for line settings and DosWrite
+/// to COM1).
+pub static COM1_HW: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
+
 pub fn write_byte(b: u8) {
+    // Tried, not waited for: the log must get out even if a CPU stopped
+    // holding it (panics).
+    let mut g = None;
+    for _ in 0..100_000 {
+        g = COM1_HW.try_lock();
+        if g.is_some() {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    let _g = g;
     unsafe {
         let mut spins = 0;
         while inb(COM1 + 5) & 0x20 == 0 && spins < 100_000 {

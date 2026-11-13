@@ -22,13 +22,9 @@ pub fn spawn(name: &'static str, f: impl FnOnce() + Send + 'static) -> Arc<Threa
 
 /// First code a kernel thread runs (switch_stacks returns here).
 pub extern "C" fn kthread_start() -> ! {
-    // A new thread does not return through schedule(): finish the switch
-    // (with `bkl`, take the legacy lock), then enable interrupts
-    // (schedule() disabled them before switching).
+    // A new thread does not return through schedule(): finish the switch,
+    // then enable interrupts (schedule() disabled them before switching).
     sched::finish_switch();
-    if crate::smp::bkl_forced() {
-        crate::smp::legacy_acquire();
-    }
     crate::arch::enable_interrupts();
     {
         let f = sched::current().kentry.lock().take();

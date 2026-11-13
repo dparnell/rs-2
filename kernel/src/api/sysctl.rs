@@ -218,6 +218,10 @@ pub fn dos_shutdown(c: &mut Ctx) -> u32 {
     if r > 1 {
         return err::INVALID_PARAMETER;
     }
+    // One shutdown at a time (a second one waits and finds the volumes
+    // stopped).
+    static ONE: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+    let _one = ONE.lock();
     let mut n = 0;
     for p in crate::task::process::all() {
         let files: alloc::vec::Vec<_> = p
