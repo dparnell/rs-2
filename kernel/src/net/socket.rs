@@ -74,7 +74,13 @@ struct Handle {
     linger: Option<u32>,
     /// Bumped by so_cancel(): blocked calls on the handle end with EINTR.
     cancel: u32,
+    /// Unique to this socket (the stack reuses ids at once): a call
+    /// resolved its handle before a soclose on another CPU must not reach
+    /// the socket that got the id next (see `stack_h`).
+    serial: u64,
 }
+
+static SERIAL: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
 #[derive(Default)]
 struct Table {
@@ -131,13 +137,35 @@ fn insert(pid: u32, id: usize, kind: Kind) -> Result<u32> {
     let t = g.entry(pid).or_default();
     t.map.insert(
         n,
-        Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, cancel: 0 },
+        Handle {
+            id,
+            kind,
+            nonblock: false,
+            rcv_timeout: None,
+            snd_timeout: None,
+            linger: None,
+            cancel: 0,
+            serial: SERIAL.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
+        },
     );
     Ok(n)
 }
 
 fn stack<R>(f: impl FnOnce(&mut Stack, u64) -> R) -> Result<R> {
     super::with_stack(f).ok_or(ENETDOWN)
+}
+
+/// Whether the socket of `serial` is still open in some process.
+fn live(serial: u64) -> bool {
+    TABLES.lock().values().any(|t| t.map.values().any(|x| x.serial == serial))
+}
+
+/// `f` on the stack for socket handle `h`, if it is still open: checked
+/// with the stack locked, under which soclose takes it out of the tables
+/// and closes its stack socket (ENOTSOCK otherwise).
+fn stack_h<R>(h: &Handle, f: impl FnOnce(&mut Stack, u64) -> R) -> Result<R> {
+    let serial = h.serial;
+    stack(|st, now| live(serial).then(|| f(st, now)))?.ok_or(ENOTSOCK)
 }
 
 /// Longest sleep between two looks at a blocked call's condition (a
@@ -152,7 +180,7 @@ const RECHECK_MS: u64 = 1000;
 fn blocking<T>(
     nonblock: bool,
     timeout_ms: Option<u64>,
-    on: Option<(u32, u32, u32)>,
+    on: Option<(u32, u32, u32, u64)>,
     ids: &[usize],
     mut op: impl FnMut(&mut Stack, u64) -> core::result::Result<T, Error>,
 ) -> Result<T> {
@@ -163,12 +191,13 @@ fn blocking<T>(
     }
     let r = loop {
         w.arm();
-        if let Some((pid, s, at_start)) = on {
-            if get(pid, s).map_or(true, |h| h.cancel != at_start) {
+        if let Some((pid, s, at_start, serial)) = on {
+            if get(pid, s).map_or(true, |h| h.cancel != at_start || h.serial != serial) {
                 break Err(EINTR);
             }
         }
-        match stack(&mut op) {
+        let serial = on.map(|o| o.3);
+        match stack(|st, now| if serial.is_none_or(live) { op(st, now) } else { Err(Error::BadSocket) }) {
             Err(e) => break Err(e),
             Ok(Ok(v)) => break Ok(v),
             Ok(Err(Error::WouldBlock)) if !nonblock => {
@@ -228,12 +257,12 @@ pub fn create(pid: u32, domain: u32, typ: u32, proto: u32) -> Result<u32> {
 
 pub fn bind(pid: u32, s: u32, ep: Endpoint) -> Result<()> {
     let h = get(pid, s)?;
-    stack(|st, _| st.bind(h.id, ep))?.map_err(Error::errno)
+    stack_h(&h, |st, _| st.bind(h.id, ep))?.map_err(Error::errno)
 }
 
 pub fn listen(pid: u32, s: u32, backlog: u32) -> Result<()> {
     let h = get(pid, s)?;
-    stack(|st, _| st.listen(h.id, backlog as usize))?.map_err(Error::errno)
+    stack_h(&h, |st, _| st.listen(h.id, backlog as usize))?.map_err(Error::errno)
 }
 
 /// accept(): the new socket and the peer's address.
@@ -242,7 +271,7 @@ pub fn accept(pid: u32, s: u32) -> Result<(u32, Endpoint)> {
     if h.kind != Kind::Tcp {
         return Err(EOPNOTSUPP);
     }
-    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, Some((pid, s, h.cancel)), &[h.id], |st, _| st.accept(h.id))?;
+    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, Some((pid, s, h.cancel, h.serial)), &[h.id], |st, _| st.accept(h.id))?;
     match insert(pid, id, Kind::Tcp) {
         Ok(n) => Ok((n, peer)),
         Err(e) => {
@@ -256,18 +285,18 @@ pub fn accept(pid: u32, s: u32) -> Result<(u32, Endpoint)> {
 /// non-blocking ones get EINPROGRESS and select() for writing.
 pub fn connect(pid: u32, s: u32, ep: Endpoint) -> Result<()> {
     let h = get(pid, s)?;
-    stack(|st, now| st.connect(h.id, ep, now))?.map_err(Error::errno)?;
+    stack_h(&h, |st, now| st.connect(h.id, ep, now))?.map_err(Error::errno)?;
     if h.kind != Kind::Tcp {
         return Ok(());
     }
     if h.nonblock {
-        return match stack(|st, _| st.connect_status(h.id))? {
+        return match stack_h(&h, |st, _| st.connect_status(h.id))? {
             Ok(true) => Ok(()),
             Ok(false) => Err(EINPROGRESS),
             Err(e) => Err(e.errno()),
         };
     }
-    blocking(false, None, Some((pid, s, h.cancel)), &[h.id], |st, _| match st.connect_status(h.id) {
+    blocking(false, None, Some((pid, s, h.cancel, h.serial)), &[h.id], |st, _| match st.connect_status(h.id) {
         Ok(true) => Ok(()),
         Ok(false) => Err(Error::WouldBlock),
         Err(e) => Err(e),
@@ -288,23 +317,23 @@ pub fn send(pid: u32, s: u32, data: &[u8], flags: u32, to: Option<Endpoint>) -> 
     let nb = nonblock(&h, flags);
     let ids = [h.id];
     if h.kind != Kind::Tcp {
-        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| match to {
+        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel, h.serial)), &ids, |st, now| match to {
             Some(ep) => st.send_to(h.id, data, ep, now),
             None => st.send(h.id, data, now),
         });
     }
     if flags & MSG_OOB != 0 {
         // Urgent data goes in one piece.
-        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| st.send_urgent(h.id, data, now));
+        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel, h.serial)), &ids, |st, now| st.send_urgent(h.id, data, now));
     }
     let mut done = 0;
     loop {
-        let r = blocking(nb || done > 0, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| st.send(h.id, &data[done..], now));
+        let r = blocking(nb || done > 0, h.snd_timeout, Some((pid, s, h.cancel, h.serial)), &ids, |st, now| st.send(h.id, &data[done..], now));
         match r {
             Ok(n) => done += n,
             Err(EWOULDBLOCK) if done > 0 && !nb => {
                 // Partly queued: wait for room for the rest.
-                let r = blocking(false, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, _| match st.ready(h.id) {
+                let r = blocking(false, h.snd_timeout, Some((pid, s, h.cancel, h.serial)), &ids, |st, _| match st.ready(h.id) {
                     Ok(Ready { write: true, .. }) => Ok(()),
                     Ok(_) => Err(Error::WouldBlock),
                     Err(e) => Err(e),
@@ -331,36 +360,40 @@ pub fn recv(pid: u32, s: u32, len: usize, flags: u32) -> Result<(Vec<u8>, Endpoi
             return Err(EOPNOTSUPP);
         }
         // The urgent byte: never waits for it (BSD).
-        let b = stack(|st, _| st.recv_urgent(h.id, peek))?.map_err(Error::errno)?;
-        let peer = stack(|st, _| st.peer_endpoint(h.id))?.unwrap_or_default();
+        let b = stack_h(&h, |st, _| st.recv_urgent(h.id, peek))?.map_err(Error::errno)?;
+        let peer = stack_h(&h, |st, _| st.peer_endpoint(h.id))?.unwrap_or_default();
         return Ok((if len == 0 { alloc::vec![] } else { alloc::vec![b] }, peer));
     }
     let mut buf = alloc::vec![0u8; len];
     let (n, from) =
-        blocking(nonblock(&h, flags), h.rcv_timeout, Some((pid, s, h.cancel)), &[h.id], |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
+        blocking(nonblock(&h, flags), h.rcv_timeout, Some((pid, s, h.cancel, h.serial)), &[h.id], |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
     buf.truncate(n);
     Ok((buf, from))
 }
 
 pub fn shutdown(pid: u32, s: u32, how: u32) -> Result<()> {
     let h = get(pid, s)?;
-    stack(|st, now| st.shutdown(h.id, how, now))?.map_err(Error::errno)
+    stack_h(&h, |st, now| st.shutdown(h.id, how, now))?.map_err(Error::errno)
 }
 
 /// soclose(): the handle goes at once; a TCP connection finishes in the
 /// background (or is reset with SO_LINGER and a zero timeout).
 pub fn close(pid: u32, s: u32) -> Result<()> {
-    let h = {
-        let mut g = TABLES.lock();
-        let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
-        let h = g.get_mut(&o).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
-        // Closed for every process that had it in its list.
-        for t in g.values_mut() {
-            t.map.remove(&s);
-        }
-        h
-    };
-    stack(|st, now| if h.linger == Some(0) { st.abort(h.id, now) } else { st.close(h.id, now) })?.map_err(Error::errno)
+    // Out of the tables and closed in one stack critical section (see
+    // stack_h).
+    stack(|st, now| {
+        let h = {
+            let mut g = TABLES.lock();
+            let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
+            let h = g.get_mut(&o).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
+            // Closed for every process that had it in its list.
+            for t in g.values_mut() {
+                t.map.remove(&s);
+            }
+            h
+        };
+        if h.linger == Some(0) { st.abort(h.id, now) } else { st.close(h.id, now) }.map_err(Error::errno)
+    })?
 }
 
 /// select() in OS/2's form: `socks` holds the read, then write, then
@@ -425,8 +458,8 @@ pub fn ioctl(pid: u32, s: u32, cmd: u32, arg: u32) -> Result<u32> {
     let h = get(pid, s)?;
     match cmd {
         FIONBIO => update(pid, s, |x| x.nonblock = arg != 0).map(|_| 0),
-        FIONREAD => Ok(stack(|st, _| st.available(h.id))?.map_err(Error::errno)? as u32),
-        SIOCATMARK => Ok(stack(|st, _| st.at_mark(h.id))?.map_err(Error::errno)? as u32),
+        FIONREAD => Ok(stack_h(&h, |st, _| st.available(h.id))?.map_err(Error::errno)? as u32),
+        SIOCATMARK => Ok(stack_h(&h, |st, _| st.at_mark(h.id))?.map_err(Error::errno)? as u32),
         _ => Err(EINVAL),
     }
 }
@@ -459,16 +492,16 @@ pub fn set_option(pid: u32, s: u32, level: u32, opt: u32, val: &[u8]) -> Result<
     match (level, opt) {
         (SOL_SOCKET, SO_REUSEADDR) => {
             let on = int(0)? != 0;
-            stack(|st, _| st.set_reuse_addr(h.id, on))?.map_err(Error::errno)
+            stack_h(&h, |st, _| st.set_reuse_addr(h.id, on))?.map_err(Error::errno)
         }
         (SOL_SOCKET, SO_BROADCAST) => {
             let on = int(0)? != 0;
-            stack(|st, _| st.set_broadcast(h.id, on))?.map_err(Error::errno)
+            stack_h(&h, |st, _| st.set_broadcast(h.id, on))?.map_err(Error::errno)
         }
         (SOL_SOCKET, SO_SNDBUF) | (SOL_SOCKET, SO_RCVBUF) => {
             let n = int(0)? as usize;
             let (snd, rcv) = if opt == SO_SNDBUF { (Some(n), None) } else { (None, Some(n)) };
-            stack(|st, _| st.set_buffers(h.id, snd, rcv))?.map_err(Error::errno)
+            stack_h(&h, |st, _| st.set_buffers(h.id, snd, rcv))?.map_err(Error::errno)
         }
         (SOL_SOCKET, SO_KEEPALIVE) | (SOL_SOCKET, SO_OOBINLINE) | (IPPROTO_TCP, TCP_NODELAY) => {
             let on = int(0)? != 0;
@@ -481,7 +514,7 @@ pub fn set_option(pid: u32, s: u32, level: u32, opt: u32, val: &[u8]) -> Result<
                 SO_OOBINLINE => TcpFlag::OobInline,
                 _ => TcpFlag::NoDelay,
             };
-            stack(|st, _| st.set_tcp_flag(h.id, f, on))?.map_err(Error::errno)
+            stack_h(&h, |st, _| st.set_tcp_flag(h.id, f, on))?.map_err(Error::errno)
         }
         (SOL_SOCKET, SO_LINGER) => {
             let (on, secs) = (int(0)?, int(4)?);
@@ -514,14 +547,14 @@ pub fn get_option(pid: u32, s: u32, level: u32, opt: u32) -> Result<Vec<u8>> {
             Kind::Udp => SOCK_DGRAM,
             Kind::Raw(_) => SOCK_RAW,
         }),
-        (SOL_SOCKET, SO_ERROR) => int(stack(|st, _| st.take_error(h.id))?.map_err(Error::errno)?.map_or(0, Error::errno)),
-        (SOL_SOCKET, SO_ACCEPTCONN) => int(stack(|st, _| st.is_listening(h.id))?.map_err(Error::errno)? as u32),
+        (SOL_SOCKET, SO_ERROR) => int(stack_h(&h, |st, _| st.take_error(h.id))?.map_err(Error::errno)?.map_or(0, Error::errno)),
+        (SOL_SOCKET, SO_ACCEPTCONN) => int(stack_h(&h, |st, _| st.is_listening(h.id))?.map_err(Error::errno)? as u32),
         (SOL_SOCKET, SO_REUSEADDR) | (SOL_SOCKET, SO_BROADCAST) => {
-            let (r, b) = stack(|st, _| st.options(h.id))?.map_err(Error::errno)?;
+            let (r, b) = stack_h(&h, |st, _| st.options(h.id))?.map_err(Error::errno)?;
             int(if opt == SO_REUSEADDR { r } else { b } as u32)
         }
         (SOL_SOCKET, SO_SNDBUF) | (SOL_SOCKET, SO_RCVBUF) => {
-            let (snd, rcv) = stack(|st, _| st.buffers(h.id))?.map_err(Error::errno)?;
+            let (snd, rcv) = stack_h(&h, |st, _| st.buffers(h.id))?.map_err(Error::errno)?;
             int(if opt == SO_SNDBUF { snd } else { rcv } as u32)
         }
         (SOL_SOCKET, SO_KEEPALIVE) | (SOL_SOCKET, SO_OOBINLINE) | (IPPROTO_TCP, TCP_NODELAY) => {
@@ -536,7 +569,7 @@ pub fn get_option(pid: u32, s: u32, level: u32, opt: u32) -> Result<Vec<u8>> {
                     SO_OOBINLINE => TcpFlag::OobInline,
                     _ => TcpFlag::NoDelay,
                 };
-                int(stack(|st, _| st.tcp_flag(h.id, f))?.map_err(Error::errno)? as u32)
+                int(stack_h(&h, |st, _| st.tcp_flag(h.id, f))?.map_err(Error::errno)? as u32)
             }
         }
         (IPPROTO_TCP, TCP_MAXSEG) if h.kind == Kind::Tcp => int(1460),
@@ -555,7 +588,7 @@ pub fn get_option(pid: u32, s: u32, level: u32, opt: u32) -> Result<Vec<u8>> {
 /// getsockname() / getpeername().
 pub fn name(pid: u32, s: u32, peer: bool) -> Result<Endpoint> {
     let h = get(pid, s)?;
-    stack(|st, _| if peer { st.peer_endpoint(h.id) } else { st.local_endpoint(h.id) })?.map_err(Error::errno)
+    stack_h(&h, |st, _| if peer { st.peer_endpoint(h.id) } else { st.local_endpoint(h.id) })?.map_err(Error::errno)
 }
 
 /// Resolve a host name to IPv4 addresses; the error is an h_errno value

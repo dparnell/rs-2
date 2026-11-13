@@ -10,6 +10,7 @@
 extern crate alloc;
 
 mod api;
+mod corner;
 mod files;
 mod ipc;
 mod kill;
@@ -227,6 +228,7 @@ const SECTIONS: &[(&str, fn())] = &[
     ("more", more::run),
     ("sched", sched::run),
     ("smp", smp::run),
+    ("corner", corner::run),
 ];
 
 fn words(s: &[u8]) -> Vec<String> {

@@ -115,7 +115,10 @@ pub struct Process {
     /// 16-bit signal handlers: (far handler, action) per signal number.
     pub signals: SpinLock<[(u32, u32); 8]>,
     /// Open directory searches (DosFindFirst handles).
-    pub searches: SpinLock<alloc::collections::BTreeMap<u32, crate::api::file::Search>>,
+    /// Each search has its own lock: DosFindNext fills the caller's buffer
+    /// (reading EAs from the disk) with it, DosFindClose takes it out of
+    /// the table meanwhile.
+    pub searches: SpinLock<alloc::collections::BTreeMap<u32, Arc<crate::sync::Mutex<crate::api::file::Search>>>>,
     /// XCPT_SIGNAL kinds delivered and not yet acknowledged (bit per
     /// 16-bit signal number): further ones wait.
     pub sig_held: AtomicU32,
@@ -361,6 +364,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let calls = crate::api::module::init_order(core::slice::from_ref(&exe), &proc);
     crate::api::module::start(&proc, &t, t.user_frame(), calls, true, None);
     PROCESSES.lock().push(proc.clone());
+    crate::session::claim_leader(p.session, pid);
     if p.traced {
         crate::api::debug::traced(&proc);
     }
@@ -566,6 +570,7 @@ impl Process {
             // Mutexes it owned: waiters get ERROR_SEM_OWNER_DIED now.
             crate::api::sem::thread_ended(self.pid, me);
             crate::api::xproc::thread_ended(self, me);
+            crate::api::module::thread_ended(sched::current().id);
             // The stack DosCreateThread allocated (the thread is in the
             // kernel now and never touches it again).
             let stack = sched::current().owned_stack.swap(0, Ordering::Relaxed);
@@ -598,12 +603,7 @@ impl Process {
         // The rest can wait for things (a file closing, the disk), which a
         // thread already dead must not: it would come back to life.
         let p = self.clone();
-        crate::task::kthread::spawn("procexit", move || {
-            // Its session's end (switching the screen, ending pop-ups) is
-            // in the corner still under the legacy lock (smp.rs).
-            crate::smp::legacy_acquire();
-            p.finish();
-        });
+        crate::task::kthread::spawn("procexit", move || p.finish());
     }
 
     /// The last thread is gone: everything else the process had.
@@ -660,7 +660,19 @@ impl Process {
 
 /// Remove a terminated process from the table (its memory is released once
 /// nothing references it any more).
+/// Processes whose reference an interrupt handler held (a 16-bit timer
+/// clearing a RAM semaphore): if that was the last one, the process is
+/// freed here later, in thread context, not in the handler.
+static DEFERRED: SpinLock<Vec<Arc<Process>>> = SpinLock::new(Vec::new());
+
+/// Let go of `p` from interrupt context.
+pub fn drop_later(p: Arc<Process>) {
+    DEFERRED.lock().push(p);
+}
+
 pub fn reap(pid: u32) -> bool {
+    let later = core::mem::take(&mut *DEFERRED.lock());
+    drop(later);
     // The last reference may go with it: drop it after the table lock
     // (freeing an address space takes other locks and may wait).
     let gone: Vec<Arc<Process>> = {

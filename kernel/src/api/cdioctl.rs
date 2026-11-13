@@ -47,11 +47,12 @@ fn state(dev: &Arc<dyn BlockDev>) -> Audio {
 }
 
 fn update(dev: &Arc<dyn BlockDev>, f: impl FnOnce(&mut Audio)) {
-    let mut s = state(dev);
-    f(&mut s);
+    // Made if new, then changed in place under the lock (two IOCtls on
+    // one drive must not lose each other's fields).
+    let key = state(dev).dev;
     let mut a = AUDIO.lock();
-    if let Some(x) = a.iter_mut().find(|x| x.dev == s.dev) {
-        *x = s;
+    if let Some(x) = a.iter_mut().find(|x| x.dev == key) {
+        f(x);
     }
 }
 

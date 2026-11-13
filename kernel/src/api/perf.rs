@@ -255,10 +255,15 @@ pub fn dos_alias_perf_ctrs(c: &mut Ctx) -> u32 {
     // OS/2 maps each block into one process once (ERROR_ALREADY_EXISTS
     // after that); here every block is in one read-only object mapped
     // once into each process that asks.
-    if MAPPED.lock().insert(c.process.pid) {
-        let obj = obj.clone();
-        c.space().map_shared(obj, vm::pag::READ, SegKind::None);
+    // Mapped and checked under the space lock: another thread of the
+    // process must not get the address before the mapping exists.
+    {
+        let mut sp = c.space();
+        if !sp.regions.contains_key(&obj.base) {
+            sp.map_shared(obj.clone(), vm::pag::READ, SegKind::None);
+        }
     }
+    MAPPED.lock().insert(c.process.pid);
     let addr = obj.base + off as u32;
     if !c.write_u32(pp, addr) {
         return err::INVALID_ADDRESS;

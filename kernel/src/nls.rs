@@ -95,10 +95,12 @@ pub fn set_process_cp(pid: u32, cp: u16) -> Result<(), u32> {
     if !is_prepared(cp) {
         return Err(ERROR_INVALID_CODE_PAGE);
     }
+    // Forget processes that have ended (looked up before the lock: a
+    // process reference must not be dropped under it).
+    let live: alloc::vec::Vec<u32> = crate::task::process::all().iter().map(|p| p.pid).collect();
     let mut s = SYSTEM.lock();
-    // Forget processes that have ended.
     if s.process.len() > 64 {
-        s.process.retain(|&p, _| crate::task::process::by_pid(p).is_some());
+        s.process.retain(|p, _| live.contains(p));
     }
     s.process.insert(pid, cp);
     Ok(())

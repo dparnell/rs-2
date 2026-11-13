@@ -27,14 +27,10 @@ static MOUNTED: SpinLock<Vec<(Handle, Vec<u8>, Vec<Arc<dyn BlockDev>>)>> = SpinL
 pub fn start() {
     crate::task::kthread::spawn("storage hot-plug", || loop {
         let ev = xhci::STORAGE_EVENTS.take();
-        // Drive letters are picked and mounted under the legacy lock,
-        // as NET USE does (smp.rs: the session and device corner).
-        crate::smp::legacy_acquire();
         match ev {
             StorageEvent::Added(h) => added(h),
             StorageEvent::Removed(h) => removed(h),
         }
-        crate::smp::legacy_release();
     });
 }
 
@@ -47,6 +43,8 @@ fn mount_volume(dev: Arc<dyn BlockDev>, optical: bool) -> Option<u8> {
     } else {
         crate::fs::fatfs::FatFs::mount(dev).ok()?
     };
+    // The letter is picked and taken under one lock (NET USE picks too).
+    let _m = crate::fs::MOUNTING.lock();
     let d = super::next_letter()?;
     crate::fs::mount(d, fs);
     Some(d)

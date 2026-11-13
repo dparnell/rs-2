@@ -33,6 +33,18 @@ pub fn read32(bus: u8, dev: u8, func: u8, off: u8) -> u32 {
     }
 }
 
+/// Replace the bits `mask` of a configuration dword with `v`, in one
+/// critical section (a byte or word write next to someone else's).
+pub fn modify32(bus: u8, dev: u8, func: u8, off: u8, mask: u32, v: u32) {
+    let _g = LOCK.lock();
+    unsafe {
+        outl(0xcf8, addr(bus, dev, func, off));
+        let old = inl(0xcfc);
+        outl(0xcf8, addr(bus, dev, func, off));
+        outl(0xcfc, (old & !mask) | (v & mask));
+    }
+}
+
 pub fn write32(bus: u8, dev: u8, func: u8, off: u8, v: u32) {
     let _g = LOCK.lock();
     unsafe {

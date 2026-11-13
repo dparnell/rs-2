@@ -102,6 +102,18 @@ pub fn info(sid: u32, h: u16) -> Result<Info, u32> {
     with(sid, |s| s.kbds.iter().find(|k| k.0 == h).map(|k| k.2).ok_or(ERROR_KBD_INVALID_HANDLE))
 }
 
+/// Change a keyboard handle's settings in place (one critical section:
+/// another thread's change in between is not lost).
+pub fn modify_info(sid: u32, h: u16, f: impl FnOnce(&mut Info)) -> Result<(), u32> {
+    with(sid, |s| match s.kbds.iter_mut().find(|k| k.0 == h) {
+        Some(k) => {
+            f(&mut k.2);
+            Ok(())
+        }
+        None => Err(ERROR_KBD_INVALID_HANDLE),
+    })
+}
+
 pub fn set_info(sid: u32, h: u16, i: Info) -> Result<(), u32> {
     with(sid, |s| match s.kbds.iter_mut().find(|k| k.0 == h) {
         Some(k) => {
@@ -374,8 +386,6 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
         k.shift = after;
         k
     });
-    let sid = crate::session::input_session();
-    // Session hot keys.
     if let Some(k) = &ev {
         let ctrl = k.shift & shift::CONTROL != 0;
         let alt = k.shift & shift::ALT != 0;
@@ -389,6 +399,34 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
         if k.scan == 0x11 && ctrl && alt && crate::api::sem::post_named(RESCUE_SEM) {
             return;
         }
+    }
+    dispatch_key(sc, ext, before, after, ev, false);
+}
+
+/// Whether `k` may be a session hot key (Ctrl+Esc, Alt+Esc, Alt+Home):
+/// those switch sessions, which is the session thread's work.
+fn maybe_hot(k: &KeyInfo) -> bool {
+    let ctrl = k.shift & shift::CONTROL != 0;
+    let alt = k.shift & shift::ALT != 0;
+    (k.scan == 0x01 && (ctrl || alt)) || is_alt_home(k)
+}
+
+/// The rest of a key event, in interrupt context (`thread` false) or on
+/// the session thread. Hot keys, and every key while the session thread
+/// has work queued or the window list is open, go to the session thread,
+/// which runs this again in thread context: keys stay in order.
+pub fn dispatch_key(sc: u8, ext: bool, before: u16, after: u16, ev: Option<KeyInfo>, thread: bool) {
+    let code = sc & 0x7f;
+    let release = sc & 0x80 != 0;
+    if !thread && (crate::session::keys_deferred() || ev.as_ref().is_some_and(maybe_hot)) {
+        crate::session::post(crate::session::Work::Key { sc, ext, before, after, ev });
+        return;
+    }
+    let sid = crate::session::input_session();
+    // Session hot keys (thread context only, see above).
+    if let Some(k) = ev.as_ref().filter(|_| thread) {
+        let ctrl = k.shift & shift::CONTROL != 0;
+        let alt = k.shift & shift::ALT != 0;
         // In the PM session Ctrl+Esc is PM's (its window list).
         let pm_list = ctrl && sid == crate::session::pm_session() && sid != 0;
         if k.scan == 0x01 && (ctrl || alt) && !crate::session::popup_active() && !pm_list {
@@ -521,9 +559,10 @@ pub fn deliver_key(sid: u32, k: KeyInfo, flags: u16) {
             with(sid, |s| s.paused = true);
             return;
         }
-        // PrtSc prints the screen.
+        // PrtSc prints the screen (the session thread: it waits for the
+        // printer).
         if k.scan == 0x37 && k.status & 0x02 != 0 && !ctrl {
-            crate::api::vio::print_screen(sid);
+            crate::session::post(crate::session::Work::PrintScreen(sid));
             return;
         }
     }

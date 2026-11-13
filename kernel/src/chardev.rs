@@ -147,8 +147,17 @@ pub fn init() {
     crate::println!("serial ports: {:?}", found);
 }
 
+/// The UART's registers of each port: a line setting (several writes with
+/// the divisor latch open) and a transmitted byte must not interleave on
+/// two CPUs. COM1's is the kernel log's too (serial.rs).
+fn hw(i: usize) -> &'static crate::sync::SpinLock<()> {
+    static HW: [crate::sync::SpinLock<()>; 3] = [const { crate::sync::SpinLock::new(()) }; 3];
+    if i == 0 { &crate::serial::COM1_HW } else { &HW[(i - 1).min(2)] }
+}
+
 /// Write the line settings to the UART.
 fn program(base: u16, p: &Port) {
+    let _hw = hw(BASES.iter().position(|&b| b == base).unwrap_or(0));
     let div = (115200 / p.baud.max(1)).clamp(1, 0xffff) as u16;
     let parity = match p.parity {
         1 => 0x08,
@@ -305,6 +314,7 @@ pub fn com_write(i: usize, data: &[u8]) -> usize {
     }
     for &c in data {
         let mut spins = 0u32;
+        let g = hw(i).lock();
         while unsafe { inb(b + 5) } & 0x20 == 0 {
             spins += 1;
             if spins > 2_000_000 {
@@ -313,6 +323,7 @@ pub fn com_write(i: usize, data: &[u8]) -> usize {
             core::hint::spin_loop();
         }
         unsafe { outb(b, c) };
+        drop(g);
         n += 1;
     }
     if n > 0 {

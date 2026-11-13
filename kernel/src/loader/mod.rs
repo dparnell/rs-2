@@ -275,49 +275,11 @@ impl Module {
 // on another CPU does not take it for unused meanwhile. Lock order: loader
 // lock before the file systems' and every spin lock.
 
-struct LoaderLock {
-    /// Thread id + 1 of the holder, 0 = free.
-    owner: core::sync::atomic::AtomicU32,
-    depth: core::sync::atomic::AtomicU32,
-    wait: crate::task::WaitQueue,
-}
-
-static LOADER: LoaderLock = LoaderLock {
-    owner: core::sync::atomic::AtomicU32::new(0),
-    depth: core::sync::atomic::AtomicU32::new(0),
-    wait: crate::task::WaitQueue::new(),
-};
-
-/// The loader lock while it lives.
-pub struct LoaderGuard(bool);
+static LOADER: crate::sync::RecursiveLock = crate::sync::RecursiveLock::new();
 
 /// Take the loader lock (again, if this thread holds it).
-pub fn lock() -> LoaderGuard {
-    use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed};
-    let Some(t) = crate::task::sched::current_opt() else { return LoaderGuard(false) };
-    let me = t.id + 1;
-    drop(t);
-    if LOADER.owner.load(Acquire) == me {
-        LOADER.depth.fetch_add(1, Relaxed);
-        return LoaderGuard(true);
-    }
-    loop {
-        if LOADER.owner.compare_exchange(0, me, AcqRel, Acquire).is_ok() {
-            LOADER.depth.store(1, Relaxed);
-            return LoaderGuard(true);
-        }
-        LOADER.wait.wait_uninterruptible(|| LOADER.owner.load(Acquire) == 0);
-    }
-}
-
-impl Drop for LoaderGuard {
-    fn drop(&mut self) {
-        use core::sync::atomic::Ordering::{Relaxed, Release};
-        if self.0 && LOADER.depth.fetch_sub(1, Relaxed) == 1 {
-            LOADER.owner.store(0, Release);
-            LOADER.wait.wake_one();
-        }
-    }
+pub fn lock() -> crate::sync::RecursiveGuard<'static> {
+    LOADER.lock()
 }
 
 struct Registry {

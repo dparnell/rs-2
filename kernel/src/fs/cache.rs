@@ -524,6 +524,27 @@ impl Cache {
         self.write_blocks(&mut g, &v)
     }
 
+    /// Write out what is dirty and drop every block, in one critical
+    /// section: a block dirtied between a separate sync and invalidate (a
+    /// write on another CPU) would be lost.
+    pub fn sync_invalidate(&self) -> Result<(), u32> {
+        let mut g = self.inner.lock();
+        let r = if g.dirty.is_empty() {
+            Ok(())
+        } else {
+            let v = Self::dirty_blocks(&g);
+            self.write_blocks(&mut g, &v)
+        };
+        let mut spare = Vec::with_capacity(g.count);
+        while g.tail != NIL {
+            let t = g.tail;
+            spare.push(g.remove(t));
+        }
+        g.next_miss = u64::MAX;
+        Self::give_back(spare);
+        r
+    }
+
     /// Drop every block, dirty or not.
     pub fn invalidate(&self) {
         let mut g = self.inner.lock();
@@ -799,6 +820,8 @@ pub fn start() {
 /// Forget every volume's blocks.
 pub fn invalidate_all() {
     for c in all() {
-        c.invalidate();
+        if let Err(e) = c.sync_invalidate() {
+            crate::println!("cache: write failed ({e})");
+        }
     }
 }

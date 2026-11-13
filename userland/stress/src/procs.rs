@@ -49,6 +49,8 @@ pub fn child(args: &[String]) -> u32 {
         "lockwait" => crate::locks::child_wait(rest),
         "smpmutex" => crate::smp::child_mutex(num(rest, 0)),
         "smpmix" => crate::smp::child_mix(num(rest, 0)),
+        "smpdll" => crate::smp::child_dll(),
+        k if k.starts_with("corner-") => crate::corner::child(k, num(rest, 0)),
         _ => 255,
     }
 }

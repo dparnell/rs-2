@@ -202,9 +202,11 @@ messages (link changes, DHCP leases) on the console.
 
 The stack lives behind a sleeping `Mutex`; API calls run it in the
 calling thread (`net::with_stack`) and transmit what it produced at
-once. Everything is thread context under the big kernel lock; only the
-tick and the NIC interrupt handlers run in interrupt context and only
-take driver spin locks with `try_lock`.
+once. Everything is thread context under that Mutex (calls on several
+CPUs run the stack one at a time; a socket call checks its handle is
+still open under it, see `net/socket.rs` `stack_h`); only the tick and
+the NIC interrupt handlers run in interrupt context and only take driver
+spin locks with `try_lock`.
 
 **Waiting**: the stack reports which sockets changed (data, state,
 accept queue, room to send) and whether something global did (DNS

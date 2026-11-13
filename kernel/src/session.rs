@@ -5,6 +5,18 @@
 //! more. One session is in the foreground: it is shown on the framebuffer
 //! and receives keystrokes. Ctrl+Esc opens the window list, Alt+Esc
 //! switches to the next session.
+//!
+//! Locking: everything that changes which session is shown or exists
+//! (selecting, the window list, pop-ups, creating and ending sessions, the
+//! PM session, windowed/full screen) runs in thread context under
+//! [`SWITCH`], a recursive sleeping lock. The keyboard's hot keys arrive in
+//! interrupt context: they are handed to the session thread ([`post`]),
+//! and so is every key typed while such work is pending or the window
+//! list is open, so keys stay in order. SWITCH is taken inside the loader
+//! lock and the file systems' locks (a hard-error pop-up comes from a disk
+//! read), never outside them: nothing under it reads a disk or starts a
+//! program (the windowed sessions' PM host is started by the session
+//! thread without it).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -31,6 +43,58 @@ pub struct Session {
     pub windowed: bool,
     /// A pseudo terminal session (crate::pty): never shown, in no list.
     pub pty: bool,
+    /// Its leader is the next process started in it (`claim_leader`).
+    pub awaiting_leader: bool,
+}
+
+/// Held while the set of sessions, the foreground, the window list or the
+/// pop-up changes (see the module comment).
+pub static SWITCH: crate::sync::RecursiveLock = crate::sync::RecursiveLock::new();
+
+// ---- The session thread ----
+
+/// Work for the session thread.
+pub enum Work {
+    /// A key event from the keyboard interrupt (conkbd::dispatch_key).
+    Key { sc: u8, ext: bool, before: u16, after: u16, ev: Option<KeyInfo> },
+    /// PrtSc in session `sid`.
+    PrintScreen(u32),
+    /// Show windowed session `sid` in its window (the PM host may have to
+    /// be started first).
+    Activate(u32),
+}
+
+static WORK: crate::task::kthread::Inbox<Work> = crate::task::kthread::Inbox::new();
+/// Work posted and not yet done.
+static PENDING: AtomicU32 = AtomicU32::new(0);
+
+/// Hand work to the session thread (any context, interrupts included).
+pub fn post(w: Work) {
+    PENDING.fetch_add(1, Ordering::AcqRel);
+    WORK.post(w);
+}
+
+/// Whether keys must go through the session thread now: work is queued
+/// (a hot key before them) or the window list is open.
+pub fn keys_deferred() -> bool {
+    PENDING.load(Ordering::Acquire) != 0 || LIST.lock().is_some()
+}
+
+/// Start the session thread.
+pub fn start() {
+    crate::task::kthread::spawn("session", || loop {
+        let w = WORK.take();
+        match w {
+            Work::Key { sc, ext, before, after, ev } => crate::conkbd::dispatch_key(sc, ext, before, after, ev, true),
+            Work::PrintScreen(sid) => crate::api::vio::print_screen(sid),
+            Work::Activate(sid) => {
+                if crate::viowin::ensure_host(crate::viowin::host_env()) {
+                    crate::viowin::activate(sid);
+                }
+            }
+        }
+        PENDING.fetch_sub(1, Ordering::AcqRel);
+    });
 }
 
 /// The Presentation Manager session, if one has been started.
@@ -43,6 +107,7 @@ pub fn pm_session() -> u32 {
 /// The Presentation Manager session, created on first use: a session whose
 /// screen is drawn by PM itself.
 pub fn pm_session_or_create() -> u32 {
+    let _g = SWITCH.lock();
     let s = pm_session();
     if s != 0 {
         return s;
@@ -131,6 +196,7 @@ pub fn popup_begin(wait: bool, transparent: bool) -> Result<(), u32> {
             return Err(crate::api::err::INTERRUPT);
         }
     }
+    let _g = SWITCH.lock();
     close_list();
     let fg = foreground();
     crate::api::vio::notify_popup(fg, true);
@@ -161,6 +227,9 @@ pub fn popup_end() -> Result<(), u32> {
 }
 
 fn end_popup_of(pid: u32) -> Result<(), u32> {
+    // The pop-up is taken down under the lock it was put up under: a new
+    // one claimed meanwhile is set up after this is gone.
+    let _g = SWITCH.lock();
     {
         let mut g = POPUP.lock();
         if !g.as_ref().is_some_and(|p| p.owner == pid) {
@@ -183,9 +252,10 @@ fn end_popup_of(pid: u32) -> Result<(), u32> {
 
 /// Create a session with its own (hidden) screen and keyboard queue.
 pub fn create(title: String, parent_session: u32, parent_pid: Option<u32>, termq: Option<String>) -> u32 {
+    let _g = SWITCH.lock();
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     crate::screen::create(id);
-    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq, windowable: false, windowed: false, pty: false });
+    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq, windowable: false, windowed: false, pty: false, awaiting_leader: false });
     id
 }
 
@@ -208,6 +278,7 @@ pub fn is_pty(sid: u32) -> bool {
 
 /// Make `sid` a windowable VIO session, shown in its window.
 pub fn make_windowed(sid: u32) {
+    let _g = SWITCH.lock();
     if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
         s.windowable = true;
         s.windowed = true;
@@ -219,6 +290,7 @@ pub fn make_windowed(sid: u32) {
 /// Make `sid` windowable: shown in its window (`windowed`) or on the full
 /// screen, Alt+Home switching between the two (DOS sessions).
 pub fn make_windowable(sid: u32, windowed: bool) {
+    let _g = SWITCH.lock();
     if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
         s.windowable = true;
         s.windowed = windowed;
@@ -239,6 +311,7 @@ pub fn is_windowable(sid: u32) -> bool {
 /// Switch a windowable session between its window (`on`) and the full
 /// screen (Alt+Home). False if `sid` is not windowable.
 pub fn set_windowed(sid: u32, on: bool) -> bool {
+    let _g = SWITCH.lock();
     {
         let mut g = SESSIONS.lock();
         let Some(s) = g.iter_mut().find(|s| s.id == sid && s.windowable) else { return false };
@@ -273,6 +346,22 @@ pub fn list_full() -> Vec<(u32, String, bool, bool)> {
     SESSIONS.lock().iter().filter(|s| !s.pty).map(|s| (s.id, s.title.clone(), s.windowable, s.windowed)).collect()
 }
 
+/// The next process started in `sid` leads it: recorded by exec before
+/// the process runs, so a leader that ends at once still ends the session.
+pub fn expect_leader(sid: u32) {
+    if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
+        s.awaiting_leader = true;
+    }
+}
+
+/// Exec: process `pid` starts in session `sid`.
+pub fn claim_leader(sid: u32, pid: u32) {
+    if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid && s.awaiting_leader) {
+        s.awaiting_leader = false;
+        s.leader = pid;
+    }
+}
+
 pub fn set_leader(sid: u32, pid: u32) {
     if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
         s.leader = pid;
@@ -286,6 +375,7 @@ pub fn leader(sid: u32) -> Option<u32> {
 
 /// Undo `create` when the program could not be started.
 pub fn discard(sid: u32) {
+    let _g = SWITCH.lock();
     SESSIONS.lock().retain(|s| s.id != sid);
     crate::screen::destroy(sid);
     crate::kbd::drop_queue(sid);
@@ -322,6 +412,7 @@ pub fn parent_pid(sid: u32) -> Option<u32> {
 /// Bring session `sid` to the foreground. A windowed session's window
 /// comes to the front in PM.
 pub fn select(sid: u32) -> bool {
+    let _g = SWITCH.lock();
     if !exists(sid) || is_pty(sid) {
         return false;
     }
@@ -352,6 +443,7 @@ pub fn select(sid: u32) -> bool {
 
 /// Alt+Esc: the next session in order.
 pub fn select_next() {
+    let _g = SWITCH.lock();
     if popup_active() {
         return;
     }
@@ -364,6 +456,7 @@ pub fn select_next() {
 
 /// A process ended; if it led a session, the session ends.
 pub fn process_ended(pid: u32, code: u32) {
+    let _g = SWITCH.lock();
     let _ = end_popup_of(pid);
     crate::display::process_ended(pid);
     crate::api::vio::process_ended(pid);
@@ -435,6 +528,7 @@ const LIST_WIDTH: usize = 40;
 
 /// Ctrl+Esc: open the window list, or close it if open.
 pub fn toggle_list() {
+    let _g = SWITCH.lock();
     if popup_active() {
         return;
     }
@@ -494,6 +588,7 @@ fn draw_list() {
 
 /// Keys while the window list is open. Returns true if consumed.
 pub fn list_key(k: &KeyInfo) -> bool {
+    let _g = SWITCH.lock();
     let choice = {
         let mut g = LIST.lock();
         let Some(l) = g.as_mut() else { return false };

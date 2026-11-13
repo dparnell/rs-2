@@ -63,16 +63,27 @@ pub fn host() -> u32 {
 
 /// The calling process is the host.
 pub fn register_host(pid: u32) {
-    let cur = HOST.load(Ordering::Relaxed);
-    if cur == 0 || cur == pid || !crate::task::process::all().iter().any(|p| p.pid == cur && p.exit_info().is_none()) {
+    let _g = STARTING.lock();
+    if host() == pid || !host_alive() {
         HOST.store(pid, Ordering::Relaxed);
     }
 }
 
-/// Start the host unless one runs. False if it cannot be started.
-pub fn ensure_host(env: Vec<String>) -> bool {
+/// Whether the host runs.
+fn host_alive() -> bool {
     let cur = host();
-    if cur != 0 && crate::task::process::all().iter().any(|p| p.pid == cur && p.exit_info().is_none()) {
+    cur != 0 && crate::task::process::all().iter().any(|p| p.pid == cur && p.exit_info().is_none())
+}
+
+/// One start of the host at a time.
+static STARTING: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+
+/// Start the host unless one runs. False if it cannot be started. Not
+/// with the session lock held (it reads the disk and starts a program).
+pub fn ensure_host(env: Vec<String>) -> bool {
+    debug_assert!(!crate::session::SWITCH.held(), "viowin host started under the session lock");
+    let _g = STARTING.lock();
+    if host_alive() {
         return true;
     }
     if crate::fs::read_file(HOST_PATH).is_none() {
@@ -112,10 +123,12 @@ pub fn host_env() -> Vec<String> {
 /// Bring the window of windowed session `sid` to the front: PM comes to
 /// the foreground and the host activates the window.
 pub fn activate(sid: u32) {
-    ACTIVATE.store(sid, Ordering::Relaxed);
-    if !ensure_host(host_env()) {
+    if !host_alive() {
+        // Started by the session thread, outside the session lock.
+        crate::session::post(crate::session::Work::Activate(sid));
         return;
     }
+    ACTIVATE.store(sid, Ordering::Relaxed);
     changed();
     let pm = crate::session::pm_session();
     if pm != 0 {

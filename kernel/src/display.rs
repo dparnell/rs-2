@@ -404,9 +404,14 @@ pub fn read(ms: u32) -> Option<Input> {
     }
 }
 
+/// Mapping the display for PM and changing the mode: one at a time (the
+/// driver hands out framebuffers and frees the old one).
+static MODE: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+
 /// The display as a shared object for PM (created on first use), with
 /// its geometry.
 pub fn display() -> Option<Info> {
+    let _g = DISPLAY.get().is_none().then(|| MODE.lock());
     if DISPLAY.get().is_none() {
         // The memory PM draws into: what the display driver offers
         // (virtio-gpu, VMware SVGA II, whose driver takes the adapter
@@ -475,6 +480,7 @@ pub fn pm_mapped() -> bool {
 /// PM is told (EV_MODE) and lays its desktop out again. (0, 0) is the
 /// display's preferred size (virtio-gpu).
 pub fn set_mode(width: u32, height: u32) -> bool {
+    let _g = MODE.lock();
     use crate::drivers::{svga, virtio::gpu};
     let (width, height) = match (width, height) {
         (0, 0) if gpu::present() => match gpu::preferred() {

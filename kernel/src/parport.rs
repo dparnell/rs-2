@@ -159,6 +159,7 @@ const fn port() -> Port {
 
 static PORTS: [SpinLock<Port>; NPORTS] = [const { SpinLock::new(port()) }; NPORTS];
 static FOUND: AtomicBool = AtomicBool::new(false);
+static PROBE: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 /// Interrupt-driven: the handler is installed and ACK interrupts enabled.
 static IRQ_ON: [AtomicBool; NPORTS] = [const { AtomicBool::new(false) }; NPORTS];
 /// Interrupts taken, by port (the handler signals every interrupt-driven
@@ -338,6 +339,8 @@ fn acpi_ports() -> Vec<(u16, u16, Option<u8>)> {
 
 /// Find the ports (once, at boot after ACPI and PCI).
 pub fn init() {
+    // One probe; a caller on another CPU waits for it to finish.
+    let _g = PROBE.lock();
     if FOUND.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -459,8 +462,8 @@ fn setup_irq(n: usize, f: &Info) {
     if IRQ_STATE[n].load(Ordering::Acquire) != 0 {
         return;
     }
-    // Writers on other CPUs may get here at once (DosWrite runs without
-    // the legacy lock): one sets the interrupt up, the others see it done.
+    // Writers on other CPUs may get here at once: one sets the interrupt
+    // up, the others see it done.
     static SETUP: SpinLock<()> = SpinLock::new(());
     let _g = SETUP.lock();
     if IRQ_STATE[n].load(Ordering::Acquire) != 0 {
@@ -517,6 +520,9 @@ fn wait_for(n: usize, ms: u64, mut cond: impl FnMut() -> bool) -> Waited {
     let deadline = crate::irq::ticks() + (ms * hz / 1000).max(1);
     let irq = IRQ_ON[n].load(Ordering::Acquire);
     loop {
+        // The signal count before the look at the port: an acknowledge
+        // after the look wakes the wait below.
+        let seen = SIGNALS[n].load(Ordering::Acquire);
         if cond() {
             return Waited::Ready;
         }
@@ -532,7 +538,6 @@ fn wait_for(n: usize, ms: u64, mut cond: impl FnMut() -> bool) -> Waited {
             return Waited::Killed;
         }
         let until = if irq { deadline.min(now + 50 * hz / 1000) } else { now + 1 };
-        let seen = SIGNALS[n].load(Ordering::Acquire);
         WAIT[n].wait_uninterruptible_until(until, || SIGNALS[n].load(Ordering::Acquire) != seen);
     }
 }

@@ -95,9 +95,6 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     task::sched::init();
     fs::init(info);
     vmware::init();
-    if info.cmdline().split_whitespace().any(|w| w == "bkl") {
-        smp::force_bkl();
-    }
     if info.cmdline().split_whitespace().any(|w| w == "nocache") {
         fs::cache::DISABLED.store(true, core::sync::atomic::Ordering::Relaxed);
     }
@@ -129,6 +126,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     smp::start_aps();
     msi::start();
     drivers::hotplug::start();
+    session::start();
     fs::cache::start();
     bench::start(cmdline);
     boot::start(cmdline);
@@ -160,6 +158,10 @@ pub mod boot {
     }
 
     static STATE: SpinLock<Option<Boot>> = SpinLock::new(None);
+    /// Held from starting a boot program until it is recorded as the
+    /// current one, and while an ended process is checked against it: one
+    /// that ends at once on another CPU is still seen.
+    static CHAIN: crate::sync::RecursiveLock = crate::sync::RecursiveLock::new();
 
     fn default_env() -> Vec<String> {
         [
@@ -300,6 +302,7 @@ pub mod boot {
 
     /// Start the next boot program (or restart the shell).
     fn next() {
+        let _chain = CHAIN.lock();
         loop {
             let (item, env, last, background) = {
                 let mut g = STATE.lock();
@@ -339,6 +342,7 @@ pub mod boot {
 
     /// A top-level process ended.
     pub fn process_ended(pid: u32) {
+        let _chain = CHAIN.lock();
         let ours = STATE.lock().as_ref().is_some_and(|b| b.current == pid);
         if ours {
             // The machine may be switched off now (test runs are).

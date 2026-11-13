@@ -388,6 +388,9 @@ fn write_dump(p: &Arc<Process>, drive: u8) -> u32 {
         );
     }
     let Some(fs) = crate::fs::drive(drive) else { return err::INVALID_DRIVE };
+    // The name is picked and the file made under one lock.
+    static DUMP: crate::sync::Mutex<()> = crate::sync::Mutex::new(());
+    let _d = DUMP.lock();
     let name = (0..1000).map(|n| alloc::format!("PDUMP.{n:03}")).find(|n| fs.stat(n).is_err());
     let Some(name) = name else { return err::CANNOT_MAKE };
     match fs.create(&name, 0) {

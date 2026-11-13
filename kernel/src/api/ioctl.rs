@@ -60,10 +60,10 @@ pub fn dos_physical_disk(c: &mut Ctx) -> u32 {
             // INFO_GETIOCTLHANDLE: params "n:" (1-based)
             let Some(s) = c.read_str(params, 8) else { return err::INVALID_ADDRESS };
             let n: u32 = s.trim_end_matches(':').parse().unwrap_or(0);
-            if n == 0 || disk(n - 1).is_none() {
+            let Some(dev) = n.checked_sub(1).and_then(disk) else {
                 return err::INVALID_PARAMETER;
-            }
-            match super::file::add(c, Handle::PhysDisk(n - 1)) {
+            };
+            match super::file::add(c, Handle::PhysDisk(n - 1, dev)) {
                 Ok(h) => {
                     c.write_u16(buf, h as u16);
                     0
@@ -76,7 +76,7 @@ pub fn dos_physical_disk(c: &mut Ctx) -> u32 {
             let Some(h) = c.read_u16(params) else { return err::INVALID_ADDRESS };
             let mut hs = c.process.handles.lock();
             match hs.get_mut(h as usize) {
-                Some(slot @ Some(Handle::PhysDisk(_))) => {
+                Some(slot @ Some(Handle::PhysDisk(..))) => {
                     *slot = None;
                     0
                 }
@@ -226,7 +226,7 @@ fn ioctl(c: &mut Ctx, r: &Req) -> u32 {
 fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
     let Some(h) = super::file::get(c, r.handle) else { return err::INVALID_HANDLE };
     match (h, r.category) {
-        (Handle::PhysDisk(n), 9) => phys(c, n, r),
+        (Handle::PhysDisk(_, d), 9) => phys(c, d, r),
         (Handle::Drive(d), 8) => logical(c, &d, r),
         (Handle::Drive(d), 0x80 | 0x81) => super::cdioctl::ioctl(c, &d.dev, r),
         (_, 0xd5) => dos_dev(c, r),
@@ -329,7 +329,7 @@ pub(crate) fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
 
 /// A request on a physical disk goes past the volumes' block caches: they
 /// write out first, and forget what a write may have changed.
-fn phys(c: &Ctx, n: u32, r: &Req) -> u32 {
+fn phys(c: &Ctx, n: Arc<dyn BlockDev>, r: &Req) -> u32 {
     crate::fs::cache::sync_all();
     let rc = phys_request(c, n, r);
     if matches!(r.function, 0x44 | 0x45) {
@@ -339,8 +339,7 @@ fn phys(c: &Ctx, n: u32, r: &Req) -> u32 {
     rc
 }
 
-fn phys_request(c: &Ctx, n: u32, r: &Req) -> u32 {
-    let Some(d) = disk(n) else { return err::INVALID_HANDLE };
+fn phys_request(c: &Ctx, d: Arc<dyn BlockDev>, r: &Req) -> u32 {
     let ss = d.sector_size() as u32;
     match r.function {
         // PDSK_LOCKPHYSDRIVE / PDSK_UNLOCKPHYSDRIVE (parameter: a reserved
@@ -695,20 +694,19 @@ fn kbd(c: &Ctx, r: &Req) -> u32 {
         // KBD_SETINPUTMODE: BINARY_MODE 0x80, SHIFT_REPORT_MODE 0x01.
         0x51 => {
             let Some(m) = pbyte() else { return err::INVALID_ADDRESS };
-            let Ok(mut i) = conkbd::info(sid, 0) else { return err::INVALID_HANDLE };
-            i.mask &= !(conkbd::mask::BINARY | conkbd::mask::ASCII | conkbd::mask::SHIFT_REPORT);
-            i.mask |= if m & 0x80 != 0 { conkbd::mask::BINARY } else { conkbd::mask::ASCII };
-            if m & 1 != 0 {
-                i.mask |= conkbd::mask::SHIFT_REPORT;
-            }
-            conkbd::set_info(sid, 0, i).err().unwrap_or(0)
+            let r = conkbd::modify_info(sid, 0, |i| {
+                i.mask &= !(conkbd::mask::BINARY | conkbd::mask::ASCII | conkbd::mask::SHIFT_REPORT);
+                i.mask |= if m & 0x80 != 0 { conkbd::mask::BINARY } else { conkbd::mask::ASCII };
+                if m & 1 != 0 {
+                    i.mask |= conkbd::mask::SHIFT_REPORT;
+                }
+            });
+            if r.is_err() { err::INVALID_HANDLE } else { 0 }
         }
         // KBD_SETINTERIMFLAG
         0x52 => {
             let Some(m) = pbyte() else { return err::INVALID_ADDRESS };
-            let Ok(mut i) = conkbd::info(sid, 0) else { return err::INVALID_HANDLE };
-            i.interim = m as u16;
-            conkbd::set_info(sid, 0, i).err().unwrap_or(0)
+            if conkbd::modify_info(sid, 0, |i| i.interim = m as u16).is_err() { err::INVALID_HANDLE } else { 0 }
         }
         // KBD_SETSHIFTSTATE: SHIFTSTATE { fsState, fNLS }
         0x53 => {
