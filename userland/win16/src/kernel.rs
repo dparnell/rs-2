@@ -727,7 +727,17 @@ pub fn application_error(r: &crate::dos::Regs) {
     let seg = (1..=n).find(|&i| unsafe { pm::Rs2Win16Selector(6, hmod, i) } as u16 | 7 == cs | 7).unwrap_or(0);
     let (task, module) = (alloc::string::String::from_utf8_lossy(&task), alloc::string::String::from_utf8_lossy(&module));
     let at = if seg != 0 { alloc::format!("{seg:04X}:{ip:04X}") } else { alloc::format!("{cs:04X}:{ip:04X}") };
-    trace(format_args!("WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h)", r[INTNO] & 0xff));
+    trace(format_args!(
+        "WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h, error {:04X}; AX={:04X} BX={:04X} CX={:04X} DX={:04X} SI={:04X} DI={:04X} BP={:04X} SP={:04X} DS={:04X} ES={:04X})",
+        r[INTNO] & 0xff, r[ERROR], r[AX], r[BX], r[CX], r[DX], r[SI], r[DI], r[BP], r[SP], r[DS], r[ES]
+    ));
+    if crate::tracing() {
+        // The stack (the task's: SS is its DGROUP), for the callers.
+        let ss = TASK.get().hinst as u32;
+        let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+        let words: alloc::vec::Vec<u16> = (0..24).map(|i| unsafe { st.add(i).read_unaligned() }).collect();
+        trace(format_args!("WIN16: stack at {ss:04X}:{:04X}: {words:04X?}", r[SP]));
+    }
     let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
     crate::stderr_line(&alloc::format!("WIN16: {}", &t[..t.len() - 1]));
     unsafe {
