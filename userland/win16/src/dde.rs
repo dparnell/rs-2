@@ -208,8 +208,12 @@ pub fn incoming(msg: u32, mp1: u32, mp2: u32) -> (u16, u16, u32) {
                 #[link_name = "DOSCALLS.306"]
                 fn DosQueryMem(p: *const u8, cb: *mut u32, fl: *mut u32) -> u32;
             }
-            if unsafe { DosQueryMem(p, &mut cb, &mut fl) } == 0 {
-                crate::kernel::adopt(h, cb);
+            let rc = unsafe { DosQueryMem(p, &mut cb, &mut fl) };
+            if crate::tracing() {
+                crate::trace(format_args!("W16 DDE block {h:04x}: DosQueryMem {rc}, {cb:#x} bytes, flags {fl:#x}"));
+            }
+            if rc == 0 {
+                crate::kernel::adopt(h, crate::kernel::shared_size(p, cb), cb);
             }
         }
     }

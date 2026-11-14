@@ -855,7 +855,8 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     if size > crate::stress::free_space() {
         return 0;
     }
-    let room = size.next_multiple_of(0x10000);
+    let shared = fl & GMEM_DDESHARE != 0;
+    let room = (size + if shared { SHARE_TAIL } else { 0 }).next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
     let rw = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE;
     // GMEM_DDESHARE blocks are giveable shared memory: the same address
@@ -873,8 +874,41 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let h = (far(p) >> 16) as u16;
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
+    if shared {
+        share_tail(p, room, size);
+    }
     crate::stress::global_changed();
     h
+}
+
+/// A GMEM_DDESHARE block's size travels with it to the processes it is
+/// given to (dde.rs), in its last 8 bytes, which its own size never
+/// reaches: "W16S" and the size. Without it the receiver had only the
+/// memory object's size (64 KB) for GlobalSize and DdeGetData.
+const SHARE_TAIL: u32 = 8;
+const SHARE_MAGIC: u32 = 0x5336_3157;
+
+fn share_tail(base: *mut u8, room: u32, size: u32) {
+    if size + SHARE_TAIL <= room {
+        let t = unsafe { base.add((room - SHARE_TAIL) as usize) } as *mut u32;
+        unsafe {
+            t.write_unaligned(SHARE_MAGIC);
+            t.add(1).write_unaligned(size);
+        }
+    }
+}
+
+/// The size a GMEM_DDESHARE block of `room` bytes (its memory object's)
+/// was given by its owner.
+pub fn shared_size(base: *const u8, room: u32) -> u32 {
+    if room < SHARE_TAIL {
+        return room;
+    }
+    let t = unsafe { base.add((room - SHARE_TAIL) as usize) } as *const u32;
+    match unsafe { (t.read_unaligned(), t.add(1).read_unaligned()) } {
+        (SHARE_MAGIC, n) if n + SHARE_TAIL <= room => n,
+        _ => room,
+    }
 }
 
 /// A block over 64 KB: as on Windows, its first selector reaches the
@@ -890,13 +924,13 @@ fn huge_limits(h: u16, room: u32) {
 
 /// A GMEM_DDESHARE block another process gave this one (dde.rs): a
 /// global block here from now on.
-pub fn adopt(h: u16, size: u32) {
+pub fn adopt(h: u16, size: u32, room: u32) {
     let h = h | 7;
     if GLOBALS.get().contains_key(&h) {
         return;
     }
     let base = flat((h as u32) << 16);
-    let room = size.next_multiple_of(0x10000).max(0x10000);
+    let room = room.max(size).next_multiple_of(0x10000).max(0x10000);
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
     crate::stress::global_changed();
@@ -1017,11 +1051,15 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
         return h;
     }
     let size = n.max(1);
-    if size <= b.room {
+    let tail = if b.flags & GMEM_DDESHARE != 0 { SHARE_TAIL } else { 0 };
+    if size + tail <= b.room {
         if size > b.size && fl & GMEM_ZEROINIT != 0 {
             unsafe { core::ptr::write_bytes(b.base.add(b.size as usize), 0, (size - b.size) as usize) };
         }
         b.size = size;
+        if tail != 0 {
+            share_tail(b.base, b.room, size);
+        }
         crate::stress::global_changed();
         return h;
     }
