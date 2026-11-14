@@ -169,7 +169,7 @@ fn setup(frame: u32, fcd: u32) {
     if style & FS_TASKLIST != 0 {
         fcf |= FCF_TASKLIST;
     }
-    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
+    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false, child_active: false });
     if fcf & FCF_ICON != 0 {
         let i = crate::pointer::WinLoadPointer(1, hmod, id);
         if let Some(f) = st().frames.get_mut(&frame) {
@@ -772,7 +772,7 @@ pub extern "C" fn WinCreateFrameControls(h: u32, fcd: *const u8, title: *const u
     let (fcf, hmod, id) = unsafe { ((fcd.add(2) as *const u32).read_unaligned(), (fcd.add(6) as *const u16).read_unaligned() as u32, (fcd.add(8) as *const u16).read_unaligned() as u32) };
     let title = ctl::cstr(title);
     if !st().frames.contains_key(&h) {
-        st().frames.insert(h, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
+        st().frames.insert(h, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false, child_active: false });
     } else if let Some(f) = st().frames.get_mut(&h) {
         f.fcf |= fcf;
     }
@@ -1039,9 +1039,11 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             1
         }
         WM_ACTIVATE => {
+            // As IBM's FrameDrawHilite: the title bar is told
+            // (TBM_SETHILITE), a frame inside another window included.
             let t = WinWindowFromID(h, FID_TITLEBAR);
             if t != 0 {
-                ctl::invalidate(t);
+                send(t, TBM_SETHILITE, (mp1 & 0xffff != 0) as u32, 0);
             }
             // As IBM's frame procedure, the client hears of it too (EPM's
             // edit window tells its owner it is the active one, and the

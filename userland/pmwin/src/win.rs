@@ -676,6 +676,50 @@ pub fn set_focus(h: u32) {
     if h != 0 {
         notify(h, WM_SETFOCUS, old, 1);
     }
+    child_frames_activate(old, h);
+}
+
+/// The frames inside other windows (MDI documents) around `h`, innermost
+/// first.
+fn child_frames(h: u32) -> alloc::vec::Vec<u32> {
+    let mut v = alloc::vec::Vec::new();
+    let mut c = h;
+    while c != 0 && c != HWND_DESKTOP {
+        let Some(w) = st().desk.get(c) else { break };
+        if w.parent == HWND_DESKTOP || w.parent == 0 || w.parent == pmwin::HWND_OBJECT {
+            break;
+        }
+        if st().frames.contains_key(&c) {
+            v.push(c);
+        }
+        c = w.parent;
+    }
+    v
+}
+
+/// As IBM's WinFrameFocusChange, for frames inside other windows: one
+/// the focus leaves is sent WM_ACTIVATE(FALSE), one it enters
+/// WM_ACTIVATE(TRUE) (its title bar lights up; the Open Watcom GUI
+/// library makes its MDI documents current there). Top-level frames are
+/// activated with the active window.
+fn child_frames_activate(old: u32, new: u32) {
+    let (was, now) = (child_frames(old), child_frames(new));
+    for &f in was.iter().filter(|f| !now.contains(f)) {
+        if st().frames.get(&f).is_some_and(|x| x.child_active) && st().desk.exists(f) {
+            if let Some(x) = st().frames.get_mut(&f) {
+                x.child_active = false;
+            }
+            notify(f, WM_ACTIVATE, 0, f);
+        }
+    }
+    for &f in now.iter().rev().filter(|f| !was.contains(f)) {
+        if st().frames.get(&f).is_some_and(|x| !x.child_active) {
+            if let Some(x) = st().frames.get_mut(&f) {
+                x.child_active = true;
+            }
+            notify(f, WM_ACTIVATE, 1, f);
+        }
+    }
 }
 
 /// WinSetWindowPos(hwnd, hwndInsertBehind, x, y, cx, cy, fl)

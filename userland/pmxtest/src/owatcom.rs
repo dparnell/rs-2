@@ -30,6 +30,8 @@ unsafe extern "C" {
     fn WinSetWindowUShort(h: u32, i: i32, v: u32) -> u32;
     #[link_name = "PMWIN.892"]
     fn WinUpdateWindow(h: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMGPI.476"]
     fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
 }
@@ -40,6 +42,41 @@ fn pel(h: u32, x: i32, y: i32) -> i32 {
     let v = unsafe { GpiQueryPel(hps, p.as_ptr()) };
     unsafe { WinReleasePS(hps) };
     v
+}
+
+static CHILD_ACT: AtomicU32 = AtomicU32::new(0);
+static OLD_CHILD: AtomicU32 = AtomicU32::new(0);
+
+/// A document frame's subclass: what WM_ACTIVATE said (1 on, 2 off).
+extern "C" fn child_frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    if msg == 0x000d {
+        CHILD_ACT.store(if mp1 & 0xffff != 0 { 1 } else { 2 }, Ordering::Relaxed);
+    }
+    let old: WndProc = unsafe { core::mem::transmute(OLD_CHILD.load(Ordering::Relaxed) as usize) };
+    old(h, msg, mp1, mp2)
+}
+
+/// A frame inside a client (the GUI library's MDI documents): the focus
+/// going into it sends it WM_ACTIVATE(TRUE) and lights its title bar,
+/// leaving it WM_ACTIVATE(FALSE), as IBM's WinFrameFocusChange (the IDE
+/// makes a document current on that WM_ACTIVATE).
+unsafe fn child_frame_activation(client: u32) {
+    unsafe {
+        let mut fcf = 0x0001 | 0x0008; // FCF_TITLEBAR | FCF_SIZEBORDER
+        let mut doc = 0;
+        let child = WinCreateStdWindow(client, 0x8000_0000, &mut fcf, b"OwGuiClient\0".as_ptr(), b"Doc\0".as_ptr(), 0, 0, 0, &mut doc);
+        WinSetWindowPos(child, 3, 10, 10, 150, 100, 0x0003 | 0x0008);
+        OLD_CHILD.store(WinSubclassWindow(child, child_frame_proc), Ordering::Relaxed);
+        WinSetFocus(HWND_DESKTOP, client);
+        CHILD_ACT.store(0, Ordering::Relaxed);
+        WinSetFocus(HWND_DESKTOP, doc);
+        let tb = WinWindowFromID(child, 0x8003);
+        let lit = |tb: u32| WinSendMsg(tb, 0x01e4 /* TBM_QUERYHILITE */, 0, 0);
+        check("the focus into a frame inside a client: WM_ACTIVATE(TRUE), its title lit", CHILD_ACT.load(Ordering::Relaxed) == 1 && lit(tb) == 1);
+        WinSetFocus(HWND_DESKTOP, client);
+        check("the focus out of it: WM_ACTIVATE(FALSE), its title not lit", CHILD_ACT.load(Ordering::Relaxed) == 2 && lit(tb) == 0);
+        WinDestroyWindow(child);
+    }
 }
 
 /// LM_QUERYSELECTION as IBM's: a single-selection list ignores mp1 (the
@@ -282,5 +319,6 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         gui_menu_keys(hab);
         group_box_over_sibling(client);
         list_selection(client);
+        child_frame_activation(client);
     }
 }
