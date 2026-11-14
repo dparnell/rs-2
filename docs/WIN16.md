@@ -422,7 +422,8 @@ CreateMenu or RT_MENU templates become the frame's FID_MENU with SetMenu
 items (MIS_SUBMENU, with IDs of their own: Windows' pop-up items have
 none). PM's menus draw and track themselves, keyboard included (Alt,
 F10, mnemonics); their notifications, which PM's frame passes to the
-client, become Windows' WM_INITMENU, WM_INITMENUPOPUP (with the pop-up's
+client, become Windows' WM_INITMENU (made from the bar's first
+WM_MENUSELECT: PM sends no WM_INITMENU for a menu bar), WM_INITMENUPOPUP (with the pop-up's
 HMENU and position), WM_MENUSELECT and WM_COMMAND. "&" mnemonics are PM's
 "~". TrackPopupMenu shows a pop-up at a point and returns when it closes.
 Accelerator tables (RT_ACCELERATOR) are WIN16's: TranslateAccelerator
