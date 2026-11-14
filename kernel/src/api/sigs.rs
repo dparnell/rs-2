@@ -147,6 +147,21 @@ const DOSCALLS: &[(u16, &str)] = &[
     (215, "p"),        // DosPageSize
     (423, ""),         // DosFlatToSel: register based (EAX in and out)
     (424, ""),         // DosSelToFlat: register based (EAX in and out)
+    // OS/2 1.x named pipes (NAMPIPES forwards to these; IBM's RETF sizes)
+    (399, "ppwwwwd"),  // DosMakeNmPipe
+    (400, "wwpw"),     // DosQNmPipeInfo
+    (401, "w"),        // DosConnectNmPipe
+    (402, "w"),        // DosDisConnectNmPipe
+    (403, "wp"),       // DosQNmPHandState
+    (404, "ww"),       // DosSetNmPHandState
+    (405, "wpwppp"),   // DosPeekNmPipe
+    (406, "pd"),       // DosWaitNmPipe
+    (407, "wpwpwp"),   // DosTransactNmPipe
+    (408, "ppwpwpd"),  // DosCallNmPipe
+    (409, "wpwp"),     // DosRawReadNmPipe
+    (410, "wpwp"),     // DosRawWriteNmPipe
+    (411, "wdw"),      // DosSetNmPipeSem
+    (412, "dpw"),      // DosQNmPipeSemState
     (443, "d"),        // DosQueryABIOSSupport (kernel-only 16-bit gate; SYSINST2)
     (567, "pppddwwdpp"), // Dos16OpenL (from CMD.EXE call sites)
     (568, "wddcp"),    // Dos16SetFilePtrL (LONGLONG as two dwords)

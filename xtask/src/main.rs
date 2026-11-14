@@ -748,6 +748,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("wincfg", "OS2\\DLL\\WINCFG.DLL"),
         ("rminfo", "OS2\\DLL\\RMINFO.DLL"),
         ("pnp", "OS2\\DLL\\PNP.DLL"),
+        ("nampipes", "OS2\\DLL\\NAMPIPES.DLL"),
         ("rexx", "OS2\\DLL\\REXX.DLL"),
         ("rexxapi", "OS2\\DLL\\REXXAPI.DLL"),
         ("rexxutil", "OS2\\DLL\\REXXUTIL.DLL"),

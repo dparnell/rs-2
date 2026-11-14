@@ -1,0 +1,13 @@
+[package]
+name = "nampipes-dll"
+description = "NAMPIPES.DLL: OS/2 1.x named pipe module, forwarders to the kernel's 16-bit DOSCALLS named pipe calls (as Warp's)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nampipes"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

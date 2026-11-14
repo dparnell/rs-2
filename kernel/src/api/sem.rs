@@ -1102,6 +1102,11 @@ pub fn wake_16bit() {
     RAM16_WAIT.wake_all();
 }
 
+/// Is `h` a 16-bit system semaphore's handle (DosCreateSem)?
+pub fn is_sys16(h: u32) -> bool {
+    h >> 16 == SYS_SEL && SYS16.lock().contains_key(&(h & 0xffff))
+}
+
 /// Clear a 16-bit system semaphore by handle.
 pub fn clear_sys16(h: u32) {
     if let Some(s) = SYS16.lock().get_mut(&(h & 0xffff)) {

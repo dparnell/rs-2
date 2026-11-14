@@ -48,7 +48,25 @@ pub fn display(module: u8, ordinal: u16) -> &'static str {
 /// 16-bit DOSCALLS entries that IBM's kernel exports itself (call gates in
 /// its DOSCALLS entry table) and that are neither in DOSCALL1 nor in the
 /// Toolkit import libraries. Undocumented; found by reading the table.
-const KERNEL16: [(u16, &str); 1] = [(443, "DOSQUERYABIOSSUPPORT")];
+/// 399-412 are OS/2 1.x's named pipe calls, which programs import from
+/// NAMPIPES (a forwarder module, as on Warp).
+const KERNEL16: [(u16, &str); 15] = [
+    (399, "DOSMAKENMPIPE"),
+    (400, "DOSQNMPIPEINFO"),
+    (401, "DOSCONNECTNMPIPE"),
+    (402, "DOSDISCONNECTNMPIPE"),
+    (403, "DOSQNMPHANDSTATE"),
+    (404, "DOSSETNMPHANDSTATE"),
+    (405, "DOSPEEKNMPIPE"),
+    (406, "DOSWAITNMPIPE"),
+    (407, "DOSTRANSACTNMPIPE"),
+    (408, "DOSCALLNMPIPE"),
+    (409, "DOSRAWREADNMPIPE"),
+    (410, "DOSRAWWRITENMPIPE"),
+    (411, "DOSSETNMPIPESEM"),
+    (412, "DOSQNMPIPESEMSTATE"),
+    (443, "DOSQUERYABIOSSUPPORT"),
+];
 
 /// MONCALLS (not in the Toolkit 4.5 import libraries).
 const MONCALLS: [(&str, u16); 5] = [("DosMonWrite", 1), ("DosMonRead", 2), ("DosMonClose", 3), ("DosMonOpen", 4), ("DosMonReg", 5)];

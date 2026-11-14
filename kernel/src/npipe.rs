@@ -233,7 +233,12 @@ impl Instance {
         let sems = self.inner.lock().sem;
         self.cond.wake_all();
         for (h, _) in sems.into_iter().flatten() {
-            crate::api::sem::post_event_handle(0, h);
+            // A 16-bit system semaphore (DosSetNmPipeSem) is cleared.
+            if crate::api::sem::is_sys16(h) {
+                crate::api::sem::clear_sys16(h);
+            } else {
+                crate::api::sem::post_event_handle(0, h);
+            }
         }
     }
 
