@@ -1,0 +1,32 @@
+/* OS/2 resources for pmres.c, compiled by wrc */
+#include <os2.h>
+#include "pmres.h"
+
+ICON ID_MAIN watcom.ico
+
+MENU ID_MAIN
+BEGIN
+    SUBMENU "~File", IDM_FILE
+    BEGIN
+        MENUITEM "~Hello...", IDM_HELLO
+        MENUITEM SEPARATOR
+        MENUITEM "E~xit", IDM_EXIT
+    END
+END
+
+STRINGTABLE
+BEGIN
+    IDS_HELLO   "Hello from a string table"
+    IDS_SECOND  "Second string"
+END
+
+DLGTEMPLATE ID_DLG
+BEGIN
+    DIALOG "Resource dialog", ID_DLG, 20, 20, 180, 70, WS_VISIBLE, FCF_TITLEBAR | FCF_SYSMENU
+    BEGIN
+        LTEXT "Text from the dialog template", IDC_TEXT, 8, 50, 160, 10
+        ENTRYFIELD "entry", IDC_ENTRY, 10, 32, 100, 10, ES_MARGIN
+        DEFPUSHBUTTON "OK", DID_OK, 8, 6, 40, 14
+        PUSHBUTTON "Cancel", DID_CANCEL, 56, 6, 40, 14
+    END
+END

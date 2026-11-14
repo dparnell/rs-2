@@ -510,10 +510,11 @@ fn read_name_table<'a>(
         }
         let ord = r.u16(o + 1 + s.len())?;
         o += 3 + s.len();
-        if first {
-            // The first entry names the module (resident) or holds the
-            // description (non-resident).
-            first = false;
+        // The first entry names the module (resident) or holds the
+        // description (non-resident), with ordinal 0. A linker given no
+        // description starts the non-resident table with an export
+        // (Open Watcom's WDPMHOOK.DLL: SendMsgHookProc, ordinal 1).
+        if core::mem::take(&mut first) && ord == 0 {
             continue;
         }
         out.push((s, ord));
@@ -742,8 +743,33 @@ pub fn expand_exepack2(src: &[u8], out: &mut [u8]) -> Result<usize, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::fixup_chain;
+    use super::{fixup_chain, read_name_table};
+    use crate::read::Reader;
     use alloc::vec;
+    use alloc::vec::Vec;
+
+    #[test]
+    fn name_table_skips_only_an_ordinal_0_first_entry() {
+        let t = |names: &[(&[u8], u16)]| {
+            let mut b = Vec::new();
+            for (n, o) in names {
+                b.push(n.len() as u8);
+                b.extend_from_slice(n);
+                b.extend_from_slice(&o.to_le_bytes());
+            }
+            b.push(0);
+            b
+        };
+        let mut v = Vec::new();
+        let with_desc = t(&[(b"a description", 0), (b"Exported", 1)]);
+        read_name_table(&Reader::new(&with_desc), 0, with_desc.len(), &mut v).unwrap();
+        assert_eq!(v, [(&b"Exported"[..], 1)]);
+        // Open Watcom's WDPMHOOK.DLL: no description, the exports at once.
+        let mut v = Vec::new();
+        let no_desc = t(&[(b"SendMsgHookProc", 1), (b"SetHmqDebugee", 2)]);
+        read_name_table(&Reader::new(&no_desc), 0, no_desc.len(), &mut v).unwrap();
+        assert_eq!(v, [(&b"SendMsgHookProc"[..], 1), (&b"SetHmqDebugee"[..], 2)]);
+    }
 
     #[test]
     fn chain_follows_links_in_the_page() {

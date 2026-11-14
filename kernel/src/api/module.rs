@@ -557,60 +557,51 @@ pub fn dos_query_proc_type(c: &mut Ctx) -> u32 {
     }
 }
 
-/// FAPPTYP_* flags for an executable file.
-pub fn app_type(data: &[u8]) -> u32 {
+/// The program type DosQueryAppType reports, as IBM's _LDRQAppType: an
+/// LX or NE module's own type; a DOS program (FAPPTYP_DOS) for an MZ
+/// executable with no NE/LX/LE/PE header behind it; FAPPTYP_32BIT |
+/// FAPPTYP_WINDOWSPROT31 (and FAPPTYP_BOUND for a DLL) for a Win32 PE
+/// file, which only a PE loader can run; ERROR_INVALID_EXE_SIGNATURE for
+/// an LE file (DOS extender programs, VxDs), which OS/2 does not run
+/// either, and for anything else.
+pub fn app_type(data: &[u8]) -> Result<u32, u32> {
     use os2_exe::Format;
+    const ERROR_INVALID_EXE_SIGNATURE: u32 = 191;
     match os2_exe::detect(data) {
         Ok(Format::Lx { header }) => match os2_exe::lx::Module::parse(data, header) {
             Ok(m) => {
                 let f = m.header.module_flags;
                 let mut t = (f >> 8) & 3;
                 if m.header.is_library() {
-                    t |= 0x0008; // FAPPTYP_DLL
+                    t |= 0x0010; // FAPPTYP_DLL (0x0008 is FAPPTYP_BOUND)
                 }
-                t | 0x4000 // FAPPTYP_32BIT
+                Ok(t | 0x4000) // FAPPTYP_32BIT
             }
-            Err(_) => 0x0010,
+            Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
         },
         Ok(Format::Ne { header }) => match os2_exe::ne::Module::parse(data, header) {
             Ok(m) => {
                 let mut t = ((m.header.flags as u32) >> 8) & 3;
                 if m.header.flags & os2_exe::ne::flags::LIBRARY != 0 {
-                    t |= 0x0008;
+                    t |= 0x0010; // FAPPTYP_DLL
                 }
                 if m.header.target_os == 2 {
                     t |= 0x0200; // FAPPTYP_WINDOWSREAL
                 }
-                t
+                Ok(t)
             }
-            Err(_) => 0x0010,
+            Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
         },
-        // A Win32 program, as IBM's LDRQAppType reports it (0x5010 for
-        // a DLL, IMAGE_FILE_DLL in the characteristics).
-        Ok(Format::Mz) if pe_header(data).is_some() => {
-            let h = pe_header(data).unwrap_or(0);
-            if data.get(h + 0x17).is_some_and(|b| b & 0x20 != 0) { 0x5010 } else { 0x5000 }
+        Ok(Format::Mz) => {
+            let lfanew = data.get(0x3c..0x40).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+            match data.get(lfanew..lfanew + 0x18) {
+                // IMAGE_FILE_DLL (0x2000 in the characteristics).
+                Some(h) if lfanew != 0 && &h[..4] == b"PE\0\0" => Ok(if h[0x17] & 0x20 != 0 { 0x5010 } else { 0x5000 }),
+                _ => Ok(0x0020), // FAPPTYP_DOS
+            }
         }
-        Ok(Format::Mz) => 0x0020,      // FAPPTYP_DOS
-        // DosQueryAppType fails for these (le_or_unknown); 0 here.
-        Ok(Format::Le { .. }) => 0,
-        Err(_) => 0x0010,              // FAPPTYP_BOUND / unknown
+        Ok(Format::Le { .. }) | Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
     }
-}
-
-/// The offset of a PE header behind the MZ header, if there is one.
-fn pe_header(data: &[u8]) -> Option<usize> {
-    let lfanew = u32::from_le_bytes(data.get(0x3c..0x40)?.try_into().ok()?) as usize;
-    (lfanew != 0 && data.get(lfanew..lfanew + 4) == Some(b"PE\0\0")).then_some(lfanew)
-}
-
-/// Whether IBM's loader rejects the file's header with
-/// ERROR_INVALID_EXE_SIGNATURE before it knows its type: an LE executable
-/// (a DOS extender's, such as DOS/4GW's, or a Windows VxD) is neither an
-/// OS/2 nor a DOS program to it (_ldrOpenNewExe), so DosQueryAppType and
-/// DosExecPgm fail with 191.
-pub fn le_or_unknown(data: &[u8]) -> bool {
-    matches!(os2_exe::detect(data), Ok(os2_exe::Format::Le { .. }))
 }
 
 pub fn dos_query_app_type(c: &mut Ctx) -> u32 {
@@ -627,12 +618,10 @@ pub fn dos_query_app_type(c: &mut Ctx) -> u32 {
     }
     let Some(data) = crate::fs::read_file(&path.display()) else { return err::FILE_NOT_FOUND };
     // .COM files are DOS programs.
-    let t = if path.file_name().to_ascii_uppercase().ends_with(".COM") && !data.starts_with(b"MZ") {
-        0x0020
-    } else if le_or_unknown(&data) {
-        return crate::loader::err::INVALID_EXE_SIGNATURE;
-    } else {
-        app_type(&data)
+    let t = if path.file_name().to_ascii_uppercase().ends_with(".COM") && !data.starts_with(b"MZ") { Ok(0x0020) } else { app_type(&data) };
+    let t = match t {
+        Ok(t) => t,
+        Err(e) => return e,
     };
     if c.is16 { c.write_u16(ptype, t as u16) } else { c.write_u32(ptype, t) };
     0

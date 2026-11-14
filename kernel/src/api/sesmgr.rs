@@ -162,7 +162,7 @@ pub(super) fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String
 /// Whether the program at `path` (its contents `data`) is a DOS program.
 pub fn is_dos_program(path: &str, data: &[u8]) -> bool {
     let up = path.to_ascii_uppercase();
-    up.ends_with(".COM") || up.ends_with(".BAT") || (data.len() >= 2 && super::module::app_type(data) == 0x20)
+    up.ends_with(".COM") || up.ends_with(".BAT") || (data.len() >= 2 && super::module::app_type(data) == Ok(0x20))
 }
 
 /// Whether the file at `path` is a DOS program, from its headers only: a
@@ -341,7 +341,7 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     let title = sd.title.clone().unwrap_or_else(|| program.clone());
     let caller_session = c.process.session.load(Ordering::Relaxed);
     let parent_pid = sd.related.then_some(c.process.pid);
-    let app = super::module::app_type(&data);
+    let app = super::module::app_type(&data).unwrap_or(0);
     let mut windowed = wants_window(sd.session_type, app, caller_session);
     // The window needs the PM host; without it the session runs full
     // screen.

@@ -81,6 +81,15 @@ struct Inner {
     /// Event semaphores attached with DosSetNPipeSem: (handle, key) for the
     /// server and the client end.
     sem: [Option<(u32, u16)>; 2],
+    /// Client threads blocked in a read.
+    client_readers: u32,
+    /// What the server wrote for a client that was already waiting in a
+    /// read when the server disconnected it (with that client's
+    /// generation): on OS/2 a write completes a waiting read at once, so
+    /// a reply written just before DosDisConnectNPipe reaches the client
+    /// (Open Watcom's NMPBIND answers and disconnects at once: NMPSERV
+    /// and the debugger's NMP trap file said "NMPBIND not found").
+    parting: Option<(u32, Chan)>,
 }
 
 pub struct Instance {
@@ -170,6 +179,8 @@ pub fn create(name: String, open_mode: u32, pipe_mode: u32, out_size: u32, in_si
             to_client: Chan::default(),
             to_server: Chan::default(),
             sem: [None, None],
+            client_readers: 0,
+            parting: None,
         }),
         cond: WaitQueue::new(),
     });
@@ -233,7 +244,12 @@ impl Instance {
         let sems = self.inner.lock().sem;
         self.cond.wake_all();
         for (h, _) in sems.into_iter().flatten() {
-            crate::api::sem::post_event_handle(0, h);
+            // A 16-bit system semaphore (DosSetNmPipeSem) is cleared.
+            if crate::api::sem::is_sys16(h) {
+                crate::api::sem::clear_sys16(h);
+            } else {
+                crate::api::sem::post_event_handle(0, h);
+            }
         }
     }
 
@@ -318,6 +334,18 @@ impl End {
         loop {
             let mut g = self.inst.inner.lock();
             if self.stale(&g) {
+                // The reply that was there for this client's waiting read.
+                let mine = self.generation;
+                if let Some((_, rx)) = g.parting.as_mut().filter(|p| p.0 == mine && !p.1.data.is_empty()) {
+                    let m = if msg_mode { rx.msgs.front().copied().unwrap_or(rx.data.len()) } else { rx.data.len() };
+                    let k = n.min(m);
+                    let v = rx.take(k);
+                    let done = rx.data.is_empty();
+                    if done {
+                        g.parting = None;
+                    }
+                    return Ok((v, if k < m { ERROR_MORE_DATA } else { 0 }));
+                }
                 return Err(ERROR_PIPE_NOT_CONNECTED);
             }
             let has = {
@@ -359,7 +387,15 @@ impl End {
                 let rx = self.rx(&mut g);
                 !rx.data.is_empty() || !rx.msgs.is_empty() || g.state != NP_STATE_CONNECTED || self.stale(&g)
             };
-            if !self.inst.cond.wait_until(None, ready) {
+            if !self.server {
+                self.inst.inner.lock().client_readers += 1;
+            }
+            let woke = self.inst.cond.wait_until(None, ready);
+            if !self.server {
+                let mut g = self.inst.inner.lock();
+                g.client_readers = g.client_readers.saturating_sub(1);
+            }
+            if !woke {
                 return Err(err::INTERRUPT);
             }
         }
@@ -466,7 +502,13 @@ impl End {
         }
         let mut g = self.inst.inner.lock();
         g.state = NP_STATE_DISCONNECTED;
+        let old = g.generation;
         g.generation = g.generation.wrapping_add(1);
+        g.parting = None;
+        if g.client_readers > 0 && (!g.to_client.data.is_empty() || !g.to_client.msgs.is_empty()) {
+            let reply = core::mem::take(&mut g.to_client);
+            g.parting = Some((old, reply));
+        }
         g.to_client.clear();
         g.to_server.clear();
         g.sem[1] = None;

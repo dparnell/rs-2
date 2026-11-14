@@ -1,0 +1,9 @@
+#define ID_MAIN         1
+#define ID_DLG          100
+#define IDM_FILE        200
+#define IDM_HELLO       201
+#define IDM_EXIT        202
+#define IDS_HELLO       300
+#define IDS_SECOND      301
+#define IDC_TEXT        101
+#define IDC_ENTRY       102

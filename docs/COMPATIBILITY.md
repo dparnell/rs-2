@@ -686,8 +686,16 @@ program notebook (RS2SHELL has it).
 `open-watcom-c-os2-1.9.exe`, Open Watcom's own OS/2 installer (an LX PM
 program with the files in a ZIP appended), on a system disk with only
 rs2's files (`cargo xtask disk --system --size 1000`, the installer copied
-to `C:\OWSETUP.EXE`). The test programs and the BUILD.CMD that builds them
-are in `tests/owatcom` (a second disk, `--virtio-disk`).
+to `C:\OWSETUP.EXE`). The test programs and the scripts that build and
+run them are in `tests/owatcom`. For the toolchain tests,
+`tests/owatcom/mkdisk.sh` makes `work/owsys.img`: a system disk with
+Open Watcom unpacked from the installer's ZIP as a Full installation lays
+it out (the installer's CONFIG.SYS lines in `tests/owatcom/config.sys`)
+and the tests in `C:\OWT`; it boots into `RUN.CMD` (BUILD.CMD, TOOLS.CMD,
+MORE.CMD, then a restart that ends QEMU), or `INIT="OS2\CMD.EXE /C
+C:\OWT\UI.CMD"` for the PM and Windows tools one after another
+(screenshots); `tests/owatcom/getlogs.sh DIR` fetches the logs from the
+image. The whole run takes about 3 minutes in QEMU.
 
 | What | Status | Notes |
 |------|--------|-------|
@@ -699,11 +707,65 @@ are in `tests/owatcom` (a second disk, `--virtio-disk`).
 | `wcl -l=os2 -i=%WATCOM%\h\os21x hello16.c` | works | 16-bit OS/2 program (NE); it reports DosGetVersion 20.45. The installer's INCLUDE names the 32-bit headers only, so 16-bit builds need the `-i` (as on OS/2). |
 | `wmake` | works | Builds the three programs from `tests/owatcom/makefile`. |
 | `wd` (debugger) | works | `wd hello` (built with `wcl386 -d2`) loads the program through its trap file (STD.D32: DosStartSession with the trace option, then `DosDebug`), loads its helper DLL (WDSPLICE) into it, stops at `main` with the source and the locals, steps (F10, with DBG_C_SStep and breakpoints), shows the variables as they change, and runs the program to its end (F5: "The task has completed running"). Watchpoints work with the debug registers: a 4-byte break on write on `i` stops after `i = 0` and again after `i++` ("Break on write ... Old value=0 New value=1"). |
+| C++: `wcl386 -xs -xr cpptest.cpp` | works | iostream and fstream, `throw` through three functions with destructors run while unwinding, rethrow, `std::exception`, function and class templates, `vector`/`list`/`map` and `sort`, Watcom's `WCValOrderedVector` and `WCValSList`, RTTI (`dynamic_cast`, `typeid`), static constructors and destructors: 17 of 17 checks. (Open Watcom 1.9's `<sstream>` is empty: its string streams are the classic `strstream`s.) |
+| C++ 16-bit: `wcl -l=os2 -xs -xr -ml` | works | The same program as a 16-bit OS/2 program: 17 of 17. |
+| Threads: `wcl386 -bm`, with `-br` too | works | Four `_beginthread` threads with a mutex semaphore, per-thread `errno` and `strtok`, `DosWaitThread`; the same on the runtime DLLs (MT7R19.DLL ...). |
+| DLLs: `wcl386 -l=os2v2_dll -bd`, `wlib -n x.lib +x.dll` | works | A C DLL called through its import library and through `DosLoadModule`/`DosQueryProcAddr` (`DllAdd_`: the register convention's name). A C++ DLL on the runtime DLLs (`-bd -br`) exporting a class whose member throws, caught in the EXE. |
+| `wasm`, `wlib`, `wdis`, `dmpobj`, `wdump` | works | Assembled functions in a library with a C one (`wlib -n`, `-l` listing), called from C; disassembly of the object; object and executable dumps. |
+| `wlink @file`, `ms2wlink`, `wstrip`, `cvpack`, `exe2bin` | works | A directive file (system, name, options, library) with a map; MS LINK syntax converted; debug information moved to a .SYM; CodeView packing; a DOS .COM made from an assembled EXE (it runs in a DOS session). |
+| `owcc` | works | `owcc -o hellou.exe -O2 -Wall hello.c`. |
+| `wmake` with `!include`, implicit rules, `.BEFORE`, `!ifdef` | works | `mk2.mak`: `.c.obj` from an included file, `.asm.obj`, the link. |
+| `wrc` and a PM program using its resources | works | Menu (FCF_MENU), icon (FCF_ICON, `WinLoadPointer`), string table (`WinLoadString`), dialog template (`WinDlgBox`, its static text and entry field): 9 of 9 checks. |
+| `wipfc`, and VIEW | works | `owhelp.ipf` (headings, a link, a list, a table) compiled to .INF and .HLP; VIEW shows the book's contents. The shipped books (`C:\WATCOM\BINP\HELP\*.INF`, BOOKSHELF) open in VIEW (`view cguide.inf`). |
+| `vi` | works | Text mode; `vi -k "Goadded by vi\e:wq\n" file` edits and saves. |
+| `wsample` and `wprof` | works | `wsample busy.exe` writes the sample file (sampling through DosDebug); the profiler (PM) shows it by module, with its menu bar (File, Convert, Windows, Actions, Help). |
+| `wdw` (PM debugger) | works | Stops at `main` with the source, the locals and the modules, with its menu bar and its message hook DLL (WDPMHOOK). |
+| `ctags`, `wtouch`, `wbind`, `fcenable`, `edbind`, `wasaxp`, `wasppc` | works | Tags of C files; a file's date and time set; the others' usage. |
+| DOS: `wcl -l=dos` | works | Built on rs2, runs in a DOS session (writes its result file). |
+| DOS/4GW: `wcl386 -l=dos4g` | works | Runs in a DOS session (from a .BAT; DOS4GW.EXE on rs2's DPMI host). Started from the OS/2 command prompt it does not run, as on OS/2: an LE file is not an OS/2 program (SYS0191). |
+| Win16: `wcl -l=windows` | works | Built on rs2, runs on rs2's WIN16 (a window, a timer, its result file). |
+| Win32: `wcl386 -l=nt` | works | Built only: a valid PE (a PE32 console program importing KERNEL32 and USER32; Open Watcom 1.9 gives its .reloc section a virtual size of 0, which LLVM's objdump rejects). |
+| `viw` (BINW, the Windows editor) | works | On WIN16: its menus, tool bar, MDI child with the file, status line. |
+| BINW's other Windows tools: `wimgedit`, `wre`, `wzoom`, `wspy` | works | Start on WIN16 with their menus, tool bars and palettes (UI2.CMD); not used further. CTL3DV2.DLL is looked for and not there, as on a Windows without it. |
+| `wheapwlk` (Heap Walker) | fails | Imports STRESS (Windows 3.1's STRESS.DLL), which rs2's WIN16 does not have. |
 | `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
-| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | Imports `NAMPIPES`, OS/2 1.x's named pipe module, which Warp's kernel does not provide either (it is for remote debugging over named pipes). |
+| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | It imports `NAMPIPES`, OS/2 1.x's named pipe module. Warp has it: `\OS2\DLL\NAMPIPES.DLL` (1 KB) is an LX forwarder module whose 14 entries go to the kernel's 16-bit DOSCALLS 399-412; rs2 has its own NAMPIPES.DLL made the same way and those kernel calls. NMPBIND starts at boot, runs, and answers the bindery requests (NMPSERV registers with it). |
+| Remote debugging over named pipes: `nmpserv`, `wdw -tr=nmp` | partial | NMPSERV starts and registers with NMPBIND; the debugger's NMP trap file finds the server, but the debugger does not come up (the link through NMPBIND's relay threads; not followed up). |
+| `ide2make`, the other remote debug servers (`tcpserv`, `serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | |
 
 Fixed for it:
 
+- Kernel: `DosUnwindException` with a report record of the caller's
+  (Open Watcom's 32-bit C++ `throw` passes its own) put its context
+  record and the handlers' frames below that report, over the throwing
+  function's live stack: its saved registers became 0 and the program
+  faulted. They now go below the caller's stack pointer, as IBM's
+  `_xcptUnwindDispatcher` keeps them in its own frame (APITEST).
+- `NAMPIPES.DLL` and the 16-bit named pipe calls (DOSCALLS 399-412:
+  DosMakeNmPipe ... DosQNmPipeSemState, studied in IBM's kernel and its
+  NAMPIPES.DLL), which NMPBIND needs; `DosRawReadNPipe` and
+  `DosRawWriteNPipe` (APITEST, through NAMPIPES).
+- Named pipes: a reply the server writes for a client already waiting in
+  `DosRead` survives the server's `DosDisConnectNPipe` (on OS/2 the write
+  completes the waiting read at once); NMPBIND answers and disconnects at
+  once, and NMPSERV and the NMP trap file said "NMPBIND not found"
+  (APITEST).
+- `DosQueryAppType` as IBM's `_LDRQAppType`: FAPPTYP_DLL is 10h (rs2 gave
+  08h, FAPPTYP_BOUND); a PE file is FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31;
+  an LE file (a DOS/4GW program) gives ERROR_INVALID_EXE_SIGNATURE (rs2
+  called it a virtual device driver), and `DosExecPgm` of LE and PE files
+  fails with that error as IBM's `_ldrOpenNewExe`; CMD names the program
+  in such errors (SYS0191 showed "%1") (APITEST).
+- PMWIN: a frame formats its FID_MENU child whether it is shown or not,
+  as IBM's `FrameCalcFrameCoords`; the GUI library puts its menu bar into
+  the frame while that is still of size 0, formatting hid it, and rs2
+  then left it out for good (wprof and wdw had no menu bar) (PMXTEST).
+- Loader: in the LX and NE name tables only a first entry with ordinal 0
+  is the module name or description; WDPMHOOK.DLL's non-resident table
+  starts with an export, and `DosQueryProcAddr` did not find it.
+- PMWIN: when a thread starts or stops responding, the title bars of all
+  its frames are repainted, also those inside other windows (viw's MDI
+  child kept saying "not responding").
 - Kernel: `DosDebug` (DOSCALLS 317) and the trace option of
   DosStartSession and DosExecPgm (EXEC_TRACE): connect, stop, go, single
   step, continue after an exception, read and write memory, registers
@@ -776,7 +838,7 @@ results numerically and ends with "all checks passed" or the failures.
 | The FWCOPY Windows sample | fails | The package's: its AppendMenu calls push 8 bytes of arguments where the function takes 10 (`value far` of a LOC() value in WINAPI.FI), so AppendMenu sees a wrong menu handle and the program ends. |
 | `wd` on a FORTRAN program | works | `wd fmathdbg` (built with `-d2`): stops at the program's first statement with FMATH.FOR's source, the locals (INTEGER, REAL, COMPLEX), steps over statements (F10) and runs the program to its end ("The task has completed running"). |
 | Help books in the help viewer | works | `view f77lr` (FORTRAN 77 Language Reference) with its contents; the folder's other books (User's Guide, Programmer's Reference, Tools, Graphics Library, Master Index, Read Me) are on BOOKSHELF. The installer's "Fortran Error Messages" object names WFCERRS.INF, which the package does not have (it has WFCERRS.HLP). |
-| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | As with the C/C++ package: it imports OS/2 1.x's NAMPIPES, which Warp does not have either. |
+| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | The same program as the C/C++ package's: it runs on rs2's NAMPIPES.DLL, as on Warp (see the C/C++ section). |
 
 Fixed for it:
 

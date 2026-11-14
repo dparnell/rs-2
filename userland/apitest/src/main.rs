@@ -63,9 +63,11 @@ fn main(s: &Startup) -> u32 {
     t16::run();
     klibc::run();
     exceptions();
+    unwind_own_report();
     pipes();
     named_pipes();
     dlls();
+    app_types();
     timers();
     perf_counters();
     shared_memory();
@@ -311,6 +313,50 @@ static mut FAULTS: u32 = 0;
 static mut GUARD_AT: u32 = 0;
 static mut GUARD_ACCESS: u32 = 0;
 
+static mut UNWOUND: u32 = 0;
+
+unsafe extern "C" fn unwind_handler(rep: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, _ctx: *mut ContextRecord, _d: *mut u8) -> u32 {
+    unsafe {
+        if (*rep).flags & EH_UNWINDING != 0 {
+            UNWOUND += 1;
+        }
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+/// DosUnwindException with a report record in the caller's own frame (Open
+/// Watcom's C++ throw passes one): the system's records and the handlers'
+/// frames go below the caller's stack, not below the report, which is
+/// live stack (rs2 wrote its context record there: the throwing
+/// function's saved registers became 0 and the program faulted).
+fn unwind_own_report() {
+    #[repr(C)]
+    struct Frame {
+        below: [u32; 96],
+        report: ExceptionReportRecord,
+        above: [u32; 8],
+    }
+    unsafe {
+        let mut outer = ExceptionRegistrationRecord { prev: null_mut(), handler };
+        DosSetExceptionHandler(&mut outer);
+        let mut inner = ExceptionRegistrationRecord { prev: null_mut(), handler: unwind_handler };
+        DosSetExceptionHandler(&mut inner);
+        let mut fr: Frame = core::mem::zeroed();
+        fr.below = [0x5a5a_5a5a; 96];
+        fr.above = [0xa5a5_a5a5; 8];
+        fr.report.num = 0x2000_0002;
+        UNWOUND = 0;
+        let rc = DosUnwindException(&mut outer, null(), &mut fr.report);
+        let fr = core::ptr::read_volatile(&fr);
+        let mut head: u32;
+        core::arch::asm!("mov {0}, fs:[0]", out(reg) head);
+        check("DosUnwindException with the caller's report: the handler below the target is called", rc == 0 && UNWOUND == 1 && head == &raw mut outer as u32);
+        check("the report gets EH_UNWINDING", fr.report.flags & EH_UNWINDING != 0);
+        check("and the caller's stack around the report is left alone", fr.below.iter().all(|&w| w == 0x5a5a_5a5a) && fr.above.iter().all(|&w| w == 0xa5a5_a5a5));
+        DosUnsetExceptionHandler(&mut outer);
+    }
+}
+
 unsafe extern "C" fn handler(
     rep: *mut ExceptionReportRecord,
     _reg: *mut ExceptionRegistrationRecord,
@@ -467,6 +513,47 @@ fn named_pipes() {
         DosClose(h);
         check("pipe gone", DosWaitNPipe(name, 10) == 2);
     }
+    reply_then_disconnect();
+}
+
+static PIPE_CLIENT: AtomicU32 = AtomicU32::new(0);
+static PIPE_GOT: AtomicU32 = AtomicU32::new(0);
+
+/// A client blocked in DosRead (its request sent).
+unsafe extern "C" fn pipe_reader(_: u32) {
+    let mut buf = [0u8; 8];
+    let mut n = 0;
+    let rc = unsafe { DosRead(PIPE_CLIENT.load(Ordering::Relaxed), buf.as_mut_ptr(), 8, &mut n) };
+    PIPE_GOT.store(if rc == 0 && n == 1 { buf[0] as u32 } else { 0x100 | rc }, Ordering::Relaxed);
+}
+
+/// A server that writes its one-byte answer and disconnects at once (Open
+/// Watcom's NMPBIND): the client already waiting in DosRead gets it, as
+/// on OS/2, where the write completes the waiting read.
+fn reply_then_disconnect() {
+    let name = b"\\PIPE\\RS2BIND\0".as_ptr();
+    unsafe {
+        let mut h = 0;
+        DosCreateNPipe(name, &mut h, NP_ACCESS_DUPLEX, NP_TYPE_MESSAGE | NP_READMODE_MESSAGE | 1, 64, 64, 0);
+        let (mut hc, mut act) = (0, 0);
+        let rc = DosOpen(name, &mut hc, &mut act, 0, 0, 1, 0x42, null_mut());
+        DosConnectNPipe(h);
+        PIPE_CLIENT.store(hc, Ordering::Relaxed);
+        PIPE_GOT.store(0, Ordering::Relaxed);
+        let mut tid = 0;
+        DosCreateThread(&mut tid, pipe_reader, 0, 0, 16384);
+        DosSleep(100);
+        let mut n = 0;
+        DosWrite(h, b"\x06".as_ptr(), 1, &mut n);
+        DosDisConnectNPipe(h);
+        DosWaitThread(&mut tid, DCWW_WAIT);
+        let got = PIPE_GOT.load(Ordering::Relaxed);
+        check(&alloc::format!("a reply written just before DosDisConnectNPipe reaches the waiting client (got {got:#x})"), rc == 0 && got == 6);
+        let mut buf = [0u8; 4];
+        check("then the client's handle is not connected", DosRead(hc, buf.as_mut_ptr(), 4, &mut n) == 233);
+        DosClose(hc);
+        DosClose(h);
+    }
 }
 
 fn sessions() {
@@ -610,6 +697,57 @@ unsafe extern "C" {
     fn TestInitCount() -> u32;
     #[link_name = "TESTDLL.6"]
     fn TestSelfAdd(a: u32, b: u32) -> u32;
+}
+
+/// DosQueryAppType and DosExecPgm of files that are not OS/2 programs, as
+/// IBM's loader (_LDRQAppType, _ldrOpenNewExe): a plain MZ program is a
+/// DOS program, a PE file FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31, an LE file
+/// (a DOS/4GW program) ERROR_INVALID_EXE_SIGNATURE, and DosExecPgm of
+/// the LE and PE files fails with that error (rs2 called LE a virtual device driver).
+fn app_types() {
+    let mk = |name: &[u8], sig: &[u8], extra: &[(usize, u8)]| {
+        let mut img = [0u8; 0x100];
+        img[0] = b'M';
+        img[1] = b'Z';
+        if !sig.is_empty() {
+            img[0x3c] = 0x80;
+            img[0x80..0x80 + sig.len()].copy_from_slice(sig);
+        }
+        for &(at, v) in extra {
+            img[at] = v;
+        }
+        let (mut hf, mut action, mut n) = (0, 0, 0);
+        unsafe {
+            DosOpen(name.as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE, null_mut());
+            DosWrite(hf, img.as_ptr(), img.len() as u32, &mut n);
+            DosClose(hf);
+        }
+    };
+    let files: [(&[u8], &[u8], &[(usize, u8)], Result<u32, u32>); 4] = [
+        (b"C:\\AT_DOS.EXE\0", b"", &[], Ok(0x20)),
+        (b"C:\\AT_LE.EXE\0", b"LE\0\0", &[], Err(191)),
+        (b"C:\\AT_PE.EXE\0", b"PE\0\0", &[], Ok(0x5000)),
+        (b"C:\\AT_PED.DLL\0", b"PE\0\0", &[(0x80 + 0x17, 0x20)], Ok(0x5010)),
+    ];
+    for (name, sig, extra, want) in files {
+        mk(name, sig, extra);
+        let mut ty = 0;
+        let rc = unsafe { DosQueryAppType(name.as_ptr(), &mut ty) };
+        let got = if rc == 0 { Ok(ty) } else { Err(rc) };
+        let label = core::str::from_utf8(&name[3..name.len() - 1]).unwrap_or("?");
+        check(&alloc::format!("DosQueryAppType {label}: {want:x?} (got {got:x?})"), got == want);
+        // (DosExecPgm of a DOS program starts a DOS session.)
+        if !sig.is_empty() && !name.ends_with(b".DLL\0") {
+            let mut fail = [0u8; 64];
+            let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+            let rc = unsafe { DosExecPgm(fail.as_mut_ptr(), 64, EXEC_SYNC, b"x\0\0".as_ptr(), null(), &mut res, name.as_ptr()) };
+            check(&alloc::format!("DosExecPgm {label}: ERROR_INVALID_EXE_SIGNATURE (got {rc})"), rc == 191);
+        }
+        unsafe { DosDelete(name.as_ptr()) };
+    }
+    let mut ty = 0;
+    let rc = unsafe { DosQueryAppType(b"C:\\RS2\\TESTDLL.DLL\0".as_ptr(), &mut ty) };
+    check(&alloc::format!("DosQueryAppType of an LX DLL: FAPPTYP_32BIT | FAPPTYP_DLL (0x10) (got {ty:#x})"), rc == 0 && ty & 0x4018 == 0x4010);
 }
 
 fn dlls() {

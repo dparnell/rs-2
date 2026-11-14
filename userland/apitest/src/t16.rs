@@ -34,6 +34,20 @@ unsafe extern "C" {
     fn D16QueryABIOSSupport();
     #[link_name = "DOSCALLS.371"]
     fn DosQueryABIOSSupport(reserved: u32) -> u32;
+    // OS/2 1.x named pipes: NAMPIPES (a forwarder module, as Warp's) to
+    // the kernel's 16-bit DOSCALLS 399-412 (Open Watcom's NMPBIND.EXE).
+    #[link_name = "NAMPIPES.1"]
+    fn N16MakeNmPipe();
+    #[link_name = "NAMPIPES.2"]
+    fn N16QNmPipeInfo();
+    #[link_name = "NAMPIPES.3"]
+    fn N16ConnectNmPipe();
+    #[link_name = "NAMPIPES.4"]
+    fn N16DisConnectNmPipe();
+    #[link_name = "NAMPIPES.5"]
+    fn N16QNmPHandState();
+    #[link_name = "NAMPIPES.7"]
+    fn N16PeekNmPipe();
     static at16_create: u8;
     static at16_thread: u8;
 }
@@ -170,9 +184,65 @@ fn find16() {
     }
 }
 
+/// The 16-bit named pipe calls through NAMPIPES.DLL.
+fn nampipes() {
+    let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
+    let name = b"\\PIPE\\T16NMP\0";
+    let mut hp = 0u16;
+    // DosMakeNmPipe(pszName, php, fsOpenMode, fsPipeMode, cbOut, cbIn, ulTimeOut):
+    // duplex; no wait, message pipe read as messages, one instance.
+    let r = PascalCall::new()
+        .l(far(name.as_ptr()))
+        .l(far(&raw mut hp as *const u8))
+        .w(2)
+        .w(0x8000 | 0x0400 | 0x0100 | 1)
+        .w(512)
+        .w(512)
+        .l(0)
+        .call(gate(N16MakeNmPipe))
+        & 0xffff;
+    check("NAMPIPES DosMakeNmPipe", r == 0 && hp != 0);
+    if r != 0 {
+        return;
+    }
+    let connect = || PascalCall::new().w(hp).call(gate(N16ConnectNmPipe)) & 0xffff;
+    // No client yet: ERROR_PIPE_NOT_CONNECTED (no-wait pipe).
+    check("DosConnectNmPipe without a client: ERROR_PIPE_NOT_CONNECTED", connect() == 233);
+    let (mut hc, mut action) = (0, 0);
+    let ro = unsafe { os2::DosOpen(name.as_ptr(), &mut hc, &mut action, 0, 0, os2::OPEN_ACTION_OPEN_IF_EXISTS, os2::OPEN_ACCESS_READWRITE | os2::OPEN_SHARE_DENYNONE, core::ptr::null_mut()) };
+    check("a client opens it (DosOpen)", ro == 0);
+    check("DosConnectNmPipe with the client", connect() == 0);
+    let mut state = 0u16;
+    let r = PascalCall::new().w(hp).l(far(&raw mut state as *const u8)).call(gate(N16QNmPHandState)) & 0xffff;
+    check("DosQNmPHandState: a server end of a message pipe read as messages", r == 0 && state & 0x4000 != 0 && state & 0x0400 != 0 && state & 0x0100 != 0 && state & 0xff == 1);
+    let mut n = 0;
+    unsafe { os2::DosWrite(hc, b"ping".as_ptr(), 4, &mut n) };
+    let mut buf = [0u8; 16];
+    let (mut cb, mut avail, mut pst) = (0u16, [0u16; 2], 0u16);
+    let r = PascalCall::new()
+        .w(hp)
+        .l(far(buf.as_mut_ptr()))
+        .w(16)
+        .l(far(&raw mut cb as *const u8))
+        .l(far(avail.as_mut_ptr() as *const u8))
+        .l(far(&raw mut pst as *const u8))
+        .call(gate(N16PeekNmPipe))
+        & 0xffff;
+    check("DosPeekNmPipe: the client's message, USHORT count and state", r == 0 && cb == 4 && &buf[..4] == b"ping" && avail == [4, 4] && pst == 3);
+    let mut info = [0u8; 64];
+    let r = PascalCall::new().w(hp).w(1).l(far(info.as_mut_ptr())).w(64).call(gate(N16QNmPipeInfo)) & 0xffff;
+    check("DosQNmPipeInfo level 1: sizes and name", r == 0 && info[0..2] == [0, 2] && info[2..4] == [0, 2] && &info[7..7 + info[6] as usize] == b"\\PIPE\\T16NMP");
+    check("DosDisConnectNmPipe", PascalCall::new().w(hp).call(gate(N16DisConnectNmPipe)) & 0xffff == 0);
+    unsafe {
+        os2::DosClose(hc);
+        os2::DosClose(hp as u32);
+    }
+}
+
 pub fn run() {
     suballoc();
     find16();
+    nampipes();
     let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
     let flags = PascalCall::new().l(0).call(gate(D16QueryABIOSSupport)) & 0xffff;
     check("DOSCALLS.443 (16-bit DosQueryABIOSSupport) answers as the 32-bit one", flags == unsafe { DosQueryABIOSSupport(0) } && flags & 0x10 != 0);

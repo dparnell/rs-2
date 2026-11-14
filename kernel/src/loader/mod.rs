@@ -598,9 +598,8 @@ fn load_image(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, space: Opt
     match os2_exe::detect(&data) {
         Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, specific, space),
         Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, specific, space),
-        // As IBM's _ldrOpenNewExe: a DOS (MZ only), LE or PE executable
-        // is not an OS/2 module, ERROR_INVALID_EXE_SIGNATURE ("SYS0191:
-        // ... cannot be run in an OS/2 session").
+        // As IBM's _ldrOpenNewExe: DOS, LE (DOS extenders) and PE files
+        // are not OS/2 modules.
         Ok(_) | Err(_) => Err(err::INVALID_EXE_SIGNATURE),
     }
 }

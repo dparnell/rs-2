@@ -26,17 +26,25 @@ fn status(r: Result<u32, u32>) -> u32 {
     r.unwrap_or_else(|e| e)
 }
 
-/// DosCreateNPipe(pszName, phpipe, openmode, pipemode, cbOut, cbIn, msec)
+/// Store a count, handle or state through an output pointer: a USHORT for
+/// the 16-bit calls (OS/2 1.x's DosMakeNmPipe and the rest, DOSCALLS
+/// 399-412, which NAMPIPES.DLL forwards to), a ULONG for the 32-bit ones.
+fn put(c: &Ctx, at: u32, v: u32) -> bool {
+    if c.is16 { c.write_u16(at, v as u16) } else { c.write_u32(at, v) }
+}
+
+/// DosCreateNPipe(pszName, phpipe, openmode, pipemode, cbOut, cbIn, msec);
+/// 16-bit DosMakeNmPipe has the same arguments.
 pub fn dos_create_npipe(c: &mut Ctx) -> u32 {
     status((|| {
-        let name = name_arg(c, c.arg(0))?;
+        let name = name_arg(c, c.ptr(0))?;
         let open_mode = c.arg(2);
         let e = npipe::create(name, open_mode, c.arg(3), c.arg(4), c.arg(5), c.arg(6))?;
         let h = add(c, Handle::NPipe(e))?;
         if open_mode & npipe::NP_NOINHERIT != 0 {
             c.process.noinherit.lock().insert(h);
         }
-        c.write_u32(c.arg(1), h);
+        put(c, c.ptr(1), h);
         Ok(0)
     })())
 }
@@ -54,21 +62,22 @@ pub fn dos_peek_npipe(c: &mut Ctx) -> u32 {
     status((|| {
         let e = end(c, c.arg(0))?;
         let (data, in_pipe, in_msg, state) = e.peek(c.arg(2) as usize);
-        if !data.is_empty() && !c.write(c.arg(1), &data) {
+        if !data.is_empty() && !c.write(c.ptr(1), &data) {
             return Err(err::INVALID_ADDRESS);
         }
-        c.write_u32(c.arg(3), data.len() as u32);
+        put(c, c.ptr(3), data.len() as u32);
         // AVAILDATA: cbpipe, cbmessage (USHORTs).
-        c.write_u16(c.arg(4), in_pipe.min(0xffff) as u16);
-        c.write_u16(c.arg(4) + 2, in_msg.min(0xffff) as u16);
-        c.write_u32(c.arg(5), state);
+        let avail = c.ptr(4);
+        c.write_u16(avail, in_pipe.min(0xffff) as u16);
+        c.write_u16(avail + 2, in_msg.min(0xffff) as u16);
+        put(c, c.ptr(5), state);
         Ok(0)
     })())
 }
 
 pub fn dos_query_nph_state(c: &mut Ctx) -> u32 {
     status(end(c, c.arg(0)).map(|e| {
-        c.write_u32(c.arg(1), e.state_bits());
+        put(c, c.ptr(1), e.state_bits());
         0
     }))
 }
@@ -95,18 +104,21 @@ pub fn dos_query_npipe_info(c: &mut Ctx) -> u32 {
         v.push(0);
         let cb = c.arg(3) as usize;
         let n = v.len().min(cb);
-        if !c.write(c.arg(2), &v[..n]) {
+        if !c.write(c.ptr(2), &v[..n]) {
             return Err(err::INVALID_ADDRESS);
         }
         Ok(if n < v.len() { err::BUFFER_OVERFLOW } else { 0 })
     })())
 }
 
-/// DosSetNPipeSem(hpipe, hsem, key)
+/// DosSetNPipeSem(hpipe, hsem, key): an event semaphore; 16-bit
+/// DosSetNmPipeSem takes a system semaphore (DosCreateSem), which the pipe
+/// clears.
 pub fn dos_set_npipe_sem(c: &mut Ctx) -> u32 {
     status((|| {
         let e = end(c, c.arg(0))?;
-        if !super::sem::is_event_handle(c, c.arg(1)) {
+        let ok = if c.is16 { super::sem::is_sys16(c.arg(1)) } else { super::sem::is_event_handle(c, c.arg(1)) };
+        if !ok {
             return Err(err::INVALID_HANDLE);
         }
         e.set_sem(c.arg(1), c.arg(2) as u16);
@@ -140,7 +152,7 @@ pub fn dos_query_npipe_sem_state(c: &mut Ctx) -> u32 {
         return err::BUFFER_OVERFLOW;
     }
     let n = v.len().min(cb);
-    if !c.write(c.arg(1), &v[..n]) {
+    if !c.write(c.ptr(1), &v[..n]) {
         return err::INVALID_ADDRESS;
     }
     if n < v.len() { err::BUFFER_OVERFLOW } else { 0 }
@@ -164,21 +176,21 @@ pub fn dos_transact_npipe(c: &mut Ctx) -> u32 {
         if e.state_bits() & npipe::NP_READMODE_MESSAGE == 0 {
             return Err(npipe::ERROR_BAD_PIPE);
         }
-        let (n, st) = transact(c, &e, c.arg(1), c.arg(2), c.arg(3), c.arg(4))?;
-        c.write_u32(c.arg(5), n);
+        let (n, st) = transact(c, &e, c.ptr(1), c.arg(2), c.ptr(3), c.arg(4))?;
+        put(c, c.ptr(5), n);
         Ok(st)
     })())
 }
 
 pub fn dos_wait_npipe(c: &mut Ctx) -> u32 {
-    status(name_arg(c, c.arg(0)).map(|n| npipe::wait(&n, c.arg(1))))
+    status(name_arg(c, c.ptr(0)).map(|n| npipe::wait(&n, c.arg(1))))
 }
 
 /// DosCallNPipe(pszName, pInBuf, cbIn, pOutBuf, cbOut, pcbActual, msec):
 /// open, transact, close.
 pub fn dos_call_npipe(c: &mut Ctx) -> u32 {
     status((|| {
-        let name = name_arg(c, c.arg(0))?;
+        let name = name_arg(c, c.ptr(0))?;
         let e = match npipe::open(&name) {
             Err(npipe::ERROR_PIPE_BUSY) => match npipe::wait(&name, c.arg(6)) {
                 0 => npipe::open(&name)?,
@@ -190,8 +202,34 @@ pub fn dos_call_npipe(c: &mut Ctx) -> u32 {
             return Err(npipe::ERROR_BAD_PIPE);
         }
         e.set_state(npipe::NP_READMODE_MESSAGE)?;
-        let (n, st) = transact(c, &e, c.arg(1), c.arg(2), c.arg(3), c.arg(4))?;
-        c.write_u32(c.arg(5), n);
+        let (n, st) = transact(c, &e, c.ptr(1), c.arg(2), c.ptr(3), c.arg(4))?;
+        put(c, c.ptr(5), n);
         Ok(st)
+    })())
+}
+
+/// DosRawReadNPipe(hpipe, pBuf, cbBuf, pcbRead) and 16-bit
+/// DosRawReadNmPipe: a read of the pipe's bytes, whatever its read mode.
+pub fn dos_raw_read_npipe(c: &mut Ctx) -> u32 {
+    status((|| {
+        let e = end(c, c.arg(0))?;
+        let (data, st) = e.read(c.arg(2) as usize)?;
+        if !data.is_empty() && !c.write(c.ptr(1), &data) {
+            return Err(err::INVALID_ADDRESS);
+        }
+        put(c, c.ptr(3), data.len() as u32);
+        Ok(st)
+    })())
+}
+
+/// DosRawWriteNPipe(hpipe, pBuf, cbBuf, pcbWritten) and 16-bit
+/// DosRawWriteNmPipe.
+pub fn dos_raw_write_npipe(c: &mut Ctx) -> u32 {
+    status((|| {
+        let e = end(c, c.arg(0))?;
+        let data = c.read_vec(c.ptr(1), c.arg(2)).ok_or(err::INVALID_ADDRESS)?;
+        let n = e.write(&data)?;
+        put(c, c.ptr(3), n as u32);
+        Ok(0)
     })())
 }

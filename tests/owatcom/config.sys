@@ -1,0 +1,46 @@
+REM rs2 system configuration
+LIBPATH=.;C:\OS2\DLL;C:\OS2;C:\OS2\APPS;C:\;C:\WATCOM\BINP\DLL
+SET PATH=C:\OS2;C:\OS2\SYSTEM;C:\OS2\APPS;C:\RS2;C:\;C:\WATCOM\BINP;C:\WATCOM\BINW
+SET DPATH=C:\OS2;C:\OS2\SYSTEM;C:\RS2;C:\
+SET PROMPT=$i[$p]
+SET USER_INI=C:\OS2\OS2.INI
+SET SYSTEM_INI=C:\OS2\OS2SYS.INI
+SET ETC=C:\MPTN\ETC
+SET HELP=C:\OS2\HELP;C:\WATCOM\BINP\HELP
+SET GLOSSARY=C:\OS2\HELP\GLOSS
+SET BOOKSHELF=C:\OS2\BOOK;C:\WATCOM\BINP\HELP
+REM Multimedia (MMPM/2): sounds and other media files in %MMBASE%
+SET MMBASE=C:\MMOS2;
+REM SOM: the interface repository files (SOM's classes, the Workplace
+REM Shell's, its DSOM server's and Object REXX's; programs' own files can be
+REM added, separated by ";": the last one is where changes are saved)
+SET SOMIR=C:\OS2\ETC\SOM.IR;C:\OS2\ETC\WPSH.IR;C:\OS2\ETC\WPDSERV.IR;C:\OS2\ETC\REXX.IR
+SET COMSPEC=C:\OS2\CMD.EXE
+SET OS2_SHELL=C:\OS2\CMD.EXE
+REM PM: milliseconds before a program that does not take its input is "not responding"
+SET PM_HANGTIME=2000
+REM During boot, CHKDSK /F runs on every volume that was not shut down cleanly
+REM (HPFS, FAT and JFS: rs2 has no separate drivers, this line is for all of
+REM them). To choose drives list their letters, as /AUTOCHECK:CD; without the
+REM /AUTOCHECK parameter a dirty drive only gets a warning.
+IFS=C:\OS2\HPFS.IFS /AUTOCHECK:*
+REM Ctrl+Alt+W: the rescue screen (end a process that hangs, save a report).
+RUN=C:\OS2\RESCUE.EXE
+REM The QEMU guest agent (Proxmox, libvirt): shutdown, addresses, backups.
+REM It ends at once outside such a virtual machine.
+RUN=C:\OS2\QEMUGA.EXE
+REM The shell: the desktop (Presentation Manager with the Workplace Shell).
+REM For the text-mode command prompt instead, put REM before the first
+REM PROTSHELL line and remove it from the second. Pressing T while the boot
+REM loader waits, or "textmode" in \RS2\CMDLINE, also boots to the command
+REM prompt.
+PROTSHELL=C:\OS2\PMSHELL.EXE
+REM PROTSHELL=C:\OS2\CMD.EXE
+REM RS2SHELL, rs2's earlier desktop (no SOM), instead of the Workplace Shell:
+REM PROTSHELL=C:\OS2\RS2SHELL.EXE
+REM Open Watcom 1.9, as its installer sets it up
+SET WATCOM=C:\WATCOM
+SET INCLUDE=C:\WATCOM\H\OS2;C:\WATCOM\H
+SET EDPATH=C:\WATCOM\EDDAT
+SET WIPFC=C:\WATCOM\WIPFC
+RUN=C:\WATCOM\BINP\NMPBIND.EXE

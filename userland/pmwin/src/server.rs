@@ -409,12 +409,14 @@ fn check_hung() {
     let mut any = false;
     for q in changed {
         // Their title bars change; while hung, the server paints them.
-        for h in win::top_windows_of(q) {
-            if st().frames.contains_key(&h) {
-                let tb = WinWindowFromID(h, FID_TITLEBAR);
-                if tb != 0 {
-                    st().desk.invalidate(tb, None, false);
-                }
+        // Every frame of the queue's, also those inside other windows (an
+        // MDI child of a Win16 program, Open Watcom's viw: its title kept
+        // saying "not responding").
+        let frames: Vec<u32> = st().frames.keys().copied().filter(|&f| st().queue_of(f) == q).collect();
+        for h in frames {
+            let tb = WinWindowFromID(h, FID_TITLEBAR);
+            if tb != 0 {
+                st().desk.invalidate(tb, None, false);
             }
         }
         any |= st().queues.get(&q).is_some_and(|x| x.hung);

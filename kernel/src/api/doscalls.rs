@@ -375,6 +375,24 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 251) => super::npipe::dos_set_npipe_sem,
         (0, 252) => super::npipe::dos_transact_npipe,
         (0, 253) => super::npipe::dos_wait_npipe,
+        (0, 246) => super::npipe::dos_raw_read_npipe,
+        (0, 247) => super::npipe::dos_raw_write_npipe,
+        // 16-bit (OS/2 1.x) named pipe calls, which NAMPIPES.DLL forwards
+        // to: the same as the 32-bit ones with USHORT results.
+        (0, 399) => super::npipe::dos_create_npipe,     // DosMakeNmPipe
+        (0, 400) => super::npipe::dos_query_npipe_info, // DosQNmPipeInfo
+        (0, 401) => super::npipe::dos_connect_npipe,
+        (0, 402) => super::npipe::dos_disconnect_npipe,
+        (0, 403) => super::npipe::dos_query_nph_state,  // DosQNmPHandState
+        (0, 404) => super::npipe::dos_set_nph_state,    // DosSetNmPHandState
+        (0, 405) => super::npipe::dos_peek_npipe,
+        (0, 406) => super::npipe::dos_wait_npipe,
+        (0, 407) => super::npipe::dos_transact_npipe,
+        (0, 408) => super::npipe::dos_call_npipe,
+        (0, 409) => super::npipe::dos_raw_read_npipe,
+        (0, 410) => super::npipe::dos_raw_write_npipe,
+        (0, 411) => super::npipe::dos_set_npipe_sem,
+        (0, 412) => super::npipe::dos_query_npipe_sem_state, // DosQNmPipeSemState
         (0, 44) | (0, 318) => super::module::dos_load_module,
         (0, 45) => super::module::dos16_get_proc_addr,
         (0, 46) | (0, 322) => super::module::dos_free_module,

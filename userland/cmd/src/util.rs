@@ -49,9 +49,8 @@ pub fn sys_error(rc: u32) {
     sys_error_ins(rc, &[]);
 }
 
-/// `sys_error` with the message's insertions (%1...): the program's
-/// path for the errors of starting one ("SYS0191: An OS/2 session cannot
-/// run D:\FMATHX.EXE.").
+/// The same, with the message's insertions (%1: the program or module a
+/// DosExecPgm error is about).
 pub fn sys_error_ins(rc: u32, ins: &[&str]) {
     // Short texts for when OSO001.MSG is missing.
     let text = match rc {
