@@ -275,8 +275,12 @@ fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
         }
         top = y;
     }
+    // As IBM's FrameCalcFrameCoords: every child with a frame control's ID
+    // is formatted, shown or not (formatting shows it; it hides one with
+    // no room, as the menu of a frame still of size 0: the Open Watcom
+    // GUI library puts its menu bar in so, and it never came back).
     let m = WinWindowFromID(frame, FID_MENU);
-    if m != 0 && st().desk.get(m).is_some_and(|w| w.visible_style()) {
+    if m != 0 {
         out.push((m, Rect::new(l, top - MENU_H, r, top)));
         top -= MENU_H;
     }
@@ -368,8 +372,7 @@ pub fn insets(frame: u32) -> (i32, i32, i32, i32) {
     if [FID_SYSMENU, FID_TITLEBAR, FID_MINMAX].into_iter().any(|id| WinWindowFromID(frame, id) != 0) {
         top += TITLE_H;
     }
-    let m = WinWindowFromID(frame, FID_MENU);
-    if m != 0 && st().desk.get(m).is_some_and(|w| w.visible_style()) {
+    if WinWindowFromID(frame, FID_MENU) != 0 {
         top += MENU_H;
     }
     if WinWindowFromID(frame, FID_HORZSCROLL) != 0 {
