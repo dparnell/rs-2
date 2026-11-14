@@ -485,9 +485,6 @@ pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
 /// see it first (CWPSTRUCT: lParam, wParam, message, hwnd), and may
 /// change the window's procedure (subclassing a window being created).
 pub fn send(hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
-    if (0x03e0..=0x03e8).contains(&msg) {
-        crate::ddeml::monitor_msg(false, hwnd, msg, wp, lp);
-    }
     if wnd(hwnd).is_none() {
         // Another task's window, or all top-level windows (dde.rs).
         if hwnd == 0xffff {
@@ -975,6 +972,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // SendMessage(hwnd, msg, wParam, lParam)
         111 => {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
+            // (DDEML monitors see what a program sends; WIN16's own sends
+            // of messages it delivers are not news.)
+            crate::ddeml::monitor_msg(false, h, m, wp, lp);
             send(h, m, wp, lp)
         }
         // WaitMessage

@@ -333,9 +333,45 @@ fn monitor_with(mf: u32, make: impl FnOnce() -> Vec<u8>) {
         bytes.extend_from_slice(&crate::dde::pid().to_le_bytes());
         bytes.extend_from_slice(&[0; 8]);
     }
+    let fields = hsz_fields(mf);
+    let atom = |b: &[u8], at: usize| u16::from_le_bytes([b[at], b[at + 1]]);
     for (pm, fl) in instances() {
         if is_monitor(fl) && fl & mf != 0 {
-            give_post(pm, WM_DDEML_MONITOR, (mf >> 24) as u16, &bytes);
+            // The monitor holds the strings until it has seen them (they
+            // may be gone here by then): which ones it holds goes in the
+            // trailer's second word.
+            let mut held = 0u32;
+            for (k, &at) in fields.iter().enumerate() {
+                let a = atom(&bytes, at);
+                if a >= 0xc000 && !global_atom_name(a).is_empty() && add_atom_ref(a) != 0 {
+                    held |= 1 << k;
+                }
+            }
+            if !fields.is_empty() {
+                bytes[cb + 4..cb + 8].copy_from_slice(&held.to_le_bytes());
+            }
+            if !give_post(pm, WM_DDEML_MONITOR, (mf >> 24) as u16, &bytes) {
+                release(&bytes, fields, held);
+            }
+        }
+    }
+}
+
+/// Where the string handles of each MON*STRUCT are.
+fn hsz_fields(mf: u32) -> &'static [usize] {
+    match mf {
+        MF_CALLBACKS => &[22, 26],
+        MF_CONV => &[10, 14],
+        MF_LINKS => &[12, 16, 20],
+        _ => &[],
+    }
+}
+
+/// Let go of the strings a monitor held.
+fn release(b: &[u8], fields: &[usize], held: u32) {
+    for (k, &at) in fields.iter().enumerate() {
+        if held & 1 << k != 0 && at + 2 <= b.len() {
+            delete_global_atom(u16::from_le_bytes([b[at], b[at + 1]]));
         }
     }
 }
@@ -352,7 +388,7 @@ fn htask_at(mf: u32) -> usize {
 /// Post one of DDEML's own messages to an instance window of any task,
 /// with `bytes` in a giveable block (lParam, a flat pointer) the receiver
 /// frees.
-fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) {
+fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) -> bool {
     unsafe extern "C" {
         #[link_name = "DOSCALLS.303"]
         fn DosGiveSharedMem(p: *const u8, pid: u32, flags: u32) -> u32;
@@ -360,19 +396,20 @@ fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) {
     let mut p: *mut u8 = core::ptr::null_mut();
     let fl = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_GIVEABLE;
     if unsafe { os2::DosAllocSharedMem(&mut p, core::ptr::null(), bytes.len().max(1) as u32, fl) } != 0 {
-        return;
+        return false;
     }
     unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len()) };
     let (me, them) = (crate::dde::pid(), crate::dde::window_pid(pm));
     if them != me && unsafe { DosGiveSharedMem(p, them, os2::PAG_READ | os2::PAG_WRITE) } != 0 {
         unsafe { os2::DosFreeMem(p) };
-        return;
+        return false;
     }
     let ok = unsafe { crate::pm::WinPostMsg(pm, crate::dde::W16X | m as u32, wp as u32, p as u32) } != 0;
     // Ours goes (theirs stays with the receiver), or both if not posted.
     if them != me || !ok {
         unsafe { os2::DosFreeMem(p) };
     }
+    ok
 }
 
 /// A WM_DDEML_MONITOR at a monitor's window: XTYP_MONITOR.
@@ -384,6 +421,8 @@ fn monitor_event(h: u16, mf: u16, p: *mut u8) {
     let mut bytes = unsafe { core::slice::from_raw_parts(p, cb.max(2)) }.to_vec();
     let tail = |i: usize| unsafe { (p.add(cb + 4 * i) as *const u32).read_unaligned() };
     let (from, to, wp) = (tail(0), tail(1), tail(2));
+    // (Not a message: the strings held for us.)
+    let (fields, held) = (hsz_fields((mf as u32) << 24), to);
     unsafe { os2::DosFreeMem(p) };
     // The sender's handles as this task knows them.
     if from != crate::dde::pid() {
@@ -402,10 +441,12 @@ fn monitor_event(h: u16, mf: u16, p: *mut u8) {
             }
         }
     }
-    let Some(id) = d().insts.iter().find(|i| i.wnd == h && is_monitor(i.flags)).map(|i| i.id) else { return };
-    let data = new_local_data(&bytes);
-    callback(id, XTYP_MONITOR, 0, 0, 0, 0, data, 0, (mf as u32) << 24);
-    free_data(data);
+    if let Some(id) = d().insts.iter().find(|i| i.wnd == h && is_monitor(i.flags)).map(|i| i.id) {
+        let data = new_local_data(&bytes);
+        callback(id, XTYP_MONITOR, 0, 0, 0, 0, data, 0, (mf as u32) << 24);
+        free_data(data);
+    }
+    release(&bytes, fields, held);
 }
 
 /// MF_HSZ_INFO: a string handle made, kept or freed.
@@ -785,6 +826,7 @@ fn initiate(id: u32, client: u16, app: u16, topic: u16) {
         d().convs.push(Box::new(Conv { h: hc, inst: id, wnd: w, partner: client, client: false, service: svc, topic, connected: true, user: 0, list: 0, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 }));
         // The ACK carries atoms of our own (the client deletes them).
         let (a, t) = (add_atom_ref(svc), add_atom_ref(topic));
+        monitor_msg(false, client, WM_DDE_ACK, w, (t as u32) << 16 | a as u32);
         send(client, WM_DDE_ACK, w, (t as u32) << 16 | a as u32);
         if let Some(c) = conv(hc) {
             monitor_conv(c, true);
@@ -1178,6 +1220,7 @@ fn connect(id: u32, service: u16, topic: u16, list: u32, single: bool) -> Vec<u3
     }
     d().connecting = Some((id, w, list, single));
     let (a, t) = (add_atom_ref(service), add_atom_ref(topic));
+    monitor_msg(false, 0xffff, WM_DDE_INITIATE, w, (t as u32) << 16 | a as u32);
     send(0xffff, WM_DDE_INITIATE, w, (t as u32) << 16 | a as u32);
     d().connecting = None;
     let made: Vec<u32> = d().convs.iter().filter(|c| c.wnd == w && c.connected).map(|c| c.h).collect();
