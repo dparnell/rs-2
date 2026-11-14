@@ -699,7 +699,11 @@ are in `tests/owatcom` (a second disk, `--virtio-disk`).
 | `wcl -l=os2 -i=%WATCOM%\h\os21x hello16.c` | works | 16-bit OS/2 program (NE); it reports DosGetVersion 20.45. The installer's INCLUDE names the 32-bit headers only, so 16-bit builds need the `-i` (as on OS/2). |
 | `wmake` | works | Builds the three programs from `tests/owatcom/makefile`. |
 | `wd` (debugger) | works | `wd hello` (built with `wcl386 -d2`) loads the program through its trap file (STD.D32: DosStartSession with the trace option, then `DosDebug`), loads its helper DLL (WDSPLICE) into it, stops at `main` with the source and the locals, steps (F10, with DBG_C_SStep and breakpoints), shows the variables as they change, and runs the program to its end (F5: "The task has completed running"). Watchpoints work with the debug registers: a 4-byte break on write on `i` stops after `i = 0` and again after `i++` ("Break on write ... Old value=0 New value=1"). |
-| `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
+| `ide` (IDE) | works | Started from its object in the "Open Watcom C/C++" folder (or by name). Menus from the mouse and the keyboard (Alt+letter, the accelerators: Ctrl+N, Ins, F4, Ctrl+R, Ctrl+D ...). File > New Project (`C:\OWTEST\TEST.WPJ`, a name that does not exist yet in the Open dialog), New Target (OS/2 32-bit, Executable), Sources > New Source (`hello.c`), File > Save Project, and the project opened again (Ctrl+O). Targets > Make (F4): the IDE's log window shows `wmake`, `wcc386` and `wlink` running through its batch server, "Execution complete". Targets > Run (Ctrl+R) starts TEST.EXE in its own session; the switch notebooks (Target Options > OS/2 Linking Switches, with its pages, Reset, CopyRel); a source opened from the target window in EPM (through EPMLINK.DLL and DDE, with Open Watcom's EPM macros: syntax colours, the Compiler menu); Local Debug (Ctrl+D) starts the windowed debugger on the target. |
+| `wdw` (windowed debugger) | works | Local Debug from the IDE (and its "Windowed Debugger" object): the Source, Locals, Watches and Modules windows inside its main window, the action bar and tool bar, F10 steps over (the locals change), the Run menu from Alt+R, F5 runs the program to its end. |
+| `wbrw` (source browser) | works | `wbrw database test.dbr file hello.mbr` (a module file from `wcc386 -db`): it merges the database, shows the Inheritance view, View > List lists the symbols with their kinds; the menus. The IDE's Targets > Browse says the target needs `-db` first (and Open Watcom ships no OS/2 `wbrg`, the database merger the IDE runs). |
+| `wsample`, `wprof` (profiler) | works | `wsample TEST.exe` writes TEST.SMP; `wprof TEST.smp` shows the sample, the image and its modules, and drills into one (a module without debug information says so). |
+| EPM through `EPMLINK.DLL` (the IDE's editor) | works | With IBM's EPM installed as on Warp (`\OS2\APPS`): a source opened from the IDE's target window comes up in EPM with Open Watcom's macros. EPM's tool bar shows as an empty box (not looked at). |
 | `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | Imports `NAMPIPES`, OS/2 1.x's named pipe module, which Warp's kernel does not provide either (it is for remote debugging over named pipes). |
 
 Fixed for it:
@@ -744,6 +748,47 @@ Fixed for it:
   `ICONFILE=C:\WATCOM\WATCOM.ICO` gave a document icon), and an
   executable longer than 8 MB (the installer: 84 MB with its ZIP
   appended) still shows its icon (SHELLTST).
+
+Fixed for the GUI tools (the IDE, the browser, the profiler and the
+windowed debugger are built on Open Watcom's GUI library; each fix
+studied in IBM's PMMERGE or PMCTLS, with a PMXTEST or CTLTEST check):
+
+- PMWIN: accelerators are translated through `WM_TRANSLATEACCEL`, as
+  IBM's `XAccelTranslate`: the key's window gets it with a copy of the
+  QMSG, `WinDefWindowProc` passes it to the parent, a frame tries its
+  table, the Alt+letter mnemonics of its action bar (the item opens and
+  the QMSG is emptied, as `MenuTranslateMnemonic`) and the queue's table
+  (`FrameTranslateAccel`). The GUI library's frame subclass keeps every
+  `WM_CHAR` and refuses F10, so the IDE's Alt+letter never opened its
+  menus.
+- PMCTLS: an Open file dialog takes the name of a file that does not
+  exist, as IBM's `ProcessOKButtonMsg` (File > New Project names the new
+  project there).
+- PMWIN: a group box draws only its outline and title (IBM's
+  `StaticPaintGroupbox`) and its parent paints the inside: the New
+  Target dialog makes its Target Environment radio buttons before the
+  group box, which covered them.
+- PMWIN: `LM_QUERYSELECTION` of a single-selection list box ignores mp1
+  (IBM's `WinListboxWndProc`); the GUI library asks with 0 and New
+  Target said "Select an image type." with the first one selected.
+- PMWIN: a frame inside another window (an MDI document) gets
+  `WM_ACTIVATE` when the focus goes into it and leaves it (IBM's
+  `WinFrameFocusChange`), and a frame's `WM_ACTIVATE` sets its title
+  bar's highlight (`FrameDrawHilite`): the target windows stayed grey
+  and never became the current window.
+- PMWIN: the focus leaves a window before it is destroyed or its
+  top-level window hidden (IBM's `XDestroyWindow`): the window that had
+  it gets `WM_SETFOCUS(FALSE)` while it still exists, so an entry field
+  tells its owner `EN_KILLFOCUS`. The GUI library ignored every key
+  (Ins, F4, Ctrl+R ...) after a dialog closed with the focus in a field.
+- PMWIN: `WinLoadFileIcon` of a bare program name looks along PATH (IBM's
+  `ShlQueryIconNGivenFEAL2`): the Getting Started (`view.exe`) and Read
+  Me (`e.exe`) objects showed no program icon.
+- PMWIN: a frame formats its FID_MENU whether it shows or not (from the
+  command-line tools work, cherry-picked): the debugger's and the
+  profiler's menu bars, and Warp 4's folder menu bars, stayed hidden.
+- Loader: a non-resident name table may start with an export
+  (WDPMHOOK.DLL; cherry-picked).
 
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 
