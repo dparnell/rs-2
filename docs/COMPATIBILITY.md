@@ -704,6 +704,8 @@ are in `tests/owatcom` (a second disk, `--virtio-disk`).
 | `wbrw` (source browser) | works | `wbrw database test.dbr file hello.mbr` (a module file from `wcc386 -db`): it merges the database, shows the Inheritance view, View > List lists the symbols with their kinds; the menus. The IDE's Targets > Browse says the target needs `-db` first (and Open Watcom ships no OS/2 `wbrg`, the database merger the IDE runs). |
 | `wsample`, `wprof` (profiler) | works | `wsample TEST.exe` writes TEST.SMP; `wprof TEST.smp` shows the sample, the image and its modules, and drills into one (a module without debug information says so). |
 | EPM through `EPMLINK.DLL` (the IDE's editor) | works | With IBM's EPM installed as on Warp (`\OS2\APPS`): a source opened from the IDE's target window comes up in EPM with Open Watcom's macros. EPM's tool bar shows as an empty box (not looked at). |
+| Getting Started, Read Me, the "Tools Help" folder | works | From the desktop folders (with their programs' icons): Getting Started opens C_README.INF in VIEW, Read Me opens README.TXT in E, and the help books (C Library Reference, ...) open in VIEW and follow their links. |
+| Resource editors, PM spy | not shipped | The OS/2 package has none (the installer's `dlgedit`, `fontedit` and `iconedit` objects are only made when those files exist, which they do not). |
 | `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | Imports `NAMPIPES`, OS/2 1.x's named pipe module, which Warp's kernel does not provide either (it is for remote debugging over named pipes). |
 
 Fixed for it:
