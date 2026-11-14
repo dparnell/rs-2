@@ -713,9 +713,10 @@ pub fn undefined_dynalink(r: &crate::dos::Regs) {
 /// would have raised.
 pub fn application_error(r: &crate::dos::Regs) {
     use crate::dos::reg::*;
-    // The message box's message loop may call the program's window
-    // procedures, which may fault again (Windows' box is system modal and
-    // runs none): the program ends then.
+    // The box is shown by a thread of its own while this one waits, so
+    // that none of the program's window procedures runs meanwhile (they
+    // may fault again; Windows' box is system modal). A fault while it is
+    // shown ends the program.
     static SHOWN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
     if SHOWN.swap(true, core::sync::atomic::Ordering::Relaxed) {
         unsafe { os2::DosExit(1, 0xff) };
@@ -750,8 +751,28 @@ pub fn application_error(r: &crate::dos::Regs) {
     }
     let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
     crate::stderr_line(&alloc::format!("WIN16: {}", &t[..t.len() - 1]));
+    *ERROR_TEXT.get() = t.into_bytes();
+    let mut tid = 0u32;
+    if unsafe { os2::DosCreateThread(&mut tid, error_box, 0, 0, 0x1_0000) } == 0 {
+        loop {
+            unsafe { os2::DosSleep(1000) };
+        }
+    }
+    unsafe { error_box(1) };
+}
+
+static ERROR_TEXT: Global<alloc::vec::Vec<u8>> = Global::new(alloc::vec::Vec::new());
+
+/// The Application Error box (`own`: on the faulting thread, its queue
+/// there already), then the program ends.
+unsafe extern "C" fn error_box(own: u32) {
+    if own == 0 {
+        let hab = unsafe { pm::WinInitialize(0) };
+        unsafe { pm::WinCreateMsgQueue(hab, 0) };
+    }
+    let t = ERROR_TEXT.get().as_ptr();
     unsafe {
-        pm::WinMessageBox(pm::HWND_DESKTOP, 0, t.as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
+        pm::WinMessageBox(pm::HWND_DESKTOP, 0, t, b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
         os2::DosExit(1, 0xff);
     }
 }
