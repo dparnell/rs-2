@@ -726,9 +726,12 @@ image. The whole run takes about 3 minutes in QEMU.
 | Win16: `wcl -l=windows` | works | Built on rs2, runs on rs2's WIN16 (a window, a timer, its result file). |
 | Win32: `wcl386 -l=nt` | works | Built only: a valid PE (a PE32 console program importing KERNEL32 and USER32; Open Watcom 1.9 gives its .reloc section a virtual size of 0, which LLVM's objdump rejects). |
 | `viw` (BINW, the Windows editor) | works | On WIN16: its menus, tool bar, MDI child with the file, status line. |
+| BINW's other Windows tools: `wimgedit`, `wre`, `wzoom`, `wspy` | works | Start on WIN16 with their menus, tool bars and palettes (UI2.CMD); not used further. CTL3DV2.DLL is looked for and not there, as on a Windows without it. |
+| `wheapwlk` (Heap Walker) | fails | Imports STRESS (Windows 3.1's STRESS.DLL), which rs2's WIN16 does not have. |
 | `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
-| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | It imports `NAMPIPES`, OS/2 1.x's named pipe module. Warp has it: `\OS2\DLL\NAMPIPES.DLL` (1 KB) is an LX forwarder module whose 14 entries go to the kernel's 16-bit DOSCALLS 399-412; rs2 has its own NAMPIPES.DLL made the same way and those kernel calls. NMPBIND starts at boot and runs (the named pipe binder for remote debugging); the remote debugging itself is not tried. |
-| `ide2make`, the remote debug servers (`nmpserv`, `tcpserv`, `serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | |
+| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | It imports `NAMPIPES`, OS/2 1.x's named pipe module. Warp has it: `\OS2\DLL\NAMPIPES.DLL` (1 KB) is an LX forwarder module whose 14 entries go to the kernel's 16-bit DOSCALLS 399-412; rs2 has its own NAMPIPES.DLL made the same way and those kernel calls. NMPBIND starts at boot, runs, and answers the bindery requests (NMPSERV registers with it). |
+| Remote debugging over named pipes: `nmpserv`, `wdw -tr=nmp` | partial | NMPSERV starts and registers with NMPBIND; the debugger's NMP trap file finds the server, but the debugger does not come up (the link through NMPBIND's relay threads; not followed up). |
+| `ide2make`, the other remote debug servers (`tcpserv`, `serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | |
 
 Fixed for it:
 
@@ -742,6 +745,11 @@ Fixed for it:
   DosMakeNmPipe ... DosQNmPipeSemState, studied in IBM's kernel and its
   NAMPIPES.DLL), which NMPBIND needs; `DosRawReadNPipe` and
   `DosRawWriteNPipe` (APITEST, through NAMPIPES).
+- Named pipes: a reply the server writes for a client already waiting in
+  `DosRead` survives the server's `DosDisConnectNPipe` (on OS/2 the write
+  completes the waiting read at once); NMPBIND answers and disconnects at
+  once, and NMPSERV and the NMP trap file said "NMPBIND not found"
+  (APITEST).
 - `DosQueryAppType` as IBM's `_LDRQAppType`: FAPPTYP_DLL is 10h (rs2 gave
   08h, FAPPTYP_BOUND); a PE file is FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31;
   an LE file (a DOS/4GW program) gives ERROR_INVALID_EXE_SIGNATURE (rs2
