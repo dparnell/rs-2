@@ -33,7 +33,7 @@ fmtio16 >> %LOG% 2>&1
 echo == mixed Fortran and C >> %LOG%
 if not exist %WATCOM%\binp\wcc386.exe echo no C compiler (C/C++ package not installed) >> %LOG%
 if exist %WATCOM%\binp\wcc386.exe wcc386 -q cmix.c >> %LOG% 2>&1
-if exist cmix.obj wfl386 -q -l=os2v2 fmix.for cmix.obj >> %LOG% 2>&1
+if exist cmix.obj wfl386 -q -l=os2v2 -fe=fmix.exe fmix.for cmix.obj >> %LOG% 2>&1
 if exist fmix.exe fmix >> %LOG% 2>&1
 echo == samples: mthread (multithreaded runtime) >> %LOG%
 copy %WATCOM%\samples\fortran\os2\mthread.for . > nul
