@@ -54,6 +54,11 @@ fn main(s: &Startup) -> u32 {
     if s.args().trim_ascii().starts_with(b"highchild") {
         return highmem::child(s.args().trim_ascii());
     }
+    if s.args().trim_ascii() == b"pmchild" {
+        return pm_child();
+    }
+    // First: it checks the PM server that the child starts.
+    pm_server_handles();
     info_blocks();
     memory();
     suballoc();
@@ -85,6 +90,70 @@ fn main(s: &Startup) -> u32 {
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
     f
+}
+
+/// `APITEST pmchild`: a program that uses PM (as every program on Open
+/// Watcom 2.0's C runtime DLL does: CLBR20 imports PMWIN). Its message
+/// queue starts the PM server, as its child; it ends without destroying
+/// the queue.
+fn pm_child() -> u32 {
+    let mut h = 0;
+    if unsafe { DosLoadModule(null_mut(), 0, b"PMWIN\0".as_ptr(), &mut h) } != 0 {
+        return 1;
+    }
+    let f = |ord: u32| {
+        let mut p: usize = 0;
+        unsafe { DosQueryProcAddr(h, ord, null(), &mut p) };
+        p
+    };
+    unsafe {
+        let init: extern "system" fn(u32) -> u32 = core::mem::transmute(f(763));
+        let create: extern "system" fn(u32, i32) -> u32 = core::mem::transmute(f(716));
+        if create(init(0), 0) == 0 { 2 } else { 0 }
+    }
+}
+
+/// A program's handles stay its own: the PM server, started as the child
+/// of the first program that uses PM, must not keep the files it
+/// inherited. `prog >> LOG` followed at once by `echo x >> LOG` failed with
+/// SYS0032 while the server lived (Open Watcom 2.0's TOOLS.LOG).
+fn pm_server_handles() {
+    // As CMD runs them: the first program to use PM with its output
+    // appended to a file, then a command appending to the same file.
+    let mut pib = null_mut();
+    let mut tib = null_mut();
+    let mut path = [0u8; 260];
+    unsafe {
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr());
+    }
+    let n = path.iter().position(|&c| c == 0).unwrap_or(0);
+    let mut script = alloc::vec::Vec::new();
+    script.extend_from_slice(b"@");
+    script.extend_from_slice(&path[..n]);
+    script.extend_from_slice(b" pmchild >> C:\\PMSRVH.LOG\r\n@echo after>> C:\\PMSRVH.LOG\r\n");
+    unsafe {
+        let mut h = 0;
+        let mut act = 0;
+        DosOpen(b"C:\\PMSRVH.CMD\0".as_ptr(), &mut h, &mut act, 0, 0, 0x12, 0x12, null_mut());
+        let mut w = 0;
+        DosWrite(h, script.as_ptr(), script.len() as u32, &mut w);
+        DosClose(h);
+        DosDelete(b"C:\\PMSRVH.LOG\0".as_ptr());
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        DosExecPgm(null_mut(), 0, EXEC_SYNC, b"CMD.EXE\0/C C:\\PMSRVH.CMD\0\0".as_ptr(), null(), &mut res, b"C:\\OS2\\CMD.EXE\0".as_ptr());
+        let mut buf = [0u8; 256];
+        let mut got = 0;
+        if DosOpen(b"C:\\PMSRVH.LOG\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x40, null_mut()) == 0 {
+            DosRead(h, buf.as_mut_ptr(), 256, &mut got);
+            DosClose(h);
+        }
+        let log = &buf[..got as usize];
+        check("PM server: `prog >> LOG` then `echo >> LOG` in CMD (the server started by prog keeps no handle)", log.windows(5).any(|w| w == b"after"));
+        DosDelete(b"C:\\PMSRVH.CMD\0".as_ptr());
+        DosDelete(b"C:\\PMSRVH.LOG\0".as_ptr());
+        DosSleep(4000);
+    }
 }
 
 fn info_blocks() {
