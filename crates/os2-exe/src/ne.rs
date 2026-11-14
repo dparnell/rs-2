@@ -274,7 +274,9 @@ impl<'a> Module<'a> {
                 }
                 let ord = r.u16(o + 1 + s.len())?;
                 o += 3 + s.len();
-                if !core::mem::take(&mut first) {
+                // The module name or description has ordinal 0; a table
+                // may also start with an export (no description given).
+                if !(core::mem::take(&mut first) && ord == 0) {
                     v.push((s, ord));
                 }
             }
