@@ -14,7 +14,9 @@
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
 //! program that runs too long, `--trace` logs every BIOS/DOS call,
 //! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600),
-//! `--set NAME=VALUE` a DOS setting (`DOS_RMSIZE=512`) or variable.
+//! `--set NAME=VALUE` a DOS setting (`DOS_RMSIZE=512`) or variable,
+//! `--clock N` makes the machine's time run N times as fast (timer
+//! interrupts as often per instruction as in a DOS session under QEMU).
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -34,6 +36,9 @@ struct Run {
     opens: Vec<(String, u8, u8)>,
     locks: Vec<(u32, u32, u32)>,
     start: Instant,
+    /// `--clock N`: the machine's time runs N times as fast (timer
+    /// interrupts as often per instruction as in a slow DOS session).
+    clock: u64,
     keys: VecDeque<KeyItem>,
     next_key_at: f64,
     idle_since_key: bool,
@@ -346,7 +351,7 @@ impl Host for Run {
         dt
     }
     fn micros(&mut self) -> u64 {
-        self.start.elapsed().as_micros() as u64
+        self.start.elapsed().as_micros() as u64 * self.clock
     }
     fn poll(&mut self, out: &mut Vec<Event>) {
         let t = now_secs(&self.start);
@@ -675,6 +680,7 @@ fn main() {
     drives[2] = Some(std::env::current_dir().unwrap());
     let mut keys = String::new();
     let mut timeout = 30.0;
+    let mut clock = 1u64;
     let mut screen_out = None;
     let mut png_out = None;
     let mut cfg = Config::default();
@@ -702,6 +708,7 @@ fn main() {
             }
             "--keys" => keys = val(),
             "--timeout" => timeout = val().parse().unwrap(),
+            "--clock" => clock = val().parse().unwrap(),
             "--screen" => screen_out = Some(val()),
             "--png" => png_out = Some(val()),
             "--trace" => cfg.trace = true,
@@ -750,6 +757,7 @@ fn main() {
         opens: Vec::new(),
         locks: Vec::new(),
         start: Instant::now(),
+        clock,
         keys: parse_keys(&keys),
         next_key_at: 0.3,
         idle_since_key: false,

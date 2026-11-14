@@ -924,7 +924,23 @@ impl Machine {
         self.dpmi_save(Reflect::Interrupt { ring0 });
         let hooked = vector_irq(v).and_then(|k| self.client().rm_irq_prev[k]);
         let (seg, off) = hooked.unwrap_or_else(|| self.vector(v));
-        let fl = self.cpu.flags;
+        // The real-mode handler gets the flags of the code the interrupt
+        // came from: at ring 0 they are the CPU's (the gate's stub ran
+        // nothing), but a client's handler that chains to the default one
+        // has run code of its own since, and the interrupted code's flags
+        // are in the IRET frame on its stack. A hardware interrupt's
+        // handler gives them back unchanged, and they go back to that
+        // frame (an IRQ between a CMP and its jump must not change it:
+        // DOS/4GW programs lost their loops' flags to the timer).
+        let fl = if ring0 {
+            self.cpu.flags
+        } else {
+            let bits32 = self.client().bits32;
+            let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
+            let a = self.cpu.seg[SS].base.wrapping_add(sp + if bits32 { 8 } else { 4 });
+            let caller = if bits32 { self.hw.rd32(a) } else { self.hw.rd16(a) as u32 };
+            (self.cpu.flags & !0xffff) | (caller & 0xffff)
+        };
         self.dpmi_to_real();
         let rm = self.client().rm_stack;
         self.cpu.seg[SS] = Seg::real(rm);
