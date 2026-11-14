@@ -5,7 +5,8 @@
 //! and painting the line that comes in), then moved 8 pixels at a time
 //! as a frame drag would (WinSetWindowPos, everything repainted). Each
 //! phase's time goes to the serial log (`PMBENCH: ...`). `PMBENCH SCROLL`
-//! stops after scrolling and leaves the window up.
+//! stops after scrolling and leaves the window up; `PMBENCH HOLD` ends
+//! by moving it under another window and leaves both up.
 
 #![no_std]
 #![no_main]
@@ -89,6 +90,9 @@ static mut FIRST: i32 = 0;
 /// `PMBENCH SCROLL`: stop after scrolling, leaving the window up (to
 /// look at what scrolling drew).
 static mut SCROLL_ONLY: bool = false;
+/// `PMBENCH HOLD`: at the end, put another window over this one, move
+/// this one under it, and leave both up (to look at what moving drew).
+static mut HOLD: bool = false;
 
 fn ms() -> u32 {
     let mut v = 0u32;
@@ -191,6 +195,21 @@ fn run(frame: u32, client: u32) {
         }
         let mv = ms().wrapping_sub(t);
         os2::println!("PMBENCH: move {STEPS} times: {mv} ms ({} ms/step; WinSetWindowPos {in_call} ms, painting {} ms)", mv / STEPS as u32, mv - in_call);
+        if HOLD {
+            let mut fcf = 0x1 | 0x8;
+            let mut c2 = 0;
+            let cover = WinCreateStdWindow(1, 0, &mut fcf, b"PmBench\0".as_ptr(), b"Cover\0".as_ptr(), 0, 0, 2, &mut c2);
+            WinSetWindowPos(cover, 3, 420, 300, 300, 260, 0x1 | 0x2 | 0x8 | 0x4);
+            WinUpdateWindow(1);
+            for i in 0..12 {
+                WinSetWindowPos(frame, 0, x0 + 8 * i, y0 + 6 * i, 0, 0, 0x2);
+                WinUpdateWindow(1);
+            }
+            os2::println!("PMBENCH: done");
+            loop {
+                DosSleep(u32::MAX);
+            }
+        }
         DosSleep(2000);
         os2::println!("PMBENCH: done");
     }
@@ -199,6 +218,7 @@ fn run(frame: u32, client: u32) {
 fn main(s: &os2::Startup) -> u32 {
     unsafe {
         SCROLL_ONLY = s.args().trim_ascii().eq_ignore_ascii_case(b"scroll");
+        HOLD = s.args().trim_ascii().eq_ignore_ascii_case(b"hold");
         let hab = WinInitialize(0);
         let hmq = WinCreateMsgQueue(hab, 0);
         if hab == 0 || hmq == 0 {

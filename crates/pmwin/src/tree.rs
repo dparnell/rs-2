@@ -444,6 +444,73 @@ impl Desktop {
         }
     }
 
+    /// What of the window (and its children) is on the screen: its
+    /// visible region less every showing sibling above it at each level,
+    /// whatever their styles (a sibling that does not clip, or a
+    /// transparent one, has drawn over it there).
+    fn shown_region(&self, h: Hwnd) -> Region {
+        let mut g = self.visible_region(h, false);
+        let mut cur = h;
+        while let Some(w) = self.get(cur) {
+            let Some(p) = self.get(w.parent) else { break };
+            for &s in p.children.iter().skip_while(|&&c| c != cur).skip(1) {
+                if self.get(s).is_some_and(|x| x.visible_style()) {
+                    g.subtract(&self.screen_rect(s));
+                }
+            }
+            cur = w.parent;
+        }
+        g
+    }
+
+    /// Move a window to (`x`, `y`) without changing its size, keeping
+    /// what is on the screen of it: the device region returned (the
+    /// destination) is to get the pixels `dx`, `dy` away from it, the
+    /// window's old position. The rest of its new area and what it
+    /// uncovered are invalidated. Its update regions (window
+    /// coordinates) move with it, so what was still to paint still is.
+    pub fn move_keeping(&mut self, h: Hwnd, x: i32, y: i32) -> (Region, i32, i32) {
+        let Some(w) = self.get(h) else { return (Region::new(), 0, 0) };
+        let (dx, dy, cx, cy) = (x - w.x, y - w.y, w.cx, w.cy);
+        if !self.is_showing(h) {
+            self.set_pos(h, x, y, cx, cy);
+            return (Region::new(), 0, 0);
+        }
+        let old = self.screen_rect(h);
+        let mut keep = self.shown_region(h);
+        if let Some(w) = self.windows.get_mut(&h) {
+            w.x = x;
+            w.y = y;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        let new = self.screen_rect(h);
+        keep.offset(dx, dy);
+        let copy = clip_to(&keep, &self.shown_region(h).rects);
+        // Only what can be seen at the new place paints (a part off the
+        // screen or under another window is invalidated when it shows).
+        let mut fresh = self.visible_region(h, false);
+        let mut uncovered = Region::from_rect(old);
+        for r in &copy.rects {
+            fresh.subtract(r);
+        }
+        uncovered.subtract(&new);
+        // What was not copied paints: the window and its children (and
+        // siblings above it there when it does not clip them, since it
+        // paints over them).
+        let own = self.get(h).is_some_and(|w| w.parent == HWND_DESKTOP || w.style & crate::ws::CLIPSIBLINGS != 0);
+        for r in &fresh.rects {
+            if own {
+                self.invalidate(h, Some(r.offset(-new.left, -new.bottom)), true);
+            } else {
+                self.invalidate_screen(*r);
+            }
+        }
+        for r in &uncovered.rects {
+            self.invalidate_screen(*r);
+        }
+        (copy, dx, dy)
+    }
+
     /// Move a window (keeping its position relative to the new parent)
     /// to the top of a new parent's children.
     pub fn set_parent(&mut self, h: Hwnd, parent: Hwnd) -> bool {
@@ -825,5 +892,55 @@ mod tests {
         d.set_pos(a, 100, 100, 50, 50);
         assert!(!d.get(HWND_DESKTOP).unwrap().update.is_empty());
         assert_eq!(d.paint_pending(7), Some(a));
+    }
+
+    #[test]
+    fn move_keeps_what_was_shown() {
+        let mut d = desk();
+        let a = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 100, 100), 1, 7, 0, 0).unwrap();
+        // b covers a's top right corner.
+        let b = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(80, 80, 200, 200), 2, 8, 0, 0).unwrap();
+        for w in [HWND_DESKTOP, a, b] {
+            d.get_mut(w).unwrap().update = Region::new();
+        }
+        let (copy, dx, dy) = d.move_keeping(a, 10, 0);
+        assert_eq!((dx, dy), (10, 0));
+        // a's old shown area (100x100 less b's 20x20) moved right by 10,
+        // less what b covers at the new place (30x20).
+        assert_eq!(copy.area(), 100 * 100 - 30 * 20);
+        assert!(copy.rects.iter().all(|r| r.intersect(&Rect::new(80, 80, 200, 200)).is_empty()));
+        // Nothing of a that shows was left out (under b it does not
+        // show); the desktop repaints the strip a uncovered; b is not
+        // touched.
+        assert!(d.get(a).unwrap().update.is_empty());
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().update.area(), 10 * 100);
+        assert!(d.get(b).unwrap().update.is_empty());
+        assert_eq!(d.screen_rect(a), Rect::new(10, 0, 110, 100));
+        // b moves off: a paints what b covered of it.
+        d.move_keeping(b, 300, 300);
+        assert_eq!(d.get(a).unwrap().update.area(), 30 * 20);
+    }
+
+    #[test]
+    fn move_of_a_window_with_a_child() {
+        let mut d = desk();
+        let a = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 100, 100), 1, 7, 0, 0).unwrap();
+        let c = d.create(a, 0, 1, ws::VISIBLE, Rect::new(10, 10, 50, 50), 1, 7, 0, 0).unwrap();
+        for w in [HWND_DESKTOP, a, c] {
+            d.get_mut(w).unwrap().update = Region::new();
+        }
+        let (copy, _, _) = d.move_keeping(a, 0, 20);
+        assert_eq!(copy.area(), 100 * 100);
+        assert!(d.get(c).unwrap().update.is_empty());
+        assert!(d.get(a).unwrap().update.is_empty());
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().update.area(), 100 * 20);
+        // Partly off the screen's top: only what stays on it is copied,
+        // and nothing new shows.
+        let (copy, _, _) = d.move_keeping(a, 0, 420);
+        assert_eq!(copy.area(), 100 * 60);
+        assert!(d.get(a).unwrap().update.is_empty());
+        // Back down: what was off the screen paints.
+        d.move_keeping(a, 0, 300);
+        assert_eq!(d.get(a).unwrap().update.area(), 100 * 40);
     }
 }

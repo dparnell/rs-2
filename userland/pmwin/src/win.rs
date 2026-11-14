@@ -730,7 +730,14 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     let (nx, ny) = if fl & SWP_MOVE != 0 { (x, y) } else { (ox, oy) };
     let (ncx, ncy) = if fl & SWP_SIZE != 0 { (cx, cy) } else { (ocx, ocy) };
     if (nx, ny, ncx, ncy) != (ox, oy, ocx, ocy) {
-        s.desk.set_pos(h, nx, ny, ncx, ncy);
+        if (ncx, ncy) == (ocx, ocy) {
+            // A move: what is on the screen of the window goes with it
+            // (as IBM's PM copies the bits); only the rest paints.
+            let (copy, dx, dy) = s.desk.move_keeping(h, nx, ny);
+            crate::gpiobj::move_pixels(&copy.rects, dx, dy);
+        } else {
+            s.desk.set_pos(h, nx, ny, ncx, ncy);
+        }
         if s.frames.contains_key(&h) {
             frame::layout(h);
         } else if (ncx, ncy) != (ocx, ocy) {

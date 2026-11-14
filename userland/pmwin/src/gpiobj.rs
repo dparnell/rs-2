@@ -721,6 +721,36 @@ pub extern "C" fn WinExcludeUpdateRegion(hps: u32, h: u32) -> i32 {
 /// update region; the uncovered area goes to hrgnUpdate/prclUpdate and,
 /// with SW_INVALIDATERGN (2), is invalidated (SW_SCROLLCHILDREN 1 also
 /// invalidates children).
+/// Move the screen's pixels `dx`, `dy` away from each of `dst` (device
+/// rectangles) into it, raw rows at a time. One rectangle (the usual
+/// case) moves in place; with more, one's destination may be another's
+/// source, so every source is read first.
+pub fn move_pixels(dst: &[Rect], dx: i32, dy: i32) {
+    if dst.is_empty() || (dx, dy) == (0, 0) {
+        return;
+    }
+    let s = st();
+    let mut surf = s.surface;
+    pointer::hide(s);
+    if let [r] = dst[..] {
+        surf.copy_within(r, dx, dy);
+    } else {
+        let mut px = Vec::new();
+        let saved: Vec<(Rect, usize)> = dst
+            .iter()
+            .map(|r| {
+                let at = px.len();
+                let got = surf.read_raw(r.offset(-dx, -dy), &mut px);
+                (got.offset(dx, dy), at)
+            })
+            .collect();
+        for (d, at) in saved {
+            surf.write_raw(d, &px[at..]);
+        }
+    }
+    pointer::show(st());
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL, clip: *const RectL, hrgn: u32, upd: *mut RectL, fl: u32) -> i32 {
     let s = st();
@@ -736,29 +766,8 @@ pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL
     let mut moved = vis.intersect_rect(sr);
     moved.offset(dx, dy);
     let copy = area.combine(&moved, Op::And);
-    // Raw rows. One rectangle (the usual case) moves in place; with more,
-    // one's destination may be another's source, so every source is
-    // read first.
-    let mut surf = s.surface;
-    pointer::hide(s);
-    let rects = copy.rects();
-    if let [r] = rects[..] {
-        surf.copy_within(r.offset(o.x, o.y), dx, dy);
-    } else {
-        let mut px = Vec::new();
-        let saved: Vec<(Rect, usize)> = rects
-            .iter()
-            .map(|r| {
-                let at = px.len();
-                let got = surf.read_raw(r.offset(o.x - dx, o.y - dy), &mut px);
-                (got.offset(dx, dy), at)
-            })
-            .collect();
-        for (d, at) in saved {
-            surf.write_raw(d, &px[at..]);
-        }
-    }
-    pointer::show(st());
+    let dst: Vec<Rect> = copy.rects().iter().map(|r| r.offset(o.x, o.y)).collect();
+    move_pixels(&dst, dx, dy);
     let exposed = area.combine(&copy, Op::Diff);
     // The pending update region moves with the contents.
     if let Some(w) = st().desk.get_mut(h) {

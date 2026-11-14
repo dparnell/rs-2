@@ -173,8 +173,15 @@ step, 91% of it in WinScrollWindow, which moved the pels one at a time
 (read, colour conversion, write, noting each as damage); it now moves
 raw rows (`Surface::copy_within`; with more than one rectangle every
 source is read first): 3.7 ms a step, 2 of them in WinScrollWindow.
-Moving is 20 ms a step, 99% of it repainting: a moved window is
-invalidated and painted again, not copied.
+Moving was 20 ms a step, 99% of it repainting: a moved window was
+invalidated and painted again. Now, as IBM's PM copies the bits, a
+move that keeps the size (`Desktop::move_keeping`) takes what was on
+the screen of the window (its visible region less every sibling above
+it, whatever their styles) to the new place, and invalidates only
+what of the new place shows and was not copied (the window's subtree;
+and siblings above when it does not clip them) and what it uncovered;
+its update regions, in window coordinates, go with it. 2.6 ms a step,
+0.1 of it painting. A size change still repaints.
 
 **Changing the resolution.** `Rs2SetDisplayMode` switches the driver
 (virtio-gpu makes a new resource on the same backing; SVGA II programs
