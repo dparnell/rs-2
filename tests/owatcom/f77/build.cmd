@@ -52,6 +52,13 @@ echo == samples: REXX external functions >> %LOG%
 copy %WATCOM%\samples\fortran\os2\rexx\*.* . > nul
 wmake -h -f makefile >> %LOG% 2>&1
 cmd /c testdll.cmd >> %LOG% 2>&1
+echo == samples: fshapes (PM) and calendar (VIO) >> %LOG%
+copy %WATCOM%\samples\fortran\os2\fshapes.* . > nul
+wfl386 -q -l=os2v2_pm fshapes.for >> %LOG% 2>&1
+copy %WATCOM%\samples\fortran\os2\calendar.for . > nul
+wfl386 -q -l=os2v2 calendar.for >> %LOG% 2>&1
+echo == a debug build for wd >> %LOG%
+wfl386 -q -d2 -l=os2v2 -fe=fmathdbg.exe fmath.for >> %LOG% 2>&1
 echo == DOS and Windows targets (built here, run separately) >> %LOG%
 wfl386 -q -l=dos4g -fe=fmathx.exe fmath.for >> %LOG% 2>&1
 wfl -q -l=dos -fe=fmathd.exe fmath.for >> %LOG% 2>&1
