@@ -952,8 +952,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (p, h, lo, hi) = (a.p(), a.w(), a.w(), a.w());
             if crate::tracing() {
                 // The caller (the entry stub's frame: its far return).
-                let f = thunk16::flat(thunk16::sp16().wrapping_add(32)) as *const u16;
-                let (ip, cs) = unsafe { (f.add(8).read_unaligned(), f.add(9).read_unaligned()) };
+                let (_, ip, cs) = thunk16::caller16();
                 trace(format_args!("W16 GetMessage from {cs:04x}:{ip:04x}"));
             }
             get_message(p, h, lo, hi, None)

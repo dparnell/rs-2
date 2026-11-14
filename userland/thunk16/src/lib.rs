@@ -162,6 +162,18 @@ pub fn sp16() -> u32 {
     v
 }
 
+/// The innermost 16-bit caller's BP, IP and CS, from the frame
+/// `common16!` keeps on its stack at `sp16() + 32`: EBX, EDI, ESI, EBP
+/// (8 words), FS, BX, DI, SI, ES, DS, BP, the entry's near call, then
+/// the caller's far return address.
+pub fn caller16() -> (u16, u16, u16) {
+    let f = flat(sp16().wrapping_add(32)) as *const u16;
+    if f.is_null() {
+        return (0, 0, 0);
+    }
+    unsafe { (f.add(14).read_unaligned(), f.add(16).read_unaligned(), f.add(17).read_unaligned()) }
+}
+
 pub fn set_sp16(v: u32) {
     unsafe { core::arch::asm!("mov dword ptr fs:[0x30], {0}", in(reg) v, options(nostack)) };
 }
