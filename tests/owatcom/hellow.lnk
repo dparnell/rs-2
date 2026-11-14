@@ -1,0 +1,6 @@
+# wlink directive file: wlink @hellow.lnk
+system os2v2
+name hellow
+option quiet, map, stack=64k, description 'linked from a directive file'
+file hello.obj
+library mylib.lib

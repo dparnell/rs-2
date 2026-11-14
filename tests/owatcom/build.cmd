@@ -1,7 +1,6 @@
 @echo off
-rem Builds and runs the Open Watcom test programs; output in D:\BUILD.LOG
-d:
-cd \
+rem Builds and runs the Open Watcom test programs in the current directory;
+rem output in BUILD.LOG
 echo == wcl386 hello.c > build.log
 wcl386 -l=os2v2 hello.c >> build.log 2>&1
 echo == hello >> build.log

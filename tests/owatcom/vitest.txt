@@ -1,0 +1,2 @@
+first line of the vi test file
+second line

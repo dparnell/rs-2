@@ -1,0 +1,4 @@
+# included by mk2.mak (!include)
+CFLAGS = -zq -bt=os2 -mf
+.c.obj: .AUTODEPEND
+	wcc386 $(CFLAGS) $[@
