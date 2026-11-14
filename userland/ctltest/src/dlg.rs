@@ -48,6 +48,10 @@ unsafe extern "C" {
     fn WinFileDlg(parent: u32, owner: u32, pfild: *mut u8) -> u32;
     #[link_name = "PMCTLS.5"]
     fn WinDefFileDlgProc(h: u32, m: u32, a: u32, b: u32) -> u32;
+    #[link_name = "PMWIN.859"]
+    fn WinSetDlgItemText(h: u32, id: u32, t: *const u8) -> u32;
+    #[link_name = "PMWIN.920"]
+    fn WinSendMsg(h: u32, m: u32, a: u32, b: u32) -> u32;
 }
 
 const QWL_STYLE: i32 = -2;
@@ -189,6 +193,15 @@ pub fn checks(hab: u32, owner: u32) {
         check("its title set before WM_INITDLG", &tb[..n] == b"CtlTest Open");
         check("WM_INITDLG to the application's procedure with mp1 and mp2 0", INIT_ARGS.load(Ordering::Relaxed) == 0);
         check("the directories listed although it kept WM_INITDLG", WinSendDlgItemMsg(fdlg, 264, 0x0160, 0, 0) > 0);
+        // OK with the name of a file that does not exist: an Open dialog
+        // takes it as IBM's ProcessOKButtonMsg does (only extended
+        // attribute dialogs check the file; the Open Watcom IDE names its
+        // new projects so).
+        WinSetDlgItemText(fdlg, 258, b"C:\\NEWPROJ.WPJ\0".as_ptr());
+        let wm_command = 0x0020;
+        WinSendMsg(fdlg, wm_command, 1, 0);
+        let full = &fd[52..52 + 15];
+        check("an Open dialog takes a new file's name", u32::from_le_bytes(fd[12..16].try_into().unwrap()) == 1 && full.eq_ignore_ascii_case(b"C:\\NEWPROJ.WPJ\0"));
         WinDestroyWindow(fdlg);
     }
 }
