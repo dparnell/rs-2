@@ -627,7 +627,10 @@ fn container(hab: u32, client: u32) -> u32 {
     // Emphasis.
     check("CM_SETRECORDEMPHASIS (select)", send(cnr, CM_SETRECORDEMPHASIS, recs[2], mp(1, CRA_SELECTED)) != 0);
     check("selection is in the record", rd(recs[2], R_ATTR) & CRA_SELECTED != 0);
-    check("CM_QUERYRECORDEMPHASIS", send(cnr, CM_QUERYRECORDEMPHASIS, CMA_FIRST, CRA_SELECTED) == recs[2]);
+    // The first record inserted got selection and the cursor (IBM's
+    // CnrInsertRecord, unless CCS_MULTIPLESEL), and selecting another in
+    // extended selection keeps it (CnrSetRecordEmphasis).
+    check("CM_QUERYRECORDEMPHASIS", send(cnr, CM_QUERYRECORDEMPHASIS, CMA_FIRST, CRA_SELECTED) == recs[0] && send(cnr, CM_QUERYRECORDEMPHASIS, recs[0], CRA_SELECTED) == recs[2]);
     send(cnr, CM_SETRECORDEMPHASIS, recs[3], mp(1, CRA_INUSE));
     check("in-use emphasis", send(cnr, CM_QUERYRECORDEMPHASIS, CMA_FIRST, CRA_INUSE) == recs[3]);
     send(cnr, CM_SETRECORDEMPHASIS, recs[0], mp(1, CRA_CURSORED));

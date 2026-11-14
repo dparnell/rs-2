@@ -1606,10 +1606,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(0);
             }
             let ss = (thunk16::sp16() >> 16) as u16;
-            let frame = flat(thunk16::sp16().wrapping_add(32)) as *const u16;
-            // The entry stub saved (fs, bx, di, si, es, ds, bp) below the
-            // entry's near call to it, then the caller's return address.
-            let (bp, ip, cs) = unsafe { (frame.add(6).read_unaligned(), frame.add(8).read_unaligned(), frame.add(9).read_unaligned()) };
+            let (bp, ip, cs) = thunk16::caller16();
             fill_frame(p, ss, bp, cs, ip);
             1
         }
