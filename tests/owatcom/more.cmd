@@ -48,6 +48,8 @@ wdump -q -e mydll.dll > MYDLL.DMP 2>&1
 find "DllAdd" MYDLL.DMP >> %L%
 echo == ide2make (usage) >> %L%
 ide2make -? >> %L% 2>&1
+echo == NMPBIND (CONFIG.SYS RUN=, on NAMPIPES.DLL) is running >> %L%
+pstat | find /i "nmpbind" >> %L%
 echo == results of the other sessions >> %L%
 waitfile COM.OUT 30 >> %L% 2>&1
 echo == done >> %L%

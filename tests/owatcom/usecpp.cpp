@@ -4,7 +4,9 @@
 #include <stdexcept>
 #include <iostream>
 
-class __declspec(dllimport) Counter {
+// (Not __declspec(dllimport): its __imp_ symbols are not in the import
+// library wlib makes from the DLL; the calls go through the import.)
+class Counter {
 public:
     Counter( const char *name );
     ~Counter();
