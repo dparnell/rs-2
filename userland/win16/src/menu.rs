@@ -513,6 +513,9 @@ pub fn set_menu(hwnd: u16, menu: u16) -> bool {
     true
 }
 
+/// The menu bar that has had Windows' WM_INITMENU in this menu mode.
+static BAR_INIT: crate::Global<u32> = crate::Global::new(0);
+
 /// PM's menu messages to a client (from its frame) as Windows'.
 pub fn pm_message(h: u16, msg: u32, mp1: u32, mp2: u32) -> u32 {
     use crate::user::*;
@@ -529,6 +532,7 @@ pub fn pm_message(h: u16, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_INITMENU => {
             let pm = mp2;
             if pm == bar && bar != 0 {
+                *BAR_INIT.get() = bar;
                 user::send(h, W_INITMENU, handle_of(pm), 0);
             } else if known(pm) || pm != 0 && is_below(bar, pm) {
                 let index = parent_index(bar, pm).unwrap_or(0);
@@ -537,6 +541,13 @@ pub fn pm_message(h: u16, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_MENUSELECT => {
+            // PM sends no WM_INITMENU for a menu bar entering menu mode
+            // (only for the menus it shows): Windows' WM_INITMENU comes
+            // before the bar's first selection.
+            if mp2 == bar && bar != 0 && *BAR_INIT.get() != bar {
+                *BAR_INIT.get() = bar;
+                user::send(h, W_INITMENU, handle_of(bar), 0);
+            }
             if mp1 >> 16 == 0 {
                 let pm = mp2;
                 let id = mp1 as u16;
@@ -551,6 +562,7 @@ pub fn pm_message(h: u16, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_MENUEND => {
             if mp2 == bar {
+                *BAR_INIT.get() = 0;
                 user::send(h, W_MENUSELECT, 0, 0xffff);
             }
             0

@@ -45,6 +45,7 @@ unsafe extern "C" {
 const WM_CONTROL: u32 = 0x0030;
 const WM_DRAWITEM: u32 = 0x0036;
 const WM_MEASUREITEM: u32 = 0x0037;
+const WM_INITMENU: u32 = 0x0033;
 const CLR_RED: i32 = 2;
 const CLR_BLUE: i32 = 1;
 
@@ -60,9 +61,13 @@ struct Seen {
     measured: Vec<(u32, u32)>,
     drawn: Vec<(u32, OwnerItem)>,
     buttons: Vec<(u32, u32)>,
+    /// WM_INITMENU's menus.
+    inits: Vec<u32>,
+    /// WM_COMMANDs of the tool bar menu's items.
+    commands: Vec<u32>,
 }
 
-static mut SEEN: Seen = Seen { measured: Vec::new(), drawn: Vec::new(), buttons: Vec::new() };
+static mut SEEN: Seen = Seen { measured: Vec::new(), drawn: Vec::new(), buttons: Vec::new(), inits: Vec::new(), commands: Vec::new() };
 
 fn seen() -> &'static mut Seen {
     unsafe { &mut *core::ptr::addr_of_mut!(SEEN) }
@@ -97,6 +102,14 @@ pub fn client_msg(_h: u32, msg: u32, mp1: u32, mp2: u32) -> Option<u32> {
             oi.fs_attribute &= !0x8000;
             oi.fs_attribute_old &= !0x8000;
             Some(1)
+        }
+        WM_INITMENU => {
+            seen().inits.push(mp2);
+            None
+        }
+        0x0020 if (ID_ITEM + 10..ID_ITEM + 13).contains(&(mp1 & 0xffff)) => {
+            seen().commands.push(mp1 & 0xffff);
+            Some(0)
         }
         WM_CONTROL if mp1 & 0xffff == ID_BUTTON && mp1 >> 16 == 3 => {
             // BN_PAINT: USERBUTTON hwnd, hps, fsState, fsStateOld.
@@ -200,7 +213,7 @@ pub fn owner_checks(hab: u32, client: u32) {
     pump(hab);
     check("a submenu made as a child of its menu drops down on the desktop", sub != 0 && on_desktop);
     unsafe { WinDestroyWindow(m) };
-    tool_bar_menu(client);
+    tool_bar_menu(hab, client);
 
     // A user button.
     s.buttons.clear();
@@ -253,7 +266,7 @@ pub fn owner_checks(hab: u32, client: u32) {
 /// (IBM's MenuGetMenuItemRect formats the menu first), and UCMenus sizes
 /// the tool bar from those widths. A menu made the same way and given as
 /// an item's submenu turns vertical (IBM's MenuInsertMenuItem).
-fn tool_bar_menu(client: u32) {
+fn tool_bar_menu(hab: u32, client: u32) {
     const MM_INSERTITEM: u32 = 0x0180;
     const MM_QUERYITEMRECT: u32 = 0x0194;
     let s = seen();
@@ -290,5 +303,35 @@ fn tool_bar_menu(client: u32) {
     unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, b"~More\0".as_ptr() as u32) };
     let sub_style = unsafe { WinQueryWindowULong(sub, -2) };
     check("a WinCreateMenu menu given as a submenu is vertical (MS_ACTIONBAR off)", sub != 0 && sub_style & 1 == 0 && unsafe { WinQueryWindow(sub, 4 /* QW_OWNER */) } == bar);
+    // As IBM's MenuSummon: WM_INITMENU for a menu that is shown (the
+    // pull-down), none for the action bar entering menu mode (EPM took
+    // one for its tool bar for a pull-down of its own and ended).
+    s.inits.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0189 /* MM_SELECTITEM */, (ID_ITEM + 12) | 1 << 16, 0);
+        WinSendMsg(bar, 0x0186 /* MM_ENDMENUMODE */, 1, 0);
+    }
+    let menu_mode = s.inits.clone();
+    s.inits.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0185 /* MM_STARTMENUMODE */, 0, 0);
+        WinSendMsg(bar, 0x0186, 1, 0);
+    }
+    check("an action bar entering menu mode gets no WM_INITMENU for itself", !menu_mode.contains(&bar) && s.inits.is_empty());
+    // An item whose submenu has no items (UCMenus' buttons): the submenu
+    // gets WM_INITMENU but is not shown, and the item is chosen as one
+    // without a submenu (IBM's MenuSummon and MenuButtonUp).
+    s.inits.clear();
+    s.commands.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0185 /* MM_STARTMENUMODE */, 0, 0);
+        WinSendMsg(bar, 0x0189 /* MM_SELECTITEM */, ID_ITEM + 12, 0);
+        // Enter: KC_VIRTUALKEY | KC_SCANCODE, VK_NEWLINE.
+        WinSendMsg(bar, 0x007a, 0x06 | 1 << 16 | 0x1c << 24, 0x08 << 16);
+    }
+    let shown = unsafe { WinIsWindowVisible(sub) } != 0;
+    pump(hab);
+    check("an empty submenu stays hidden (WM_INITMENU sent) and its item is chosen (WM_COMMAND)", s.inits.contains(&sub) && !shown && s.commands == [ID_ITEM + 12]);
+    unsafe { WinSendMsg(bar, 0x0186, 1, 0) };
     unsafe { WinDestroyWindow(bar) };
 }

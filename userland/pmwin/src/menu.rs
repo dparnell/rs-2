@@ -727,7 +727,15 @@ fn start(h: u32, sel: Option<usize>, drop: bool) {
     s.capture = h;
     // As in PM, the focus window keeps the focus (it gets no
     // WM_SETFOCUS); the queue's keys go to the menu meanwhile.
-    send(notify_target(h), WM_INITMENU, ctl::id(h), h);
+    // WM_INITMENU comes as IBM's MenuSummon sends it: for a menu that is
+    // shown (a pop-up menu here, a pull-down in open_sub), never for an
+    // action bar or a title button entering menu mode. EPM takes a
+    // WM_INITMENU whose menu is not FID_MENU for one of its pull-downs
+    // and hangs its own data on it: a click on its tool bar (an action
+    // bar with an id of its own) ended EPM.
+    if !horizontal(h) {
+        send(notify_target(h), WM_INITMENU, ctl::id(h), h);
+    }
     if let Some(i) = sel {
         select(h, i);
         if drop {
@@ -813,18 +821,25 @@ fn step(h: u32, d: i32) {
     select(h, i as usize);
 }
 
-/// Show the submenu of item `i` of `h`.
-fn open_sub(h: u32, i: usize, first: bool) {
-    let Some(it) = data(h).and_then(|m| m.items.get(i)) else { return };
+/// Show the submenu of item `i` of `h`; false when it is not shown. As
+/// IBM's MenuSummon, WM_INITMENU goes out first and a submenu without
+/// items (also after that) stays hidden: the item then acts as one
+/// without a submenu (MenuButtonUp). EPM's tool bar (UCMenus) gives each
+/// button an empty submenu.
+fn open_sub(h: u32, i: usize, first: bool) -> bool {
+    let Some(it) = data(h).and_then(|m| m.items.get(i)) else { return false };
     let (sub, id) = (it.sub, it.id);
     if sub == 0 || it.attr & MIA_DISABLED != 0 {
-        return;
+        return false;
     }
     if data(h).is_some_and(|m| m.open == sub) {
-        return;
+        return true;
     }
     close_from(h);
     send(notify_target(root()), WM_INITMENU, id as u32, sub);
+    if item_count(sub) == 0 {
+        return false;
+    }
     // A submenu made by WinCreateMenu (an action bar there, and a child
     // of the window given: VisualAge Smalltalk makes its pull-downs with
     // the menu bar as parent) drops down as a vertical menu on the
@@ -857,6 +872,7 @@ fn open_sub(h: u32, i: usize, first: bool) {
     if first {
         select_first(sub);
     }
+    true
 }
 
 /// Hide the submenus open below `h`.
@@ -912,8 +928,7 @@ fn choose(h: u32, i: usize, pointer: bool) {
     if !selectable(it) || it.attr & MIA_DISABLED != 0 {
         return;
     }
-    if it.sub != 0 {
-        open_sub(h, i, !pointer);
+    if it.sub != 0 && open_sub(h, i, !pointer) {
         return;
     }
     end(Some((h, i)), pointer);
@@ -977,9 +992,12 @@ fn button_up(h: u32, mp1: u32) {
     }
     let p = screen_point(h, mp1);
     if let Some((m, Some(i))) = hit(p) {
-        let has_sub = item_ref(m, i).is_some_and(|it| it.sub != 0);
-        if !has_sub {
+        // An item whose submenu is not down (an empty one) is chosen.
+        let (sub, enabled) = item_ref(m, i).map_or((0, false), |it| (it.sub, it.attr & MIA_DISABLED == 0));
+        if sub == 0 {
             choose(m, i, true);
+        } else if enabled && data(m).is_some_and(|d| d.open != sub) && item_count(sub) == 0 {
+            end(Some((m, i)), true);
         }
     }
 }
