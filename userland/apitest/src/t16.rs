@@ -5,6 +5,8 @@
 //! tidCurrent is the running thread's (Microsoft C's multithread _chkstk
 //! looks the thread's stack limit up by it).
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use thunk16::{far, flat, PascalCall};
 
 use crate::check;
@@ -293,4 +295,41 @@ pub fn run() {
     // (Once the thread has ended: on another CPU it may still be running.)
     unsafe { os2::DosSleep(100) };
     check("and back on the main thread, the main thread's", unsafe { lis.add(3).read_volatile() } == 1);
+    // With threads running on several CPUs at once each still sees its own
+    // ID there (Open Watcom's 16-bit runtime owns its locks by it: NMPBIND
+    // hung in _beginthread).
+    LIS16.store(lsel as u32, Ordering::Relaxed);
+    let mut tids = [0u32; 4];
+    for t in tids.iter_mut() {
+        unsafe { os2::DosCreateThread(t, lis16_reader, 0, 0, 16384) };
+    }
+    for t in tids.iter_mut() {
+        unsafe { os2::DosWaitThread(t, os2::DCWW_WAIT) };
+    }
+    let bad = LIS16_BAD.load(Ordering::Relaxed);
+    check(&alloc::format!("16-bit DosGetInfoSeg: four threads at once each read their own tidCurrent ({bad} wrong)"), bad == 0 && LIS16_SEEN.load(Ordering::Relaxed) == 4);
+}
+
+static LIS16: AtomicU32 = AtomicU32::new(0);
+static LIS16_BAD: AtomicU32 = AtomicU32::new(0);
+static LIS16_SEEN: AtomicU32 = AtomicU32::new(0);
+
+/// Compares tidCurrent in the segment 16-bit DosGetInfoSeg named with the
+/// thread's ID from its TIB for a while.
+unsafe extern "C" fn lis16_reader(_: u32) {
+    unsafe {
+        let lis = flat(LIS16.load(Ordering::Relaxed) << 16) as *const u16;
+        let (mut tib, mut pib): (*mut os2::Tib, *mut os2::Pib) = (core::ptr::null_mut(), core::ptr::null_mut());
+        os2::DosGetInfoBlocks(&mut tib, &mut pib);
+        let me = (*(*tib).ptib2).tid as u16;
+        for i in 0..20000u32 {
+            if lis.add(3).read_volatile() != me {
+                LIS16_BAD.fetch_add(1, Ordering::Relaxed);
+            }
+            if i % 1000 == 0 {
+                os2::DosSleep(0);
+            }
+        }
+        LIS16_SEEN.fetch_add(1, Ordering::Relaxed);
+    }
 }

@@ -416,6 +416,10 @@ impl AddressSpace {
         let mut s = AddressSpace { root, cpus: Arc::new(core::sync::atomic::AtomicU64::new(0)), ldt, regions: BTreeMap::new() };
         s.map_gate();
         crate::infoseg::attach(&mut s);
+        // The running thread's local information segment (mm::tlm), for
+        // 16-bit programs too (DosGetInfoSeg's selector): read-only data.
+        let lis = crate::mm::tlm::LIS_BASE;
+        s.ldt[(lis >> 16) as usize] = seg_descriptor(lis, PAGE - 1, SegKind::Data, pag::READ);
         Some(s)
     }
 

@@ -36,6 +36,8 @@ unsafe extern "C" {
     fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
     #[link_name = "PMWIN.840"]
     fn WinQueryWindowRect(h: u32, r: *mut i32) -> u32;
+    #[link_name = "PMWIN.994"]
+    fn WinThreadAssocQueue(hab: u32, hmq: u32) -> u32;
 }
 
 fn pel(h: u32, x: i32, y: i32) -> i32 {
@@ -313,8 +315,44 @@ fn frame_template() -> [u8; 46] {
     t
 }
 
+static ASSOC: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+
+extern "C" fn assoc_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    if msg == 0x1005 {
+        return 0x1234;
+    }
+    unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
+}
+
+/// Takes over the main thread's queue (ASSOC: hab, hmq, window) and sends
+/// to a window of it, as wdw's pump thread does while the main thread
+/// waits on a remote trap file.
+unsafe extern "C" fn assoc_thread(_: u32) {
+    let (hab, hmq, h) = (ASSOC[0].load(Ordering::Relaxed), ASSOC[1].load(Ordering::Relaxed), ASSOC[2].load(Ordering::Relaxed));
+    unsafe {
+        let ok = WinThreadAssocQueue(hab, hmq);
+        let r = WinSendMsg(h, 0x1005, 0, 0);
+        WinThreadAssocQueue(hab, 0);
+        ASSOC[3].store(if ok != 0 { r } else { 0xdead }, Ordering::Relaxed);
+    }
+}
+
 pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
     unsafe {
+        // WinThreadAssocQueue: a thread serving another thread's queue sends
+        // to that queue's windows directly (it recursed in rs2 until the
+        // stack overflowed: wdw -tr=nmp crashed).
+        WinRegisterClass(hab, b"OwAssoc\0".as_ptr(), assoc_proc, 0, 0);
+        let h = WinCreateWindow(2, b"OwAssoc\0".as_ptr(), b"\0".as_ptr(), 0, 0, 0, 0, 0, 0, 3, 1, core::ptr::null(), core::ptr::null());
+        ASSOC[0].store(hab, Ordering::Relaxed);
+        ASSOC[1].store(hmq, Ordering::Relaxed);
+        ASSOC[2].store(h, Ordering::Relaxed);
+        let mut tid = 0;
+        os2::DosCreateThread(&mut tid, assoc_thread, 0, 0, 32768);
+        os2::DosWaitThread(&mut tid, os2::DCWW_WAIT);
+        check("WinThreadAssocQueue: the thread sends to the queue's windows itself", ASSOC[3].load(Ordering::Relaxed) == 0x1234);
+        WinDestroyWindow(h);
+
         WinRegisterClass(hab, b"OwCreate\0".as_ptr(), create_proc, 0, 4);
         let ctl = [0x55u8; 8];
         let h = WinCreateWindow(client, b"OwCreate\0".as_ptr(), b"\0".as_ptr(), 0, 0, 0, 10, 10, client, 3, 77, ctl.as_ptr(), core::ptr::null());

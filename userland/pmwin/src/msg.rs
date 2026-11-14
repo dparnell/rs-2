@@ -165,7 +165,11 @@ pub fn send(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 fn deliver(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let s = st();
     let Some((p, q)) = s.desk.get(h).map(|w| (w.proc_, w.queue)).filter(|&(p, _)| p != 0) else { return 0 };
-    let other = s.queues.get(&q).is_some_and(|x| x.pid != pid() || x.tid != state::tid());
+    // A queue the caller took over with WinThreadAssocQueue is its own:
+    // the debugger's pump thread dispatches the main thread's windows
+    // (Open Watcom's wdw with a remote trap file); sending to them through
+    // the queue it serves itself recursed until its stack overflowed.
+    let other = q != s.my_queue() && s.queues.get(&q).is_some_and(|x| x.pid != pid() || x.tid != state::tid());
     if !other {
         return call(p, h, msg, mp1, mp2);
     }

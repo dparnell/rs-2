@@ -698,7 +698,14 @@ fn dos_get_info_blocks(c: &mut Ctx) -> u32 {
 
 fn dos16_get_info_seg(c: &mut Ctx) -> u32 {
     c.write_u16(c.ptr(0), crate::infoseg::global_selector());
-    c.write_u16(c.ptr(1), vm::tile_selector(c.process.info + process::info::LINFOSEG));
+    // The thread's own copy of the local information segment (mm::tlm),
+    // as the DosLocalInfo constant: with two threads of the process on
+    // two CPUs the shared page holds only one tidCurrent. Open Watcom's
+    // 16-bit runtime finds the running thread's ID there (_threadid):
+    // NMPBIND's new relay thread read the other CPU's thread, took itself
+    // for a thread beyond the runtime's table and returned without
+    // releasing _beginthread's semaphore, and the next _beginthread hung.
+    c.write_u16(c.ptr(1), vm::tile_selector(crate::mm::tlm::LIS_BASE));
     0
 }
 

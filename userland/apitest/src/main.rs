@@ -514,6 +514,39 @@ fn named_pipes() {
         check("pipe gone", DosWaitNPipe(name, 10) == 2);
     }
     reply_then_disconnect();
+    byte_mode_messages();
+}
+
+/// A client in byte read mode (as DosOpen leaves it) on a message pipe
+/// reads one message at a time, as IBM's kernel copies them (Open
+/// Watcom's NMP link sends a 1-byte packet and then its length as two
+/// messages and tells them apart by the count read).
+fn byte_mode_messages() {
+    let name = b"\\PIPE\\RS2BYTE\0".as_ptr();
+    unsafe {
+        let mut h = 0;
+        DosCreateNPipe(name, &mut h, NP_ACCESS_DUPLEX, NP_TYPE_MESSAGE | NP_READMODE_MESSAGE | 1, 64, 64, 0);
+        let (mut hc, mut act) = (0, 0);
+        let rc = DosOpen(name, &mut hc, &mut act, 0, 0, 1, 0x42, null_mut());
+        DosConnectNPipe(h);
+        let mut n = 0;
+        DosWrite(h, b"x".as_ptr(), 1, &mut n);
+        DosWrite(h, b"1234".as_ptr(), 4, &mut n);
+        DosWrite(h, b"abcdef".as_ptr(), 6, &mut n);
+        let mut buf = [0u8; 16];
+        let (mut avail, mut state) = ([0u16; 2], 0);
+        DosPeekNPipe(hc, buf.as_mut_ptr(), 16, &mut n, avail.as_mut_ptr(), &mut state);
+        check("byte read mode: DosPeekNPipe of a message pipe gives the first message", rc == 0 && n == 1 && buf[0] == b'x' && avail == [11, 1]);
+        let r1 = DosRead(hc, buf.as_mut_ptr(), 16, &mut n);
+        check("byte read mode: DosRead of a message pipe reads one message", r1 == 0 && n == 1 && buf[0] == b'x');
+        let r2 = DosRead(hc, buf.as_mut_ptr(), 16, &mut n);
+        check("byte read mode: then the next one", r2 == 0 && &buf[..n as usize] == b"1234");
+        let r3 = DosRead(hc, buf.as_mut_ptr(), 4, &mut n);
+        let r4 = DosRead(hc, buf[4..].as_mut_ptr(), 16, &mut n);
+        check("byte read mode: part of a message, without ERROR_MORE_DATA, then its rest", r3 == 0 && r4 == 0 && n == 2 && &buf[..6] == b"abcdef");
+        DosClose(hc);
+        DosClose(h);
+    }
 }
 
 static PIPE_CLIENT: AtomicU32 = AtomicU32::new(0);
