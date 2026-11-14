@@ -598,8 +598,10 @@ fn load_image(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, space: Opt
     match os2_exe::detect(&data) {
         Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, specific, space),
         Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, specific, space),
-        Ok(_) => Err(err::BAD_EXE_FORMAT),
-        Err(_) => Err(err::INVALID_EXE_SIGNATURE),
+        // As IBM's _ldrOpenNewExe: a DOS (MZ only), LE or PE executable
+        // is not an OS/2 module, ERROR_INVALID_EXE_SIGNATURE ("SYS0191:
+        // ... cannot be run in an OS/2 session").
+        Ok(_) | Err(_) => Err(err::INVALID_EXE_SIGNATURE),
     }
 }
 
@@ -763,11 +765,6 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("TYPELIB", 7700),
     ("MMSYSTEM", 10000),
 ];
-
-/// KERNEL's selectors for real-mode memory (__0040H 193; __0000H 183,
-/// __A000H 174, __B000H 181, __B800H 182, __C000H 195, __D000H 179,
-/// __E000H 190, __F000H 194): rs2's BIOS data area page.
-pub const WIN16_BIOS_SELECTORS: &[u16] = &[193, 183, 174, 181, 182, 195, 179, 190, 194];
 
 /// WIN16's entry for imports it does not have (a call ends the program).
 pub const WIN16_UNDEFINED: u32 = 999;

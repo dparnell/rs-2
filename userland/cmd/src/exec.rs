@@ -254,7 +254,7 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
         DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, flags, block.as_ptr(), env.as_ptr(), &mut res, cpath.as_ptr())
     };
     if rc != 0 {
-        sys_error(rc);
+        sys_error_ins(rc, &[&path]);
         return Err(rc);
     }
     if async_ {

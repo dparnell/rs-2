@@ -295,6 +295,36 @@ in_pm:
     cmp al, 1
     RESULT
 
+    // A handler that chains to the default one (as DOS/4GW's IRQ 0
+    // handler does): the interrupted code gets its own flags back, not
+    // the ones the handler left.
+    PRINT s_chain
+    mov ax, 0x0204
+    mov bl, 0x61
+    int 0x31
+    mov [prev61], edx
+    mov [prev61 + 4], cx
+    mov ax, 0x0205
+    mov bl, 0x61
+    mov cx, cs
+    mov edx, offset int61
+    int 0x31
+    mov eax, 1
+    or eax, eax
+    stc
+    int 0x61
+    setnz bl
+    setc bh
+    push bx
+    mov ax, 0x0205
+    mov bl, 0x61
+    mov cx, [prev61 + 4]
+    mov edx, [prev61]
+    int 0x31
+    pop bx
+    cmp bx, 0x0101
+    RESULT
+
     PRINT s_done
     mov al, [failures]
     mov ah, 0x4c
@@ -349,6 +379,15 @@ irq0_handler:
     .byte 0x2e, 0x66, 0xff, 0x2e
     .word prev8
 
+// Leaves ZF set and CF clear, then chains to the previous handler.
+int61:
+    push eax
+    xor eax, eax
+    pop eax
+    // jmp fword cs:[prev61]
+    .byte 0x2e, 0x66, 0xff, 0x2e
+    .word prev61
+
 int60:
     push ds
     mov ds, cs:[cs_data_sel]
@@ -394,6 +433,7 @@ s_dosmem: .ascii "DOS memory block: $"
 s_ok: .ascii "ok\r\n$"
 s_failed: .ascii "FAILED\r\n$"
 s_irq: .ascii "IRQ 0 in real mode to the protected-mode handler: $"
+s_chain: .ascii "Handler chaining to the default keeps the caller's flags: $"
 s_done: .ascii "DPMI test done.\r\n$"
 .balign 4
 entry: .long 0
@@ -414,6 +454,8 @@ rmcb_seen: .byte 0
 int_count: .word 0
 tick_count: .word 0
 prev8: .long 0
+    .word 0
+prev61: .long 0
     .word 0
 rm_regs: .fill 50, 1, 0
 cb_regs: .fill 50, 1, 0

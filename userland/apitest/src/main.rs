@@ -75,6 +75,7 @@ fn main(s: &Startup) -> u32 {
     debugging();
     cmd_beginlibpath();
     libpath_errors();
+    exe_formats();
     messages();
     nls();
     console::run();
@@ -551,6 +552,44 @@ fn libpath_errors() {
         }
         begin(b"\0");
         DosError(1);
+    }
+}
+
+/// Executables OS/2 does not run itself, as IBM's loader judges them
+/// (_ldrOpenNewExe, LDRQAppType): a DOS extender's LE program (DOS/4GW's)
+/// fails with ERROR_INVALID_EXE_SIGNATURE in DosQueryAppType and
+/// DosExecPgm, a Win32 PE program is 0x5000, a plain MZ program a DOS one.
+fn exe_formats() {
+    unsafe {
+        let make = |name: &[u8], sig: &[u8]| {
+            let mut img = [0u8; 0x100];
+            img[0] = b'M';
+            img[1] = b'Z';
+            img[0x3c] = 0x80;
+            img[0x80..0x80 + sig.len()].copy_from_slice(sig);
+            let (mut hf, mut action, mut n) = (0, 0, 0);
+            DosOpen(name.as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL,
+                OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE, null_mut());
+            DosWrite(hf, img.as_ptr(), img.len() as u32, &mut n);
+            DosClose(hf);
+        };
+        make(b"C:\\APITLE.EXE\0", b"LE\0\0");
+        make(b"C:\\APITPE.EXE\0", b"PE\0\0");
+        make(b"C:\\APITMZ.EXE\0", b"");
+        let mut t = 0;
+        let rc = DosQueryAppType(b"C:\\APITLE.EXE\0".as_ptr(), &mut t);
+        check("DosQueryAppType of an LE (DOS extender) program fails with 191", rc == 191);
+        let rc = DosQueryAppType(b"C:\\APITPE.EXE\0".as_ptr(), &mut t);
+        check("DosQueryAppType of a PE program is 0x5000", rc == 0 && t == 0x5000);
+        let rc = DosQueryAppType(b"C:\\APITMZ.EXE\0".as_ptr(), &mut t);
+        check("DosQueryAppType of an MZ program is FAPPTYP_DOS", rc == 0 && t == 0x20);
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        let mut fail = [0u8; 64];
+        let rc = DosExecPgm(fail.as_mut_ptr(), 64, 0, b"APITLE\0\0".as_ptr(), null(), &mut res, b"C:\\APITLE.EXE\0".as_ptr());
+        check("DosExecPgm of an LE program fails with 191", rc == 191);
+        for n in [&b"C:\\APITLE.EXE\0"[..], b"C:\\APITPE.EXE\0", b"C:\\APITMZ.EXE\0"] {
+            DosDelete(n.as_ptr());
+        }
     }
 }
 
