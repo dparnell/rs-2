@@ -337,14 +337,14 @@ impl End {
                 // The reply that was there for this client's waiting read.
                 let mine = self.generation;
                 if let Some((_, rx)) = g.parting.as_mut().filter(|p| p.0 == mine && !p.1.data.is_empty()) {
-                    let m = if msg_mode { rx.msgs.front().copied().unwrap_or(rx.data.len()) } else { rx.data.len() };
+                    let m = rx.msgs.front().copied().unwrap_or(rx.data.len());
                     let k = n.min(m);
                     let v = rx.take(k);
                     let done = rx.data.is_empty();
                     if done {
                         g.parting = None;
                     }
-                    return Ok((v, if k < m { ERROR_MORE_DATA } else { 0 }));
+                    return Ok((v, if k < m && msg_mode { ERROR_MORE_DATA } else { 0 }));
                 }
                 return Err(ERROR_PIPE_NOT_CONNECTED);
             }
@@ -353,6 +353,7 @@ impl End {
                 !rx.data.is_empty() || !rx.msgs.is_empty()
             };
             if has {
+                let message = self.inst.is_message();
                 let rx = self.rx(&mut g);
                 let r = if msg_mode {
                     let m = rx.msgs.front().copied().unwrap_or(rx.data.len());
@@ -365,6 +366,21 @@ impl End {
                         }
                         (v, 0)
                     }
+                } else if message {
+                    // Byte read mode on a message pipe: the bytes of the
+                    // first message only (what is left of it), as IBM's
+                    // kernel copies one message per read whatever the read
+                    // mode; the rest stays for the next read. Open Watcom's
+                    // NMP link writes a 1-byte packet and then its length
+                    // as two messages, and a read that took both lost the
+                    // packet boundary (the remote debugger hung).
+                    let m = rx.msgs.front().copied().unwrap_or(rx.data.len());
+                    let k = n.min(m);
+                    let v = rx.take(k);
+                    if m == 0 {
+                        rx.msgs.pop_front();
+                    }
+                    (v, 0)
                 } else {
                     let k = n.min(rx.data.len());
                     (rx.take(k), 0)
@@ -460,7 +476,8 @@ impl End {
         let state = if self.stale(&g) { NP_STATE_DISCONNECTED } else { g.state };
         let rx = self.rx(&mut g);
         let first = rx.msgs.front().copied().unwrap_or(0);
-        let want = if self.inst.is_message() && self.mode.load(Ordering::Relaxed) & NP_READMODE_MESSAGE != 0 { n.min(first) } else { n };
+        // A message pipe gives the first message only, in either read mode.
+        let want = if self.inst.is_message() { n.min(first) } else { n };
         let v: Vec<u8> = rx.data.iter().take(want).copied().collect();
         (v, rx.data.len() as u32, first as u32, state)
     }
