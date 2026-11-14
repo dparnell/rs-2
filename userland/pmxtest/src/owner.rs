@@ -38,11 +38,14 @@ unsafe extern "C" {
     pub fn WinQueryWindow(h: u32, cmd: i32) -> u32;
     #[link_name = "PMWIN.775"]
     fn WinIsWindowVisible(h: u32) -> u32;
+    #[link_name = "PMWIN.879"]
+    fn WinSetWindowUShort(h: u32, i: i32, v: u32) -> u32;
 }
 
 const WM_CONTROL: u32 = 0x0030;
 const WM_DRAWITEM: u32 = 0x0036;
 const WM_MEASUREITEM: u32 = 0x0037;
+const WM_INITMENU: u32 = 0x0033;
 const CLR_RED: i32 = 2;
 const CLR_BLUE: i32 = 1;
 
@@ -58,9 +61,13 @@ struct Seen {
     measured: Vec<(u32, u32)>,
     drawn: Vec<(u32, OwnerItem)>,
     buttons: Vec<(u32, u32)>,
+    /// WM_INITMENU's menus.
+    inits: Vec<u32>,
+    /// WM_COMMANDs of the tool bar menu's items.
+    commands: Vec<u32>,
 }
 
-static mut SEEN: Seen = Seen { measured: Vec::new(), drawn: Vec::new(), buttons: Vec::new() };
+static mut SEEN: Seen = Seen { measured: Vec::new(), drawn: Vec::new(), buttons: Vec::new(), inits: Vec::new(), commands: Vec::new() };
 
 fn seen() -> &'static mut Seen {
     unsafe { &mut *core::ptr::addr_of_mut!(SEEN) }
@@ -95,6 +102,14 @@ pub fn client_msg(_h: u32, msg: u32, mp1: u32, mp2: u32) -> Option<u32> {
             oi.fs_attribute &= !0x8000;
             oi.fs_attribute_old &= !0x8000;
             Some(1)
+        }
+        WM_INITMENU => {
+            seen().inits.push(mp2);
+            None
+        }
+        0x0020 if (ID_ITEM + 10..ID_ITEM + 13).contains(&(mp1 & 0xffff)) => {
+            seen().commands.push(mp1 & 0xffff);
+            Some(0)
         }
         WM_CONTROL if mp1 & 0xffff == ID_BUTTON && mp1 >> 16 == 3 => {
             // BN_PAINT: USERBUTTON hwnd, hps, fsState, fsStateOld.
@@ -198,6 +213,7 @@ pub fn owner_checks(hab: u32, client: u32) {
     pump(hab);
     check("a submenu made as a child of its menu drops down on the desktop", sub != 0 && on_desktop);
     unsafe { WinDestroyWindow(m) };
+    tool_bar_menu(hab, client);
 
     // A user button.
     s.buttons.clear();
@@ -241,4 +257,81 @@ pub fn owner_checks(hab: u32, client: u32) {
     unsafe { WinUpdateWindow(nb) };
     check("a notebook tab without text is the owner's (BKA_TAB, the page ID)", page != 0 && drawn(ID_NOTEBOOK).iter().any(|o| o.id_item == 4 && o.h_item == page && o.fs_attribute & 0x40 != 0));
     unsafe { WinDestroyWindow(nb) };
+}
+
+/// A menu used as a tool bar, as EPM's (UCMenus in ETKUCMS.DLL): made by
+/// WinCreateMenu on the object window, which (as IBM's WIN32CREATEMENU)
+/// makes an action bar with the id FID_MENU; its owner-drawn items are
+/// measured when MM_QUERYITEMRECT asks for them before the menu is shown
+/// (IBM's MenuGetMenuItemRect formats the menu first), and UCMenus sizes
+/// the tool bar from those widths. A menu made the same way and given as
+/// an item's submenu turns vertical (IBM's MenuInsertMenuItem).
+fn tool_bar_menu(hab: u32, client: u32) {
+    const MM_INSERTITEM: u32 = 0x0180;
+    const MM_QUERYITEMRECT: u32 = 0x0194;
+    let s = seen();
+    let bar = unsafe { WinCreateMenu(2 /* HWND_OBJECT */, null()) };
+    let (style, id) = unsafe { (WinQueryWindowULong(bar, -2), WinQueryWindowUShort(bar, -1)) };
+    check("WinCreateMenu: an action bar (MS_ACTIONBAR), id FID_MENU, not shown", bar != 0 && style & 1 != 0 && style & 0x8000_0000 == 0 && id == 0x8005);
+    unsafe {
+        WinSetWindowUShort(bar, -1, ID_MENU);
+        crate::pm::WinSetOwner(bar, client);
+    }
+    let mut mi = [0u8; 16];
+    mi[0..2].copy_from_slice(&(-1i16).to_le_bytes());
+    mi[2..4].copy_from_slice(&8u16.to_le_bytes()); // MIS_OWNERDRAW
+    for n in 0..2u32 {
+        mi[6..8].copy_from_slice(&((ID_ITEM + 10 + n) as u16).to_le_bytes());
+        mi[12..16].copy_from_slice(&(0x7700 + n).to_le_bytes());
+        unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, 0) };
+    }
+    s.measured.clear();
+    let mut r = [RectL::default(); 2];
+    for n in 0..2u32 {
+        unsafe { WinSendMsg(bar, MM_QUERYITEMRECT, ID_ITEM + 10 + n, &mut r[n as usize] as *mut RectL as u32) };
+    }
+    let widths = r.iter().map(|r| r.right - r.left).sum::<i32>();
+    check(
+        "MM_QUERYITEMRECT of a menu not shown yet: owner-drawn items measured (WM_MEASUREITEM), side by side",
+        s.measured.contains(&(ID_MENU, 0x7700)) && s.measured.contains(&(ID_MENU, 0x7701)) && widths == 240 && r[1].left >= r[0].right,
+    );
+    let sub = unsafe { WinCreateMenu(2 /* HWND_OBJECT */, null()) };
+    mi[2..4].copy_from_slice(&(1u16 | 0x10).to_le_bytes()); // MIS_TEXT | MIS_SUBMENU
+    mi[6..8].copy_from_slice(&((ID_ITEM + 12) as u16).to_le_bytes());
+    mi[8..12].copy_from_slice(&sub.to_le_bytes());
+    mi[12..16].copy_from_slice(&0u32.to_le_bytes());
+    unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, b"~More\0".as_ptr() as u32) };
+    let sub_style = unsafe { WinQueryWindowULong(sub, -2) };
+    check("a WinCreateMenu menu given as a submenu is vertical (MS_ACTIONBAR off)", sub != 0 && sub_style & 1 == 0 && unsafe { WinQueryWindow(sub, 4 /* QW_OWNER */) } == bar);
+    // As IBM's MenuSummon: WM_INITMENU for a menu that is shown (the
+    // pull-down), none for the action bar entering menu mode (EPM took
+    // one for its tool bar for a pull-down of its own and ended).
+    s.inits.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0189 /* MM_SELECTITEM */, (ID_ITEM + 12) | 1 << 16, 0);
+        WinSendMsg(bar, 0x0186 /* MM_ENDMENUMODE */, 1, 0);
+    }
+    let menu_mode = s.inits.clone();
+    s.inits.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0185 /* MM_STARTMENUMODE */, 0, 0);
+        WinSendMsg(bar, 0x0186, 1, 0);
+    }
+    check("an action bar entering menu mode gets no WM_INITMENU for itself", !menu_mode.contains(&bar) && s.inits.is_empty());
+    // An item whose submenu has no items (UCMenus' buttons): the submenu
+    // gets WM_INITMENU but is not shown, and the item is chosen as one
+    // without a submenu (IBM's MenuSummon and MenuButtonUp).
+    s.inits.clear();
+    s.commands.clear();
+    unsafe {
+        WinSendMsg(bar, 0x0185 /* MM_STARTMENUMODE */, 0, 0);
+        WinSendMsg(bar, 0x0189 /* MM_SELECTITEM */, ID_ITEM + 12, 0);
+        // Enter: KC_VIRTUALKEY | KC_SCANCODE, VK_NEWLINE.
+        WinSendMsg(bar, 0x007a, 0x06 | 1 << 16 | 0x1c << 24, 0x08 << 16);
+    }
+    let shown = unsafe { WinIsWindowVisible(sub) } != 0;
+    pump(hab);
+    check("an empty submenu stays hidden (WM_INITMENU sent) and its item is chosen (WM_COMMAND)", s.inits.contains(&sub) && !shown && s.commands == [ID_ITEM + 12]);
+    unsafe { WinSendMsg(bar, 0x0186, 1, 0) };
+    unsafe { WinDestroyWindow(bar) };
 }

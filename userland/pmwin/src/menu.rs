@@ -229,9 +229,14 @@ pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
         let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
         res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default()
     };
+    // As IBM's WIN32CREATEMENU: always an action bar (style
+    // MS_ACTIONBAR), id FID_MENU, owned by the parent. One that becomes a
+    // submenu (MM_INSERTITEM) or pops up (WinPopupMenu) turns vertical
+    // then. EPM's tool bar (UCMenus, ETKUCMS.DLL) is such a menu inside a
+    // window of its own and sizes itself from MM_QUERYITEMRECT.
     let bar = frame::is_frame(parent);
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
-    create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 }, if bar { FID_MENU } else { 0 }, &items)
+    create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { MS_ACTIONBAR }, FID_MENU, &items)
 }
 
 /// WinPopupMenu(hwndParent, hwndOwner, hwndMenu, x, y, idItem, fs): show
@@ -665,12 +670,28 @@ fn insert(h: u32, p: *const MenuItem, text: *const u8) -> u32 {
     let at = if mi.pos == MIT_END || mi.pos < 0 { m.items.len() } else { (mi.pos as usize).min(m.items.len()) };
     m.items.insert(at, Item { style: mi.style, attr: mi.attr, id: mi.id, text: t, sub: mi.sub, handle: mi.handle, size: None });
     if mi.sub != 0 {
-        if let Some(w) = st().desk.get_mut(mi.sub) {
-            w.owner = h;
-        }
+        adopt_submenu(h, mi.sub);
     }
     ctl::invalidate(h);
     at as u32
+}
+
+/// A menu window given as an item's submenu (IBM's MenuInsertMenuItem):
+/// owned by the menu, vertical (MS_ACTIONBAR off: WinCreateMenu makes
+/// action bars), hidden, kept with the other hidden menus.
+fn adopt_submenu(h: u32, sub: u32) {
+    let bar = {
+        let Some(w) = st().desk.get_mut(sub) else { return };
+        w.owner = h;
+        let bar = w.style & MS_ACTIONBAR != 0;
+        if bar {
+            w.style &= !(MS_ACTIONBAR | ws::VISIBLE);
+        }
+        bar
+    };
+    if bar {
+        st().desk.set_parent(sub, HWND_DESKTOP);
+    }
 }
 
 // ---- Menu mode ----
@@ -706,7 +727,15 @@ fn start(h: u32, sel: Option<usize>, drop: bool) {
     s.capture = h;
     // As in PM, the focus window keeps the focus (it gets no
     // WM_SETFOCUS); the queue's keys go to the menu meanwhile.
-    send(notify_target(h), WM_INITMENU, ctl::id(h), h);
+    // WM_INITMENU comes as IBM's MenuSummon sends it: for a menu that is
+    // shown (a pop-up menu here, a pull-down in open_sub), never for an
+    // action bar or a title button entering menu mode. EPM takes a
+    // WM_INITMENU whose menu is not FID_MENU for one of its pull-downs
+    // and hangs its own data on it: a click on its tool bar (an action
+    // bar with an id of its own) ended EPM.
+    if !horizontal(h) {
+        send(notify_target(h), WM_INITMENU, ctl::id(h), h);
+    }
     if let Some(i) = sel {
         select(h, i);
         if drop {
@@ -792,18 +821,25 @@ fn step(h: u32, d: i32) {
     select(h, i as usize);
 }
 
-/// Show the submenu of item `i` of `h`.
-fn open_sub(h: u32, i: usize, first: bool) {
-    let Some(it) = data(h).and_then(|m| m.items.get(i)) else { return };
+/// Show the submenu of item `i` of `h`; false when it is not shown. As
+/// IBM's MenuSummon, WM_INITMENU goes out first and a submenu without
+/// items (also after that) stays hidden: the item then acts as one
+/// without a submenu (MenuButtonUp). EPM's tool bar (UCMenus) gives each
+/// button an empty submenu.
+fn open_sub(h: u32, i: usize, first: bool) -> bool {
+    let Some(it) = data(h).and_then(|m| m.items.get(i)) else { return false };
     let (sub, id) = (it.sub, it.id);
     if sub == 0 || it.attr & MIA_DISABLED != 0 {
-        return;
+        return false;
     }
     if data(h).is_some_and(|m| m.open == sub) {
-        return;
+        return true;
     }
     close_from(h);
     send(notify_target(root()), WM_INITMENU, id as u32, sub);
+    if item_count(sub) == 0 {
+        return false;
+    }
     // A submenu made by WinCreateMenu (an action bar there, and a child
     // of the window given: VisualAge Smalltalk makes its pull-downs with
     // the menu bar as parent) drops down as a vertical menu on the
@@ -836,6 +872,7 @@ fn open_sub(h: u32, i: usize, first: bool) {
     if first {
         select_first(sub);
     }
+    true
 }
 
 /// Hide the submenus open below `h`.
@@ -891,8 +928,7 @@ fn choose(h: u32, i: usize, pointer: bool) {
     if !selectable(it) || it.attr & MIA_DISABLED != 0 {
         return;
     }
-    if it.sub != 0 {
-        open_sub(h, i, !pointer);
+    if it.sub != 0 && open_sub(h, i, !pointer) {
         return;
     }
     end(Some((h, i)), pointer);
@@ -956,9 +992,12 @@ fn button_up(h: u32, mp1: u32) {
     }
     let p = screen_point(h, mp1);
     if let Some((m, Some(i))) = hit(p) {
-        let has_sub = item_ref(m, i).is_some_and(|it| it.sub != 0);
-        if !has_sub {
+        // An item whose submenu is not down (an empty one) is chosen.
+        let (sub, enabled) = item_ref(m, i).map_or((0, false), |it| (it.sub, it.attr & MIA_DISABLED == 0));
+        if sub == 0 {
             choose(m, i, true);
+        } else if enabled && data(m).is_some_and(|d| d.open != sub) && item_count(sub) == 0 {
+            end(Some((m, i)), true);
         }
     }
 }
@@ -1139,6 +1178,12 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 (it.style, it.attr, it.sub, it.handle) = (mi.style, mi.attr, mi.sub, mi.handle);
                 it.size = None;
             }
+            // As IBM's MenuSetItem: the submenu is owned by this menu.
+            if mi.sub != 0 {
+                if let Some(w) = st().desk.get_mut(mi.sub) {
+                    w.owner = m;
+                }
+            }
             ctl::invalidate(m);
             1
         }
@@ -1177,6 +1222,9 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         MM_QUERYITEMRECT => {
             let Some((m, i)) = find(h, lo(mp1) as u16, hi(mp1) != 0) else { return 0 };
+            // As IBM's MenuGetMenuItemRect: a menu not formatted yet is
+            // first (owner-drawn items measured with WM_MEASUREITEM).
+            measure(m);
             let r = rects(m).get(i).copied().unwrap_or_default();
             if mp2 != 0 {
                 unsafe { (mp2 as *mut crate::gpiapi::RectL).write_unaligned(crate::gpiapi::RectL::from(r)) };

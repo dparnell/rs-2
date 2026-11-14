@@ -261,6 +261,10 @@ unsafe fn gui_menu_keys(hab: u32) {
         // F10: KC_VIRTUALKEY | KC_SCANCODE, VK_F10.
         let q = key(0x06 | 1 << 16 | 0x44 << 24, 0x2b << 16);
         check("F10 refused by the frame's WM_TRANSLATEACCEL stays WM_CHAR", q.msg == WM_CHAR && q.hwnd == client);
+        // F1: KC_VIRTUALKEY | KC_SCANCODE, VK_F1. As IBM's TranslateAccel,
+        // WM_HELP (CMDSRC_ACCELERATOR) is for the focus window.
+        let q = key(0x06 | 1 << 16 | 0x3b << 24, 0x20 << 16);
+        check("F1 is WM_HELP for the focus window", q.msg == 0x0022 && q.hwnd == client && q.mp2 & 0xffff == 3);
         // Alt+F4: KC_ALT | KC_VIRTUALKEY | KC_SCANCODE, VK_F4.
         let q = key(0x26 | 1 << 16 | 0x3e << 24, 0x23 << 16);
         check("Alt+F4 is still WM_SYSCOMMAND SC_CLOSE for the frame", q.msg == WM_SYSCOMMAND && q.hwnd == frame && q.mp1 & 0xffff == 0x8004);

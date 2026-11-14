@@ -845,7 +845,9 @@ mouse and keyboard. What PMWIN has:
 - Menus (`WC_MENU`): menu bars, title-bar buttons and pull-down/pop-up
   menus (each submenu is a hidden menu window shown beside its item).
   Menu mode with the mouse (click or drag) and the keyboard (F10,
-  Alt+mnemonic, arrows, Enter, Esc, letters), `WM_INITMENU`,
+  Alt+mnemonic, arrows, Enter, Esc, letters), `WM_INITMENU` (as IBM's
+  MenuSummon: for each menu shown, none for a menu bar entering menu
+  mode; a submenu without items stays hidden and its item is chosen),
   `WM_MENUSELECT`, `WM_MENUEND`, `WM_COMMAND`/`WM_SYSCOMMAND`/`WM_HELP`
   from items, check marks, disabled items, separators, accelerator text
   after a tab; the MM_* messages (insert, delete, remove, query/set item,
