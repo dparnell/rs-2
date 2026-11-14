@@ -20,6 +20,18 @@ unsafe extern "C" {
     fn WinWaitMsg(hab: u32, first: u32, last: u32) -> u32;
     #[link_name = "PMWIN.907"]
     fn WinCreateMenu(parent: u32, t: *const u8) -> u32;
+    #[link_name = "PMWIN.865"]
+    fn WinSetParent(h: u32, parent: u32, redraw: u32) -> u32;
+    #[link_name = "PMWIN.878"]
+    fn WinSetWindowULong(h: u32, i: i32, v: u32) -> u32;
+    #[link_name = "PMWIN.879"]
+    fn WinSetWindowUShort(h: u32, i: i32, v: u16) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.840"]
+    fn WinQueryWindowRect(h: u32, r: *mut i32) -> u32;
+    #[link_name = "PMWIN.929"]
+    fn WinSubclassWindow(h: u32, p: WndProc) -> u32;
 }
 
 /// MENUITEM: iPosition, afStyle, afAttribute, id, hwndSubMenu, hItem.
@@ -51,6 +63,14 @@ extern "C" fn create_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
     }
     unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
+}
+
+static OLD_FRAME: AtomicU32 = AtomicU32::new(0);
+
+/// A frame subclass that passes everything on (the GUI library's).
+extern "C" fn frame_sub(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let old: WndProc = unsafe { core::mem::transmute(OLD_FRAME.load(Ordering::Relaxed) as usize) };
+    old(h, msg, mp1, mp2)
 }
 
 extern "C" fn dlg_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
@@ -122,6 +142,36 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         WinSendMsg(bar, MM_QUERYITEM, 2, &mut q as *mut MenuItem as u32);
         check("WinCreateMenu(NULL) and MM_INSERTITEM with style 0", bar != 0 && n == 5 && &buf[..5] == b"~File" && { q.style } == 0x11);
         WinDestroyWindow(bar);
+
+        // The GUI library's menu bar (wprof, wdw): made on the desktop,
+        // given the ID FID_MENU and a visible action bar's style, put in
+        // the frame, and WM_UPDATEFRAME(FCF_MENU): the frame formats it
+        // between its title bar and the client. As in wprof, the frame is
+        // hidden, subclassed and of size 0 then (formatting hid the menu,
+        // and rs2 left a hidden menu out of the frame for good).
+        WinRegisterClass(hab, b"OwMenuClient\0".as_ptr(), create_proc, 0, 4);
+        let mut fcf = 0x0000_0001 | 0x0000_0008 | 0x0000_0002 | 0x0000_0030; // FCF_TITLEBAR | FCF_SIZEBORDER | FCF_SYSMENU | FCF_MINMAX
+        let mut cl = 0;
+        let frame = WinCreateStdWindow(HWND_DESKTOP, 0x3000_0000, &mut fcf, b"OwMenuClient\0".as_ptr(), b"menu\0".as_ptr(), 0, 0, 1, &mut cl);
+        OLD_FRAME.store(WinSubclassWindow(frame, frame_sub), Ordering::Relaxed);
+        let bar = WinCreateMenu(HWND_DESKTOP, core::ptr::null());
+        let mi = MenuItem { pos: -1, id: 1, ..Default::default() };
+        WinSendMsg(bar, MM_INSERTITEM, &mi as *const MenuItem as u32, b"~File\0".as_ptr() as u32);
+        WinSetWindowUShort(bar, -1, 0x8005);
+        WinSetWindowULong(bar, -2, 0x8200_0009);
+        WinSetParent(bar, frame, 0);
+        WinSetOwner(bar, frame);
+        WinSendMsg(frame, 0x0042, 4, 0); // WM_UPDATEFRAME, FCF_MENU
+        WinSetWindowPos(frame, 3, 20, 20, 300, 200, 0x0003);
+        WinShowWindow(frame, 1);
+        let mut mr = [0i32; 4];
+        let mut mp = [0i32; 9];
+        WinQueryWindowPos(bar, mp.as_mut_ptr());
+        WinQueryWindowRect(bar, mr.as_mut_ptr());
+        let mut cp = [0i32; 9];
+        WinQueryWindowPos(cl, cp.as_mut_ptr());
+        check("a menu put in a frame as FID_MENU: WM_UPDATEFRAME formats it above the client", WinWindowFromID(frame, 0x8005) == bar && WinIsWindowShowing(bar) != 0 && mr[3] > 0 && mp[3] >= cp[3] + cp[1] /* SWP: fl, cy, cx, y, x: the menu's y at the client's top or above */);
+        WinDestroyWindow(frame);
 
         // WinWaitMsg: returns once a message in the range is queued and
         // leaves it there.
