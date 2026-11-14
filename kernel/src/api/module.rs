@@ -448,12 +448,19 @@ pub fn dos_free_module(c: &mut Ctx) -> u32 {
     };
     // The last reference in this process: run its termination routine,
     // unless the module is still in use through the program's imports.
-    let still_used = term_order(&c.process).iter().any(|x| Arc::ptr_eq(&x.module, &freed));
-    if still_used || !needs_term(&freed, &c.process) {
+    let still_used = in_use(&c.process).iter().any(|m| Arc::ptr_eq(m, &freed));
+    if still_used {
         return 0;
     }
+    let term = needs_term(&freed, &c.process);
+    // Loaded again, it initialises again in this process, whether or not
+    // it has a termination routine (a Windows DLL's LibMain: W16TEST
+    // loads W16DLL, frees it, and loads it again).
     if freed.per_process_init {
         c.process.inited.lock().retain(|&x| x != freed.hmte);
+    }
+    if !term {
+        return 0;
     }
     c.complete_return(0);
     let (p, t) = (c.process.clone(), c.thread.clone());
