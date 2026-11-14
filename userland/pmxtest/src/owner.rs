@@ -289,6 +289,6 @@ fn tool_bar_menu(client: u32) {
     mi[12..16].copy_from_slice(&0u32.to_le_bytes());
     unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, b"~More\0".as_ptr() as u32) };
     let sub_style = unsafe { WinQueryWindowULong(sub, -2) };
-    check("a WinCreateMenu menu given as a submenu is vertical (MS_ACTIONBAR off)", sub != 0 && sub_style & 1 == 0 && unsafe { WinQueryWindow(sub, 7) } == bar);
+    check("a WinCreateMenu menu given as a submenu is vertical (MS_ACTIONBAR off)", sub != 0 && sub_style & 1 == 0 && unsafe { WinQueryWindow(sub, 4 /* QW_OWNER */) } == bar);
     unsafe { WinDestroyWindow(bar) };
 }

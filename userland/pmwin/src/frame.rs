@@ -355,7 +355,7 @@ pub fn layout(frame: u32) {
     };
     for (h, r, fl) in placed {
         if st().desk.get(h).is_some_and(|w| w.parent == frame) {
-            place(h, r);
+            place(h, r, fl);
             // SWP_SHOW, SWP_HIDE.
             if fl & 0x0018 != 0 {
                 win::show(h, fl & 0x0008 != 0);
@@ -412,8 +412,27 @@ pub extern "C" fn WinCalcFrameRect(h: u32, prcl: *mut crate::gpiapi::RectL, clie
     send(h, WM_CALCFRAMERECT, prcl as u32, client)
 }
 
-/// Move/size a frame control (WM_SIZE when the size changes).
-fn place(h: u32, r: Rect) {
+/// Move/size a frame control (WM_SIZE when the size changes). As IBM's
+/// WinSetMultWindowPos (FrameSizeChanged places the controls so), a
+/// control whose SWP lacks SWP_NOADJUST is asked first
+/// (WM_ADJUSTWINDOWPOS) and may change it. The standard controls' SWPs
+/// have it (Win32FormatFrame: 0x4b); a program's own WM_FORMATFRAME may
+/// leave it out: EPM's tool bar (UCMenus) posts itself WM_SIZE with the
+/// size it is given there, and kept an old, smaller one otherwise.
+fn place(h: u32, r: Rect, fl: u32) {
+    const SWP_NOADJUST: u32 = 0x0040;
+    let Some(w) = st().desk.get(h) else { return };
+    if (w.x, w.y, w.cx, w.cy) == (r.left, r.bottom, r.width(), r.height()) {
+        return;
+    }
+    let r = if fl & SWP_NOADJUST == 0 {
+        let mut swp: [u32; 9] = [fl, r.height() as u32, r.width() as u32, r.bottom as u32, r.left as u32, 0, h, 0, 0];
+        send(h, win::WM_ADJUSTWINDOWPOS, swp.as_mut_ptr() as u32, 0);
+        let (cy, cx, y, x) = (swp[1] as i32, swp[2] as i32, swp[3] as i32, swp[4] as i32);
+        Rect::new(x, y, x + cx.max(0), y + cy.max(0))
+    } else {
+        r
+    };
     let Some(w) = st().desk.get(h) else { return };
     if (w.x, w.y, w.cx, w.cy) == (r.left, r.bottom, r.width(), r.height()) {
         return;

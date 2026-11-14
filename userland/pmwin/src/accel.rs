@@ -97,6 +97,15 @@ fn apply(t: &[Accel], target: u32, m: &mut QMsg) -> bool {
         return false;
     }
     m.hwnd = target;
+    // As IBM's TranslateAccel: WM_HELP goes to the focus window (and up
+    // through WinDefWindowProc to the frame), so a control on the way (a
+    // notebook: BKN_HELP) or the program's own window sees it first.
+    if a.fs & AF_HELP != 0 {
+        let f = st().focus;
+        if f != 0 && st().desk.exists(f) {
+            m.hwnd = f;
+        }
+    }
     m.msg = if a.fs & AF_SYSCOMMAND != 0 {
         WM_SYSCOMMAND
     } else if a.fs & AF_HELP != 0 {
