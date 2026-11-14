@@ -28,6 +28,36 @@ unsafe extern "C" {
     fn WinSetWindowULong(h: u32, i: i32, v: u32) -> u32;
     #[link_name = "PMWIN.879"]
     fn WinSetWindowUShort(h: u32, i: i32, v: u32) -> u32;
+    #[link_name = "PMWIN.892"]
+    fn WinUpdateWindow(h: u32) -> u32;
+    #[link_name = "PMGPI.476"]
+    fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
+}
+
+fn pel(h: u32, x: i32, y: i32) -> i32 {
+    let hps = unsafe { WinGetPS(h) };
+    let p = [x, y];
+    let v = unsafe { GpiQueryPel(hps, p.as_ptr()) };
+    unsafe { WinReleasePS(hps) };
+    v
+}
+
+/// The IDE's New Target dialog makes its radio buttons, then the group
+/// box around them: a group box draws only its outline and title (IBM's
+/// StaticPaintGroupbox), so a window below it inside still shows.
+unsafe fn group_box_over_sibling(client: u32) {
+    unsafe {
+        // WC_STATIC: SS_FGNDRECT, then SS_GROUPBOX over it (WS_VISIBLE).
+        let rect = WinCreateWindow(client, 0xffff_0005 as *const u8, b"\0".as_ptr(), 0x8000_0000 | 0x05, 20, 20, 40, 30, client, 3, 901, core::ptr::null(), core::ptr::null());
+        WinUpdateWindow(client);
+        let (inside, outside) = (pel(client, 40, 30), pel(client, 100, 30));
+        let gb = WinCreateWindow(client, 0xffff_0005 as *const u8, b"Group\0".as_ptr(), 0x8000_0000 | 0x02, 10, 10, 80, 60, client, 3, 902, core::ptr::null(), core::ptr::null());
+        WinUpdateWindow(client);
+        let after = pel(client, 40, 30);
+        check("a group box made over a sibling shows it inside (only its outline is drawn)", rect != 0 && gb != 0 && inside != outside && after == inside);
+        WinDestroyWindow(gb);
+        WinDestroyWindow(rect);
+    }
 }
 
 /// MENUITEM: iPosition, afStyle, afAttribute, id, hwndSubMenu, hItem.
@@ -224,5 +254,6 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         let left = WinPeekMsg(hab, &mut q, 0, WM_USER + 5, WM_USER + 5, 1);
         check("WinWaitMsg", w != 0 && left != 0 && q.mp1 == 1);
         gui_menu_keys(hab);
+        group_box_over_sibling(client);
     }
 }
