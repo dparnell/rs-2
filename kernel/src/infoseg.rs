@@ -11,12 +11,26 @@ use crate::sync::{Once, SpinLock};
 use crate::vm::{self, AddressSpace, PageState, SegKind, SharedMem, PAGE};
 
 static OBJ: Once<Arc<SharedMem>> = Once::new();
-/// The BIOS data area of Windows programs (KERNEL's __0040H selector,
-/// docs/WIN16.md): a page with the fields programs read, the timer tick
-/// count at 6Ch kept current. Programs may write it, as on Windows (setup
-/// programs keep the floppy motor on through 40:40); it is one page for
-/// all of them, like the real BIOS data area.
+/// The first megabyte as Windows programs see it through KERNEL's
+/// __0000H, __0040H ... __F000H selectors (docs/WIN16.md): the BIOS data
+/// area at 400h with the fields programs read, the timer tick count at
+/// 46Ch kept current, and the top of the ROM BIOS (its date at
+/// F000:FFF5, the machine model at F000:FFFE: Open Watcom's 16-bit
+/// Windows runtime reads them). Programs may write it, as on Windows
+/// (setup programs keep the floppy motor on through 40:40); it is one
+/// object for all of them, like the real memory, its pages zero until
+/// touched.
 static BIOS: Once<Arc<SharedMem>> = Once::new();
+/// The size of that image.
+const LOW_MEM: u32 = 0x10_0000;
+/// Where the BIOS data area is in it.
+const BDA: usize = 0x400;
+/// KERNEL's real-mode segments and the WIN16 ordinals of their selectors
+/// (__0000H 183, __0040H 193, __A000H 174, __B000H 181, __B800H 182,
+/// __C000H 195, __D000H 179, __E000H 190, __F000H 194): GDT entries from
+/// FIRST_DYNAMIC + 1 on, in this order.
+const REAL_SEGMENTS: [(u16, u16); 9] =
+    [(183, 0x0000), (193, 0x0040), (174, 0xa000), (181, 0xb000), (182, 0xb800), (195, 0xc000), (179, 0xd000), (190, 0xe000), (194, 0xf000)];
 /// Milliseconds of the day at uptime 0 (from the RTC).
 static DAY_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 static SELECTOR: AtomicU16 = AtomicU16::new(0);
@@ -68,12 +82,12 @@ pub fn init() {
         *p.add(70) = 16; // csgWindowableVioMax
         *p.add(71) = 16; // csgPMMax
     }
-    let base = vm::reserve_shared(PAGE, None).expect("BIOS data address");
-    let bios = SharedMem::new(base, PAGE, vm::pag::READ | vm::pag::WRITE, None);
-    let f = bios.frame(0).expect("BIOS data memory");
-    bios.pages.lock()[0] = PageState::Committed;
-    let b = crate::mm::phys::phys_to_virt(f);
+    let base = vm::reserve_shared(LOW_MEM, None).expect("BIOS data address");
+    let bios = SharedMem::new(base, LOW_MEM, vm::pag::READ | vm::pag::WRITE, None);
+    bios.pages.lock().fill(PageState::Committed);
+    let b = crate::mm::phys::phys_to_virt(bios.frame(0).expect("BIOS data memory"));
     unsafe {
+        let b = b.add(BDA);
         let w16 = |o: usize, v: u16| (b.add(o) as *mut u16).write_unaligned(v);
         w16(0x10, 0x0026); // equipment: FPU, mouse, 80x25 colour
         w16(0x13, 640); // conventional memory (KB)
@@ -84,17 +98,33 @@ pub fn init() {
         *b.add(0x84) = 24; // rows - 1
         w16(0x85, 16); // character height
     }
+    let rom = crate::mm::phys::phys_to_virt(bios.frame(0xff).expect("BIOS ROM memory"));
+    unsafe {
+        // F000:FFF0: a far jump to the reset code, the BIOS date, the
+        // model byte (FCh: an AT).
+        let top = rom.add(0xff0);
+        core::ptr::copy_nonoverlapping([0xea, 0x5b, 0xe0, 0x00, 0xf0].as_ptr(), top, 5);
+        core::ptr::copy_nonoverlapping(b"01/01/26".as_ptr(), top.add(5), 8);
+        *top.add(0xe) = 0xfc;
+    }
+    let data = access::PRESENT | access::DPL3 | access::CODE_DATA | access::WRITABLE | access::ACCESSED;
+    for (i, &(_, seg)) in REAL_SEGMENTS.iter().enumerate() {
+        gdt::set_entry(gdt::FIRST_DYNAMIC + 1 + i, descriptor(base + seg as u32 * 16, 0xffff, data, 0));
+    }
     BIOS.set(bios);
     // Selector 40h: Windows' DPMI host gives programs a GDT selector for
     // real-mode segment 40h (the Delphi compiler reads the tick count
     // through it); it is mapped in Windows programs only.
-    gdt::set_entry(8, descriptor(base, 0xfff, access::PRESENT | access::DPL3 | access::CODE_DATA | access::WRITABLE | access::ACCESSED, 0));
+    gdt::set_entry(8, descriptor(base + BDA as u32, 0xffff, data, 0));
     update();
 }
 
-/// The BIOS data area's selector (0: none).
-pub fn bios_selector() -> u16 {
-    BIOS.get().map_or(0, |b| vm::tile_selector(b.base))
+/// The selector of KERNEL's real-mode segment export with WIN16 ordinal
+/// `ordinal` (__0040H ... __F000H), if it is one.
+pub fn real_mode_selector(ordinal: u16) -> Option<u16> {
+    BIOS.get()?;
+    let i = REAL_SEGMENTS.iter().position(|&(o, _)| o == ordinal)?;
+    Some(((gdt::FIRST_DYNAMIC + 1 + i) * 8 | 3) as u16)
 }
 
 /// Map the BIOS data area into a Windows program's address space.
@@ -112,7 +142,7 @@ pub fn bios_tick() {
     let ms = (crate::irq::uptime_ms() + DAY_OFFSET.load(Ordering::Relaxed)) % 86_400_000;
     let ticks = (ms * 1_193_180 / 65_536_000) as u32;
     let p = crate::mm::phys::phys_to_virt(b.frames.lock()[0]);
-    unsafe { (p.add(0x6c) as *mut u32).write_unaligned(ticks) };
+    unsafe { (p.add(BDA + 0x6c) as *mut u32).write_unaligned(ticks) };
 }
 
 /// The foreground session changed (sgCurrent, pidForeground).

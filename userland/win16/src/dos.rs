@@ -9,6 +9,10 @@ use crate::kernel;
 use crate::pm::trace;
 use thunk16::flat;
 
+/// The real-mode segments KERNEL exports selectors for, in the order
+/// of the kernel's GDT entries for them.
+const REAL_SEGMENTS: [u16; 9] = [0x0000, 0x0040, 0xa000, 0xb000, 0xb800, 0xc000, 0xd000, 0xe000, 0xf000];
+
 /// INTREGS indexes (kernel api/win16.rs).
 #[allow(dead_code)]
 pub mod reg {
@@ -124,8 +128,14 @@ fn dpmi(r: &mut Regs) {
                 bad(r);
             }
         }
-        // A selector for real-mode segment BX: the BIOS data area's.
+        // A selector for real-mode segment BX: 40h's, or the kernel's GDT
+        // selectors of KERNEL's __0000H ... __F000H (infoseg.rs
+        // REAL_SEGMENTS: GDT entries 2C1h on).
         0x0002 if r[BX] == 0x40 => r[AX] = 0x40,
+        0x0002 if REAL_SEGMENTS.contains(&r[BX]) => {
+            let i = REAL_SEGMENTS.iter().position(|&s| s == r[BX]).unwrap_or(0);
+            r[AX] = ((0x2c1 + i) * 8 | 3) as u16;
+        }
         // The selector increment.
         0x0003 => r[AX] = 8,
         // The page size: BX:CX.

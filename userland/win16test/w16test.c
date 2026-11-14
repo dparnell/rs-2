@@ -20,6 +20,7 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <string.h>
 #include <stdio.h>
 #include <io.h>
+#include <dos.h>
 #include <fcntl.h>
 #include <lzexpand.h>
 #include <ver.h>
@@ -82,6 +83,27 @@ LONG FAR PASCAL _export TestWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProc(hwnd, msg, wp, lp);
 }
 
+/* KERNEL's real-mode segments (absolute entries: an import's offset is
+   the selector, as Open Watcom's runtime takes __F000H): the ROM BIOS
+   through __F000H, the BIOS data area through __0040H and __0000H. */
+extern char __far _F000H;
+extern char __far _0040H;
+extern char __far _0000H;
+#pragma aux _F000H "__F000H"
+#pragma aux _0040H "__0040H"
+#pragma aux _0000H "__0000H"
+
+static void real_mode_segments(void)
+{
+    unsigned char __far *rom = MK_FP((unsigned)&_F000H, 0);
+    unsigned short __far *eq0 = MK_FP((unsigned)&_0000H, 0x410);
+    unsigned short __far *eq40 = MK_FP((unsigned)&_0040H, 0x10);
+
+    check(rom[0xfffe] == 0xfc && rom[0xfff7] == '/' && rom[0xfffa] == '/',
+        "__F000H: the ROM BIOS date and model byte");
+    check(*eq0 == *eq40 && *eq40 != 0, "__0000H:0410h is __0040H:0010h");
+}
+
 static void kernel_tests(void)
 {
     DWORD v = GetVersion();
@@ -93,6 +115,7 @@ static void kernel_tests(void)
     char buf[32];
 
     check(LOBYTE(LOWORD(v)) == 3 && HIBYTE(LOWORD(v)) == 10, "GetVersion is Windows 3.10");
+    real_mode_segments();
     check((GetWinFlags() & WF_PMODE) != 0, "GetWinFlags: protected mode");
 
     hl = LocalAlloc(LMEM_MOVEABLE | LMEM_ZEROINIT, 100);

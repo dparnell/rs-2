@@ -200,13 +200,13 @@ pub fn load(
                         .flatten();
                     if let Some(&(_, v)) = constant {
                         Target::constant(v)
-                    } else if base == 1000 && super::WIN16_BIOS_SELECTORS.contains(&ordinal) {
+                    } else if let Some(sel) = (base == 1000).then(|| crate::infoseg::real_mode_selector(ordinal)).flatten() {
                         // __0040H and the other real-mode segments: the
-                        // BIOS data area (infoseg.rs).
+                        // first megabyte's image (infoseg.rs).
                         if let Some(sp) = space.as_deref_mut() {
                             crate::infoseg::attach_bios(sp);
                         }
-                        Target::constant(crate::infoseg::bios_selector())
+                        Target::constant(sel)
                     } else {
                         let found = imports.target(module, ImportBy::Ordinal(base + ordinal as u32));
                         let mname = import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?");
