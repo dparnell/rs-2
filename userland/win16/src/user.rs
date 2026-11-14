@@ -485,6 +485,9 @@ pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
 /// see it first (CWPSTRUCT: lParam, wParam, message, hwnd), and may
 /// change the window's procedure (subclassing a window being created).
 pub fn send(hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
+    if (0x03e0..=0x03e8).contains(&msg) {
+        crate::ddeml::monitor_msg(false, hwnd, msg, wp, lp);
+    }
     if wnd(hwnd).is_none() {
         // Another task's window, or all top-level windows (dde.rs).
         if hwnd == 0xffff {
@@ -2537,6 +2540,9 @@ fn set_timer(h: u16, id: u16, ms: u16, proc_: u32) -> u16 {
 }
 
 pub fn post(h: u16, m: u16, wp: u16, lp: u32) -> bool {
+    if (0x03e0..=0x03e8).contains(&m) {
+        crate::ddeml::monitor_msg(true, h, m, wp, lp);
+    }
     let pm = match wnd(h) {
         Some(w) => w.client,
         None if h == 0 || h == 0xffff => {

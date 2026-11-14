@@ -109,7 +109,7 @@ static PM_PENDING: Global<Vec<(u16, u16, u16)>> = Global::new(Vec::new());
 /// The proxies: (HWND, the other process's PM window).
 static PROXIES: Global<Vec<(u16, u32)>> = Global::new(Vec::new());
 
-fn pid() -> u32 {
+pub fn pid() -> u32 {
     let mut tib = core::ptr::null_mut();
     let mut pib: *mut os2::Pib = core::ptr::null_mut();
     unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
@@ -117,7 +117,7 @@ fn pid() -> u32 {
 }
 
 /// The process of a PM window.
-fn window_pid(pm: u32) -> u32 {
+pub fn window_pid(pm: u32) -> u32 {
     let (mut p, mut t) = (0u32, 0u32);
     unsafe { WinQueryWindowProcess(pm, &mut p, &mut t) };
     p

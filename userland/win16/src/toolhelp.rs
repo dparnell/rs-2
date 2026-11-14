@@ -1075,6 +1075,15 @@ pub fn is_task(h: u16) -> bool {
     h != 0 && (h | 7 == own_tdb() | 7 || view_of(h).is_some_and(|v| slot(v.pid).is_some()))
 }
 
+/// The task handle of a process's task (its view's), 0 if none.
+pub fn task_of_pid(p: u32) -> u16 {
+    if p == pid() {
+        own_tdb()
+    } else {
+        view(p).map_or(0, |v| v.tdb)
+    }
+}
+
 /// The process of a task handle.
 pub fn task_pid(h: u16) -> Option<u32> {
     if h | 7 == own_tdb() | 7 {

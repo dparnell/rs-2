@@ -30,6 +30,13 @@ HINSTANCE FAR PASCAL __export W16DllInstance(void)
     return instance;
 }
 
+/* Call a procedure of the program (Open Watcom's FMEDIT calls the
+ * Dialog Editor's object routines so): it must get the program's DS. */
+int FAR PASCAL __export W16DllCall(int (FAR PASCAL *f)(void))
+{
+    return f();
+}
+
 /* Windows calls WEP (WEP_FREE_DLL) when the last FreeLibrary unloads
  * the DLL: W16TEST finds its mark in W16DLL.INI. */
 int FAR PASCAL __export WEP(int code)

@@ -1064,8 +1064,89 @@ HDDEDATA CALLBACK _export SrvCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, H
     return 0;
 }
 
+/* A monitor (APPCLASS_MONITOR, as DDE Spy is): what it saw. */
+static DWORD mon;
+static int mon_hsz, mon_init, mon_req, mon_connect, mon_reg, mon_conv_up, mon_conv_down, mon_link_up, mon_link_down, mon_err;
+static HCONV mon_client;
+static int cli_regs, cli_rs2_regs, mon_rs2_reg, mon_foreign_cb, mon_rs2_unreg;
+static HSZ hszRs2;
+
+HDDEDATA CALLBACK _export MonCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, HSZ h2, HDDEDATA data, DWORD d1, DWORD d2)
+{
+    LPBYTE p;
+
+    if (type != XTYP_MONITOR)
+        return 0;
+    p = DdeAccessData(data, NULL);
+    if (p == NULL)
+        return 0;
+    switch (d2) {
+    case MF_HSZ_INFO:
+        if (((MONHSZSTRUCT FAR *)p)->fsAction == MH_CREATE && lstrcmp(((MONHSZSTRUCT FAR *)p)->str, "W16TestSvc") == 0)
+            mon_hsz++;
+        break;
+    case MF_SENDMSGS:
+        if (((MONMSGSTRUCT FAR *)p)->wMsg == WM_DDE_INITIATE)
+            mon_init++;
+        break;
+    case MF_POSTMSGS:
+        if (((MONMSGSTRUCT FAR *)p)->wMsg == WM_DDE_REQUEST)
+            mon_req++;
+        break;
+    case MF_CALLBACKS:
+        if (((MONCBSTRUCT FAR *)p)->wType == XTYP_CONNECT && ((MONCBSTRUCT FAR *)p)->dwRet == 1)
+            mon_connect++;
+        if (((MONCBSTRUCT FAR *)p)->wType == XTYP_REGISTER && ((MONCBSTRUCT FAR *)p)->hsz1 == hszSvc)
+            mon_reg++;
+        if (((MONCBSTRUCT FAR *)p)->wType == XTYP_REGISTER && DdeCmpStringHandles(((MONCBSTRUCT FAR *)p)->hsz1, hszRs2) == 0)
+            mon_rs2_reg++;
+        if (((MONCBSTRUCT FAR *)p)->wType == XTYP_UNREGISTER && DdeCmpStringHandles(((MONCBSTRUCT FAR *)p)->hsz1, hszRs2) == 0)
+            mon_rs2_unreg++;
+        if (((MONCBSTRUCT FAR *)p)->hTask != GetCurrentTask() && ((MONCBSTRUCT FAR *)p)->wType == XTYP_CONNECT)
+            mon_foreign_cb++;
+        break;
+    case MF_CONV:
+        if (((MONCONVSTRUCT FAR *)p)->hConvClient == mon_client && ((MONCONVSTRUCT FAR *)p)->hConvServer != 0
+            && ((MONCONVSTRUCT FAR *)p)->hszSvc == hszSvc) {
+            if (((MONCONVSTRUCT FAR *)p)->fConnect)
+                mon_conv_up++;
+            else
+                mon_conv_down++;
+        }
+        break;
+    case MF_LINKS:
+        if (((MONLINKSTRUCT FAR *)p)->hszItem == hszItem && ((MONLINKSTRUCT FAR *)p)->wFmt == CF_TEXT) {
+            if (((MONLINKSTRUCT FAR *)p)->fEstablished)
+                mon_link_up++;
+            else
+                mon_link_down++;
+        }
+        break;
+    case MF_ERRORS:
+        if (((MONERRSTRUCT FAR *)p)->wLastError == DMLERR_NO_CONV_ESTABLISHED)
+            mon_err++;
+        break;
+    }
+    DdeUnaccessData(data);
+    return 0;
+}
+
+/* Take the posted messages for a while (a monitor's events are posted). */
+static void pump_ms(DWORD ms)
+{
+    MSG msg;
+    DWORD start = GetTickCount();
+    while (GetTickCount() - start < ms)
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+}
+
 HDDEDATA CALLBACK _export CliCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, HSZ h2, HDDEDATA data, DWORD d1, DWORD d2)
 {
+    if (type == XTYP_REGISTER && h1 == hszSvc)
+        cli_regs++;
+    if (type == XTYP_REGISTER && hszRs2 && DdeCmpStringHandles(h1, hszRs2) == 0)
+        cli_rs2_regs++;
     if (type == XTYP_ADVDATA) {
         advdata++;
         DdeGetData(data, adv_seen, sizeof adv_seen, 0);
@@ -1082,6 +1163,9 @@ static void ddeml_tests(void)
     char t[40];
     LPBYTE p;
 
+    check(DdeInitialize(&mon, (PFNCALLBACK)MakeProcInstance((FARPROC)MonCallback, hInstance),
+                        APPCLASS_MONITOR | MF_CALLBACKS | MF_CONV | MF_ERRORS | MF_HSZ_INFO | MF_LINKS | MF_POSTMSGS | MF_SENDMSGS, 0) == DMLERR_NO_ERROR,
+          "DdeInitialize (monitor)");
     check(DdeInitialize(&srv, (PFNCALLBACK)MakeProcInstance((FARPROC)SrvCallback, hInstance), APPCLASS_STANDARD, 0) == DMLERR_NO_ERROR,
           "DdeInitialize (server)");
     check(DdeInitialize(&cli, (PFNCALLBACK)MakeProcInstance((FARPROC)CliCallback, hInstance), APPCMD_CLIENTONLY, 0) == DMLERR_NO_ERROR &&
@@ -1104,6 +1188,7 @@ static void ddeml_tests(void)
     check(conv != 0 && srv_connects >= 1, "DdeConnect: XTYP_CONNECT, a conversation");
     if (!conv)
         return;
+    mon_client = conv;
     d = DdeClientTransaction(NULL, 0, conv, hszItem, CF_TEXT, XTYP_REQUEST, 5000, &res);
     check(d && DdeGetData(d, t, sizeof t, 0) == 8 && lstrcmp(t, "initial") == 0, "XTYP_REQUEST");
     DdeFreeDataHandle(d);
@@ -1129,7 +1214,39 @@ static void ddeml_tests(void)
               "DdeQueryConvInfo");
     }
     check(DdeDisconnect(conv), "DdeDisconnect");
-    check(DdeUninitialize(cli) && DdeUninitialize(srv), "DdeUninitialize");
+    pump_ms(1500);
+    check(cli_regs == 1, "DdeNameService: XTYP_REGISTER to the other instances");
+    check(mon_hsz >= 1, "monitor: MF_HSZ_INFO (MH_CREATE of a string handle)");
+    check(mon_init >= 1 && mon_req >= 1, "monitor: MF_SENDMSGS (WM_DDE_INITIATE), MF_POSTMSGS (WM_DDE_REQUEST)");
+    check(mon_connect >= 1 && mon_reg == 1, "monitor: MF_CALLBACKS (XTYP_CONNECT, XTYP_REGISTER)");
+    check(mon_conv_up == 1 && mon_conv_down == 1, "monitor: MF_CONV (made, ended: both handles)");
+    check(mon_link_up == 1 && mon_link_down == 1, "monitor: MF_LINKS (XTYP_ADVSTART, XTYP_ADVSTOP)");
+    check(mon_err >= 1, "monitor: MF_ERRORS (DMLERR_NO_CONV_ESTABLISHED)");
+    /* Another task's DDEML (DDESRV16): its XTYP_REGISTER reaches this
+     * task's instances, its callbacks this task's monitor. */
+    hszRs2 = DdeCreateStringHandle(cli, "RS2DDE", CP_WINANSI);
+    if (WinExec("C:\\RS2\\DDESRV16.EXE", SW_SHOWMINNOACTIVE) > 32) {
+        HSZ clock = DdeCreateStringHandle(cli, "Clock", CP_WINANSI);
+        DWORD start = GetTickCount();
+        HCONV c2 = 0;
+        while (!cli_rs2_regs && GetTickCount() - start < 10000)
+            pump_ms(100);
+        check(cli_rs2_regs == 1 && mon_rs2_reg == 1, "another task's DdeNameService: XTYP_REGISTER here, and to the monitor");
+        c2 = DdeConnect(cli, hszRs2, clock, NULL);
+        pump_ms(1000);
+        check(c2 != 0 && mon_foreign_cb >= 1, "monitor: another task's callback (its XTYP_CONNECT, with that task's handle)");
+        if (c2) {
+            DdeClientTransaction("[quit]", 7, c2, 0, 0, XTYP_EXECUTE, 5000, &res);
+            start = GetTickCount();
+            while (!mon_rs2_unreg && GetTickCount() - start < 5000)
+                pump_ms(100);
+            check(mon_rs2_unreg == 1, "monitor: XTYP_UNREGISTER when the other task ends");
+            DdeDisconnect(c2);
+        }
+    } else {
+        check(0, "WinExec DDESRV16");
+    }
+    check(DdeUninitialize(cli) && DdeUninitialize(srv) && DdeUninitialize(mon), "DdeUninitialize");
 }
 
 /* A PM program's DDE server (PMXTEST DDESERVER): what came back. */
@@ -2268,6 +2385,14 @@ static BOOL task_running(const char *module)
     return FALSE;
 }
 
+/* Called from W16DLL (W16DllCall): reads this program's data. */
+static int ds_mark = 4321;
+
+int FAR PASCAL _export DsMark(void)
+{
+    return ds_mark;
+}
+
 static void dll_tests(void)
 {
     char buf[8];
@@ -2299,6 +2424,12 @@ static void dll_tests(void)
     f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
     check(f && f() == 42, "LoadLibrary of it again: its LibMain runs here");
     check(GetModuleHandle("W16DLL") == d, "GetModuleHandle finds it now");
+    {
+        int (FAR PASCAL *call)(int (FAR PASCAL *)(void));
+        call = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(int (FAR PASCAL *)(void)))GetProcAddress(d, "W16DLLCALL") : NULL;
+        check(call && call((int (FAR PASCAL *)(void))MakeProcInstance((FARPROC)DsMark, hInstance)) == 4321,
+              "a program's exported procedure called from a DLL gets the program's DS");
+    }
     if (d > HINSTANCE_ERROR)
         FreeLibrary(d);
 }

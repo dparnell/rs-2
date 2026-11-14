@@ -273,8 +273,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let name = a.l();
             proc_address(h, name)
         }
-        // MakeProcInstance(proc, inst): procedures get the caller's DS
-        // already (each task is a process of its own).
+        // MakeProcInstance(proc, inst): a program's exported procedures
+        // load its DS themselves (the loader made their prologues `mov
+        // ax, DGROUP`, as a DLL's: each task is a process of its own).
         51 => {
             let p = a.l();
             a.w();
@@ -746,7 +747,7 @@ pub fn application_error(r: &crate::dos::Regs) {
         // The stack (the task's: SS is its DGROUP), for the callers.
         let ss = TASK.get().hinst as u32;
         let st = flat(ss << 16 | r[SP] as u32) as *const u16;
-        let words: alloc::vec::Vec<u16> = (0..24).map(|i| unsafe { st.add(i).read_unaligned() }).collect();
+        let words: alloc::vec::Vec<u16> = (0..96).map(|i| unsafe { st.add(i).read_unaligned() }).collect();
         trace(format_args!("WIN16: stack at {ss:04X}:{:04X}: {words:04X?}", r[SP]));
     }
     let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
@@ -1195,6 +1196,18 @@ fn largest_free(seg: u16) -> u16 {
         at = (off as u32 + size as u32).next_multiple_of(4);
     }
     best.max((hp.end as u32).saturating_sub(at)) as u16
+}
+
+/// A block in a DGROUP's local heap for WIN16 itself (DDEML's monitor
+/// data): its offset, 0 if there is no room.
+pub fn local_alloc_in(seg: u16, n: u16) -> u16 {
+    local_alloc(seg, 0, n)
+}
+
+pub fn local_free_in(seg: u16, off: u16) {
+    if let Some(hp) = HEAPS.get().get_mut(&seg) {
+        hp.blocks.remove(&off);
+    }
 }
 
 fn local_alloc(seg: u16, fl: u16, n: u16) -> u16 {

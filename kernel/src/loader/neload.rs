@@ -134,11 +134,17 @@ pub fn load(
         images.push(img);
     }
 
-    // A Windows DLL's exported procedures load DS from AX (`push ds; pop
-    // ax; nop` or `mov ax, ds; nop`, then `mov ds, ax`): Windows' loader
-    // makes the first instruction `mov ax, DGROUP`, so that they get the
-    // DLL's data whoever calls them.
-    if windows && dll {
+    // A Windows module's exported procedures load DS from AX (`push ds;
+    // pop ax; nop` or `mov ax, ds; nop`, then `mov ds, ax`): Windows'
+    // loader makes a DLL's first instruction `mov ax, DGROUP`, so that
+    // they get the DLL's data whoever calls them. A program's get AX from
+    // the thunk MakeProcInstance made with the instance's DS; here each
+    // program is a process of its own (one instance, its segments
+    // private), so its exports get the same `mov ax, DGROUP` and
+    // MakeProcInstance gives back the procedure itself. Called from a DLL
+    // (Open Watcom's FMEDIT calling the Dialog Editor's object routines)
+    // they had the DLL's DS.
+    if windows {
         if let Some(a) = autodata {
             let [lo, hi] = sel_of(a).to_le_bytes();
             for e in m.entries().map_err(|_| err::BAD_EXE_FORMAT)? {

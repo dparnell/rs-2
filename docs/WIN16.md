@@ -164,7 +164,18 @@ OS 2 it
 3. makes DGROUP a whole 64 KB tile: the stack ends at the data plus the
    stack size, and the local heap has the rest, as LocalAlloc would grow
    DGROUP on Windows;
-4. enters the program with Windows' start registers (BX, CX, DI, SI;
+4. makes each exported procedure's prologue (`push ds; pop ax; nop`,
+   then `mov ds, ax`) load the module's DGROUP: `mov ax, DGROUP`.
+   Windows does this for DLLs; a program's exports get AX from the
+   thunk MakeProcInstance makes with the instance's DS. A Windows
+   program here is one instance in a process of its own (its segments
+   are private), so its exports are patched as a DLL's and
+   MakeProcInstance gives back the procedure itself. Without it a
+   program's callback called from a DLL ran with the DLL's DS: Open
+   Watcom's FMEDIT.DLL calls the Dialog Editor's object routines that
+   way, and WdeBaseCreate read the edit font from FMEDIT's data, found
+   none and made no main object (W16TEST checks with W16DLL);
+5. enters the program with Windows' start registers (BX, CX, DI, SI;
    `kernel/src/task/process.rs`).
 
 The process is a PM process (the NE flags say WINDOWAPI), started like
@@ -647,8 +658,40 @@ of its own, so DDE between two of them crosses processes:
   (DdeCreateStringHandle, DdeQueryString, DdeCmpStringHandles), data
   handles global blocks (DdeCreateDataHandle, DdeAddData, DdeGetData,
   DdeAccessData); DdeConnectList, DdeQueryConvInfo, DdeSetUserHandle,
-  DdeEnableCallback, DdeGetLastError. Monitors (APPCLASS_MONITOR) and
-  XTYP_REGISTER broadcasts are not done.
+  DdeEnableCallback, DdeGetLastError.
+- **Monitors and registrations across tasks.** Windows' DDEML is one DLL
+  all tasks share, so a monitor (DdeInitialize with APPCLASS_MONITOR and
+  MF_ flags: Open Watcom's DDE Spy) sees every task's DDE, and
+  DdeNameService's XTYP_REGISTER (XTYP_UNREGISTER, also from
+  DdeUninitialize) reaches every instance. Here each task has its own,
+  so they share a list: a named shared memory block
+  (`\SHAREMEM\WIN16\DDEML`) holds every task's instances (the PM window
+  of each instance's window and its afCmd; a slot whose window is gone
+  is free). A task with something to report makes the MON*STRUCT only
+  when a monitor asked for it and posts it to each such monitor's
+  window in a giveable block (DDEML's own message 0x3EF); the monitor's
+  task makes it a data handle and calls the callback with XTYP_MONITOR
+  and the MF_ flag in dwData2. The same way, 0x3EE carries
+  XTYP_REGISTER and XTYP_UNREGISTER (the service and the
+  instance-specific name `NAME(0xHHHHHHHH)`) to the other instances,
+  which call their callbacks unless CBF_SKIP_(UN)REGISTRATIONS; monitors
+  get them as MF_CALLBACKS. What is reported: MF_HSZ_INFO
+  (DdeCreateStringHandle, DdeKeepStringHandle, DdeFreeStringHandle),
+  MF_SENDMSGS and MF_POSTMSGS (each WM_DDE_* message a task sends or
+  posts, DDEML's or the program's own), MF_CALLBACKS (each callback of a
+  non-monitor instance, with its result), MF_ERRORS (each error an
+  instance gets), MF_CONV and MF_LINKS (conversations and advise loops
+  made and ended: told by the client's DDEML, which knows both handles,
+  a server conversation's handle being its window's PM window; by the
+  server's when the client is no DDEML client, its PM window standing
+  for the client's handle; DDEML's windows have the PM window ID
+  0xDDE1, which every task can query). A monitor's data handle lives in
+  its task's DGROUP (its local heap): Open Watcom's `ddeml.h` declares
+  DdeAccessData near (`PBYTE`), so DDE Spy reads the structure at the
+  returned offset in its own DS; with the data in the DGROUP that works,
+  and far callers are not affected. (On Windows the near pointer would
+  have read the wrong memory.) W16TEST checks a monitor of its own
+  instances and of DDESRV16's in another task.
 
 ### The clipboard
 
@@ -674,8 +717,7 @@ LBSELCHSTRING, SHAREVISTRING and HELPMSGSTRING messages, Print to File
 (the job goes to the printer's port), the printer driver's own entries
 (ExtDeviceMode, DeviceMode, DeviceCapabilities: there is no PSCRIPT.DRV
 module to load), WriteProfileString of `[windows] device=` (changing the
-default printer), a PM DDE client talking to a Windows server, DDEML
-monitors, metafiles drawn from CF_METAFILEPICT for PM programs (Windows
+default printer), a PM DDE client talking to a Windows server, metafiles drawn from CF_METAFILEPICT for PM programs (Windows
 metafiles are not played), SHELL's drag and drop, and the messages with
 pointers that cross tasks (WM_SETTEXT, WM_GETTEXT to another task's
 window).
@@ -1464,8 +1506,8 @@ whose DLL calls back into the hooking program's code from another task
 tasks that a program starts with LoadModule and then calls into (Dr.
 Watcom's debugging information processors, `BINW\DWARF.DLL` and the
 others, are Windows programs used that way). DDEML monitors
-(APPCLASS_MONITOR, Open Watcom's DDE Spy) could be done (each task's
-DDEML telling the monitors of its traffic) but are not yet.
+(APPCLASS_MONITOR, Open Watcom's DDE Spy) are done the other way: each
+task's DDEML tells the monitors of its traffic ("DDE and DDEML").
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode
