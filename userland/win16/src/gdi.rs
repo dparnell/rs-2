@@ -115,9 +115,13 @@ pub struct Dc {
     pub clipped: bool,
 }
 
+/// The DCs and objects are boxed: the `&'static mut` that `dc` and
+/// `obj_mut` hand out stay valid while a DC or object is made meanwhile
+/// (a growing vector moved them, and the old reference wrote into freed
+/// heap: the Dialog Editor's DdeConnect then crashed in WIN16's heap).
 struct Gdi {
-    dcs: Vec<Dc>,
-    objs: Vec<Option<Obj>>,
+    dcs: Vec<alloc::boxed::Box<Dc>>,
+    objs: Vec<Option<alloc::boxed::Box<Obj>>>,
     next_dc: u16,
     /// Character widths of each font (by handle).
     widths: BTreeMap<u16, [u8; 256]>,
@@ -209,7 +213,7 @@ fn g() -> &'static mut Gdi {
         let b = |c, null| Some(Obj::Brush { color: c, null, pat: None, src: 0 });
         let p = |c, style| Some(Obj::Pen { style, width: 1, color: c });
         let mono = Some(Obj::Font(Font { face: 1, wface: 1, ..sys_font() }));
-        g.objs = alloc::vec![
+        let stock: [Option<Obj>; 17] = [
             b(0xffffff, false), // WHITE_BRUSH
             b(0xc0c0c0, false), // LTGRAY_BRUSH
             b(0x808080, false), // GRAY_BRUSH
@@ -228,6 +232,7 @@ fn g() -> &'static mut Gdi {
             Some(Obj::Palette(DEFAULT_PALETTE.to_vec())), // DEFAULT_PALETTE
             mono,                              // SYSTEM_FIXED_FONT
         ];
+        g.objs = stock.into_iter().map(|o| o.map(alloc::boxed::Box::new)).collect();
     }
     g
 }
@@ -272,24 +277,24 @@ pub const DEFAULT_PALETTE: [u32; 20] = [
 
 pub fn obj(h: u16) -> Option<Obj> {
     let i = h.checked_sub(OBJ_BASE)? as usize / 2;
-    g().objs.get(i).cloned().flatten()
+    g().objs.get(i).and_then(|o| o.as_deref().cloned())
 }
 
 /// The object itself, to change it.
 pub fn obj_mut(h: u16) -> Option<&'static mut Obj> {
     let i = h.checked_sub(OBJ_BASE)? as usize / 2;
-    g().objs.get_mut(i).and_then(|o| o.as_mut())
+    g().objs.get_mut(i).and_then(|o| o.as_deref_mut())
 }
 
 pub fn new_obj(o: Obj) -> u16 {
     let g = g();
     let i = match g.objs.iter().skip(STOCK).position(|o| o.is_none()) {
         Some(i) => {
-            g.objs[STOCK + i] = Some(o);
+            g.objs[STOCK + i] = Some(alloc::boxed::Box::new(o));
             STOCK + i
         }
         None => {
-            g.objs.push(Some(o));
+            g.objs.push(Some(alloc::boxed::Box::new(o)));
             g.objs.len() - 1
         }
     };
@@ -305,7 +310,7 @@ pub fn new_obj(o: Obj) -> u16 {
 }
 
 pub fn dc(h: u16) -> Option<&'static mut Dc> {
-    g().dcs.iter_mut().find(|d| d.hdc == h)
+    g().dcs.iter_mut().find(|d| d.hdc == h).map(|d| &mut **d)
 }
 
 /// The brush of a system colour (cached).
@@ -350,7 +355,7 @@ pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
     let g = g();
     let hdc = g.next_dc;
     g.next_dc = g.next_dc.wrapping_add(2).max(0x0402);
-    g.dcs.push(Dc {
+    g.dcs.push(alloc::boxed::Box::new(Dc {
         hdc,
         hps,
         height,
@@ -381,7 +386,7 @@ pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
         applied: 0,
         saved: Vec::new(),
         clipped: false,
-    });
+    }));
     hdc
 }
 

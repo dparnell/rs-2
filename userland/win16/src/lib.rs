@@ -981,8 +981,14 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
             }
         }
     }
+    if !os2::heap::check() {
+        trace(format_args!("W16 HEAP BROKEN before {}", idx));
+    }
     trace(format_args!("W16 {}{}", idx, s));
     let r = dispatch_(idx, args);
+    if !os2::heap::check() {
+        trace(format_args!("W16 HEAP BROKEN after {}", idx));
+    }
     trace(format_args!("W16 {} -> {:x}", idx, r));
     r
 }
