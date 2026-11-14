@@ -3567,9 +3567,10 @@ it gets.
   (`PMXTEST PS`), lazy drag (the
   input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
   `DrgDragFiles` onto a `DrgAcceptDroppedFiles` window, printing PASS/FAIL and
-  `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting
+  `pmxtest done: N failure(s)`. `PMXTEST WINS [-dN] [PROGRAM]` (starting
   PROGRAM first) lists the window tree on the serial port (class, id,
-  text, position, style), to see what another program made.
+  text, position, style) after N seconds (15), to see what another
+  program made.
 - `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
   shell needs: system pointers, pointer info and bitmaps, creating,
   copying and destroying pointers, the pointer's shape, file icons

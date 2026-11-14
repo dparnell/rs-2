@@ -52,8 +52,11 @@ fn paint(h: u32) {
                 let fg = if !enabled || fl & draw::DT_HALFTONE != 0 { gray } else { fgc };
                 c.text_in(r, &text, fg, fl);
             }
+            // Only the outline and the title, as IBM's StaticPaintGroupbox:
+            // the inside is the parent's, and what the program put there
+            // shows through (the Open Watcom IDE makes the radio buttons of
+            // its New Target dialog before their group box).
             SS_GROUPBOX => {
-                c.fill(r, bg);
                 let f = draw::font_of(h);
                 let top = r.top - f.height / 2;
                 let b = Rect::new(r.left, r.bottom, r.right, top);
@@ -98,12 +101,12 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CREATE => {
-            // Frames draw only their outline: their parent paints the
-            // inside (it does not clip them, as IBM's parent-clipped
-            // statics; a dialog's SS_FGNDFRAME around its fields shows
-            // the dialog's background there).
+            // Frames and group boxes draw only their outline: their
+            // parent paints the inside (it does not clip them, as IBM's
+            // parent-clipped statics; a dialog's SS_FGNDFRAME around its
+            // fields shows the dialog's background there).
             let kind = ctl::style(h) & 0x7f;
-            if matches!(kind, SS_FGNDFRAME | SS_HALFTONEFRAME | SS_BKGNDFRAME) {
+            if matches!(kind, SS_FGNDFRAME | SS_HALFTONEFRAME | SS_BKGNDFRAME | SS_GROUPBOX) {
                 if let Some(w) = crate::state::st().desk.get_mut(h) {
                     w.style |= pmwin::ws::TRANSPARENT;
                 }

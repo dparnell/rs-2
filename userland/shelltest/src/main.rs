@@ -441,6 +441,13 @@ fn file_icons() {
     let dir = unsafe { WinLoadFileIcon(b"C:\\OS2\0".as_ptr(), 1) };
     check("WinLoadFileIcon (a directory)", dir != 0);
     check("WinLoadFileIcon (missing file) fails", unsafe { WinLoadFileIcon(b"C:\\NOSUCH.XYZ\0".as_ptr(), 1) } == 0);
+    // A bare program name is looked for along PATH (IBM's
+    // ShlQueryIconNGivenFEAL2): program objects for "view.exe".
+    let bare = unsafe { WinLoadFileIcon(b"PMSHELL.EXE\0".as_ptr(), 1) };
+    check("WinLoadFileIcon (a bare name found along PATH)", bare != 0);
+    if bare != 0 {
+        unsafe { WinFreeFileIcon(bare) };
+    }
     check("WinFreeFileIcon", unsafe { WinFreeFileIcon(prog) != 0 && WinFreeFileIcon(dir) != 0 });
     // A data file with an icon of its own (.ICON EA, ICON_DATA).
     let name = b"C:\\SHTEST.DAT\0";

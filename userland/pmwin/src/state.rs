@@ -103,6 +103,9 @@ pub struct Frame {
     /// FCF_SHELLPOSITION and not shown yet: the first time it is shown
     /// while it still has no size, the frame gets the shell's position.
     pub shell_pos: bool,
+    /// A frame inside another window (an MDI document): the focus is in
+    /// it, so it was sent WM_ACTIVATE (IBM's frame flag 2).
+    pub child_active: bool,
 }
 
 /// A minimized frame's state before minimizing.

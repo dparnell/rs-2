@@ -728,10 +728,16 @@ image. The whole run takes about 3 minutes in QEMU.
 | `viw` (BINW, the Windows editor) | works | On WIN16: its menus, tool bar, MDI child with the file, status line. |
 | BINW's other Windows tools: `wimgedit`, `wre`, `wzoom`, `wspy` | works | Start on WIN16 with their menus, tool bars and palettes (UI2.CMD); not used further. CTL3DV2.DLL is looked for and not there, as on a Windows without it. |
 | `wheapwlk` (Heap Walker) | fails | Imports STRESS (Windows 3.1's STRESS.DLL), which rs2's WIN16 does not have. |
-| `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
 | `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | It imports `NAMPIPES`, OS/2 1.x's named pipe module. Warp has it: `\OS2\DLL\NAMPIPES.DLL` (1 KB) is an LX forwarder module whose 14 entries go to the kernel's 16-bit DOSCALLS 399-412; rs2 has its own NAMPIPES.DLL made the same way and those kernel calls. NMPBIND starts at boot, runs, and answers the bindery requests (NMPSERV registers with it). |
 | Remote debugging over named pipes: `nmpserv`, `wdw -tr=nmp` | partial | NMPSERV starts and registers with NMPBIND; the debugger's NMP trap file finds the server, but the debugger does not come up (the link through NMPBIND's relay threads; not followed up). |
 | `ide2make`, the other remote debug servers (`tcpserv`, `serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | |
+| `ide` (IDE) | works | Started from its object in the "Open Watcom C/C++" folder (or by name). Menus from the mouse and the keyboard (Alt+letter, the accelerators: Ctrl+N, Ins, F4, Ctrl+R, Ctrl+D ...). File > New Project (`C:\OWTEST\TEST.WPJ`, a name that does not exist yet in the Open dialog), New Target (OS/2 32-bit, Executable), Sources > New Source (`hello.c`), File > Save Project, and the project opened again (Ctrl+O). Targets > Make (F4): the IDE's log window shows `wmake`, `wcc386` and `wlink` running through its batch server, "Execution complete". Targets > Run (Ctrl+R) starts TEST.EXE in its own session; the switch notebooks (Target Options > OS/2 Linking Switches, with its pages, Reset, CopyRel); a source opened from the target window in EPM (through EPMLINK.DLL and DDE, with Open Watcom's EPM macros: syntax colours, the Compiler menu); Local Debug (Ctrl+D) starts the windowed debugger on the target. F1 in the IDE's main window showed no help (not followed up). |
+| `wdw` (windowed debugger) | works | Local Debug from the IDE (and its "Windowed Debugger" object): the Source, Locals, Watches and Modules windows inside its main window, the action bar and tool bar, F10 steps over (the locals change), the Run menu from Alt+R, F5 runs the program to its end. |
+| `wbrw` (source browser) | works | `wbrw database test.dbr file hello.mbr` (a module file from `wcc386 -db`): it merges the database, shows the Inheritance view, View > List lists the symbols with their kinds; the menus. The IDE's Targets > Browse says the target needs `-db` first (and Open Watcom ships no OS/2 `wbrg`, the database merger the IDE runs). |
+| `wsample`, `wprof` (profiler) | works | `wsample TEST.exe` writes TEST.SMP; `wprof TEST.smp` shows the sample, the image and its modules, and drills into one (a module without debug information says so). |
+| EPM through `EPMLINK.DLL` (the IDE's editor) | works | With IBM's EPM installed as on Warp (`\OS2\APPS`): a source opened from the IDE's target window comes up in EPM with Open Watcom's macros. EPM's tool bar shows as an empty box (not looked at). |
+| Getting Started, Read Me, the "Tools Help" folder | works | From the desktop folders (with their programs' icons): Getting Started opens C_README.INF in VIEW, Read Me opens README.TXT in E, and the help books (C Library Reference, ...) open in VIEW and follow their links. |
+| Resource editors, PM spy | not shipped | The OS/2 package has none (the installer's `dlgedit`, `fontedit` and `iconedit` objects are only made when those files exist, which they do not). |
 
 Fixed for it:
 
@@ -806,6 +812,47 @@ Fixed for it:
   `ICONFILE=C:\WATCOM\WATCOM.ICO` gave a document icon), and an
   executable longer than 8 MB (the installer: 84 MB with its ZIP
   appended) still shows its icon (SHELLTST).
+
+Fixed for the GUI tools (the IDE, the browser, the profiler and the
+windowed debugger are built on Open Watcom's GUI library; each fix
+studied in IBM's PMMERGE or PMCTLS, with a PMXTEST or CTLTEST check):
+
+- PMWIN: accelerators are translated through `WM_TRANSLATEACCEL`, as
+  IBM's `XAccelTranslate`: the key's window gets it with a copy of the
+  QMSG, `WinDefWindowProc` passes it to the parent, a frame tries its
+  table, the Alt+letter mnemonics of its action bar (the item opens and
+  the QMSG is emptied, as `MenuTranslateMnemonic`) and the queue's table
+  (`FrameTranslateAccel`). The GUI library's frame subclass keeps every
+  `WM_CHAR` and refuses F10, so the IDE's Alt+letter never opened its
+  menus.
+- PMCTLS: an Open file dialog takes the name of a file that does not
+  exist, as IBM's `ProcessOKButtonMsg` (File > New Project names the new
+  project there).
+- PMWIN: a group box draws only its outline and title (IBM's
+  `StaticPaintGroupbox`) and its parent paints the inside: the New
+  Target dialog makes its Target Environment radio buttons before the
+  group box, which covered them.
+- PMWIN: `LM_QUERYSELECTION` of a single-selection list box ignores mp1
+  (IBM's `WinListboxWndProc`); the GUI library asks with 0 and New
+  Target said "Select an image type." with the first one selected.
+- PMWIN: a frame inside another window (an MDI document) gets
+  `WM_ACTIVATE` when the focus goes into it and leaves it (IBM's
+  `WinFrameFocusChange`), and a frame's `WM_ACTIVATE` sets its title
+  bar's highlight (`FrameDrawHilite`): the target windows stayed grey
+  and never became the current window.
+- PMWIN: the focus leaves a window before it is destroyed or its
+  top-level window hidden (IBM's `XDestroyWindow`): the window that had
+  it gets `WM_SETFOCUS(FALSE)` while it still exists, so an entry field
+  tells its owner `EN_KILLFOCUS`. The GUI library ignored every key
+  (Ins, F4, Ctrl+R ...) after a dialog closed with the focus in a field.
+- PMWIN: `WinLoadFileIcon` of a bare program name looks along PATH (IBM's
+  `ShlQueryIconNGivenFEAL2`): the Getting Started (`view.exe`) and Read
+  Me (`e.exe`) objects showed no program icon.
+- PMWIN: a frame formats its FID_MENU whether it shows or not (from the
+  command-line tools work, cherry-picked): the debugger's and the
+  profiler's menu bars, and Warp 4's folder menu bars, stayed hidden.
+- Loader: a non-resident name table may start with an export
+  (WDPMHOOK.DLL; cherry-picked).
 
 ## Open Watcom F77 1.9 (OS/2 host)
 

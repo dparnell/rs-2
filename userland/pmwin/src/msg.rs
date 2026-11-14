@@ -510,6 +510,9 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 
             crate::pointer::set_system(pmwin::sysptr::SPTR_ARROW);
             1
         }
+        // Accelerator translation goes up to the parent (frames try their
+        // tables and menus); a top-level window has the system keys.
+        crate::accel::WM_TRANSLATEACCEL => crate::accel::def_translate(h, mp1),
         // Help goes up to the parent (in the end a frame, which calls the
         // help hook).
         ctl::WM_HELP => {

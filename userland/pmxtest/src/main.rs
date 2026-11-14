@@ -90,7 +90,8 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 }
 
 /// `PMXTEST WINS`: the window tree (class, text, position, style), for
-/// looking at what another program made.
+/// looking at what another program made (`WINS -dN PROGRAM` lists after N
+/// seconds).
 fn list_windows(parent: u32, depth: usize) {
     let e = unsafe { WinBeginEnumWindows(parent) };
     loop {
@@ -155,8 +156,15 @@ fn main(s: &Startup) -> u32 {
         return r;
     }
     if args.starts_with(b"WINS") {
-        // `PMXTEST WINS PROGRAM`: start it first.
-        let prog: alloc::vec::Vec<u8> = args[4..].iter().copied().skip_while(|&c| c == b' ').collect();
+        // `PMXTEST WINS [-dSECONDS] PROGRAM`: start it first; list the
+        // windows after SECONDS (15).
+        let mut prog: alloc::vec::Vec<u8> = args[4..].iter().copied().skip_while(|&c| c == b' ').collect();
+        let mut delay = 15u32;
+        if prog.starts_with(b"-d") {
+            let end = prog.iter().position(|&c| c == b' ').unwrap_or(prog.len());
+            delay = core::str::from_utf8(&prog[2..end]).ok().and_then(|t| t.parse().ok()).unwrap_or(15);
+            prog = prog[end..].iter().copied().skip_while(|&c| c == b' ').collect();
+        }
         if !prog.is_empty() {
             let mut name = prog.clone();
             name.push(0);
@@ -166,7 +174,7 @@ fn main(s: &Startup) -> u32 {
             let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, EXEC_ASYNC, a.as_ptr(), core::ptr::null(), &mut res, name.as_ptr()) };
             println!("started {}: {rc}", core::str::from_utf8(&prog).unwrap_or("?"));
         }
-        unsafe { DosSleep(15000) };
+        unsafe { DosSleep(delay * 1000) };
         list_windows(HWND_DESKTOP, 0);
         return 0;
     }

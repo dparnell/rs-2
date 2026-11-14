@@ -191,11 +191,44 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     h
 }
 
+/// Is the focus in `h` or a window inside it?
+fn focus_in(h: u32) -> bool {
+    let f = st().focus;
+    f != 0 && (f == h || st().desk.is_ancestor(h, f))
+}
+
 pub fn destroy(h: u32) {
     let s = st();
     if !s.desk.exists(h) || h == HWND_DESKTOP {
         return;
     }
+    // As IBM's XDestroyWindow: the focus leaves the window before it is
+    // destroyed, so the window that had it hears WM_SETFOCUS(FALSE) while
+    // it still exists (the Open Watcom GUI library learns from the
+    // EN_KILLFOCUS of a dialog's entry field that keys are its own
+    // again). An active top-level window passes the activation on; the
+    // focus in a window inside another goes to the frame around it.
+    if focus_in(h) {
+        // Frames around it forget it as the window to give the focus back
+        // to.
+        let f = st().focus;
+        for fr in st().frames.values_mut() {
+            if fr.focus_save == f {
+                fr.focus_save = 0;
+            }
+        }
+        if top_level(h) == h && st().active == h && st().desk.get(h).is_some_and(|w| w.visible_style()) {
+            show(h, false);
+        }
+        if focus_in(h) {
+            let mut p = st().desk.get(h).map_or(0, |w| w.parent);
+            while p != 0 && p != HWND_DESKTOP && !st().frames.contains_key(&p) {
+                p = st().desk.get(p).map_or(0, |w| w.parent);
+            }
+            set_focus(if p == HWND_DESKTOP { 0 } else { p });
+        }
+    }
+    let s = st();
     let mut all = Vec::new();
     collect(h, &mut all);
     for &w in &all {
@@ -556,13 +589,16 @@ pub fn show(h: u32, on: bool) {
     if was != on {
         st().desk.set_visible(h, on);
         notify(h, WM_SHOW, on as u32, 0);
-        // A hidden active window gives up the activation.
+        // A hidden active window gives up the activation; the window
+        // with the focus in it hears that it lost it (WM_SETFOCUS FALSE,
+        // as IBM's XFocusChange: an entry field tells its owner
+        // EN_KILLFOCUS).
         if !on && st().active == h {
             st().active = 0;
-            if st().desk.is_ancestor(h, st().focus) {
-                st().focus = 0;
-            }
             activate_next();
+            if focus_in(h) {
+                set_focus(0);
+            }
         }
     }
 }
@@ -675,6 +711,50 @@ pub fn set_focus(h: u32) {
     }
     if h != 0 {
         notify(h, WM_SETFOCUS, old, 1);
+    }
+    child_frames_activate(old, h);
+}
+
+/// The frames inside other windows (MDI documents) around `h`, innermost
+/// first.
+fn child_frames(h: u32) -> alloc::vec::Vec<u32> {
+    let mut v = alloc::vec::Vec::new();
+    let mut c = h;
+    while c != 0 && c != HWND_DESKTOP {
+        let Some(w) = st().desk.get(c) else { break };
+        if w.parent == HWND_DESKTOP || w.parent == 0 || w.parent == pmwin::HWND_OBJECT {
+            break;
+        }
+        if st().frames.contains_key(&c) {
+            v.push(c);
+        }
+        c = w.parent;
+    }
+    v
+}
+
+/// As IBM's WinFrameFocusChange, for frames inside other windows: one
+/// the focus leaves is sent WM_ACTIVATE(FALSE), one it enters
+/// WM_ACTIVATE(TRUE) (its title bar lights up; the Open Watcom GUI
+/// library makes its MDI documents current there). Top-level frames are
+/// activated with the active window.
+fn child_frames_activate(old: u32, new: u32) {
+    let (was, now) = (child_frames(old), child_frames(new));
+    for &f in was.iter().filter(|f| !now.contains(f)) {
+        if st().frames.get(&f).is_some_and(|x| x.child_active) && st().desk.exists(f) {
+            if let Some(x) = st().frames.get_mut(&f) {
+                x.child_active = false;
+            }
+            notify(f, WM_ACTIVATE, 0, f);
+        }
+    }
+    for &f in now.iter().rev().filter(|f| !was.contains(f)) {
+        if st().frames.get(&f).is_some_and(|x| !x.child_active) {
+            if let Some(x) = st().frames.get_mut(&f) {
+                x.child_active = true;
+            }
+            notify(f, WM_ACTIVATE, 1, f);
+        }
     }
 }
 

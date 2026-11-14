@@ -120,39 +120,96 @@ fn mnemonic_of(frame: u32, m: &QMsg) -> bool {
     c != 0 && bar != 0 && crate::menu::has_mnemonic(bar, c)
 }
 
+/// WM_TRANSLATEACCEL (mp1 the QMSG to translate in place).
+pub const WM_TRANSLATEACCEL: u32 = 0x004b;
+
 /// Translate a WM_CHAR taken off the queue into a command, if it is an
-/// accelerator.
+/// accelerator. As IBM's XAccelTranslate (in XScanSysQueue): the window
+/// the key is for gets WM_TRANSLATEACCEL with a copy of the QMSG, which
+/// replaces the message when it answers TRUE. WinDefWindowProc passes it
+/// up to the parent; each frame on the way tries its table, the
+/// mnemonics of its action bar and the queue's table (frame_translate),
+/// and above the top-level window come the system keys (def_translate).
+/// A program's own procedure can keep a key from being translated (the
+/// Open Watcom GUI library answers FALSE for F10, which its programs
+/// use themselves).
 pub fn translate(m: &mut QMsg) -> bool {
     if m.msg != WM_CHAR || m.mp1 & ctl::KC_KEYUP != 0 || crate::state::menu_mode().is_some() {
         return false;
     }
-    let mut cur = m.hwnd;
-    while cur != 0 && cur != pmwin::HWND_DESKTOP {
-        let a = st().frames.get(&cur).map_or(0, |f| f.accel);
-        if let Some(t) = table(a) {
-            if apply(&t.clone(), cur, m) {
-                return true;
-            }
-        }
-        // Then the frame's menu (IBM's FrameTranslateAccel asks it, as
-        // each frame from the focus up gets WM_TRANSLATEACCEL): an
-        // Alt+letter mnemonic of its action bar goes to that frame, also
-        // from inside a frame without a menu (Borland's IDE: Alt+P in
-        // an MDI document's editor opens the main window's Project).
-        if frame::is_frame(cur) && mnemonic_of(cur, m) {
-            m.hwnd = cur;
-            return true;
-        }
-        cur = ctl::parent(cur);
+    if m.hwnd == 0 || !st().desk.exists(m.hwnd) {
+        return false;
     }
-    let top = win::top_level(m.hwnd);
+    let mut copy = *m;
+    if crate::msg::send(m.hwnd, WM_TRANSLATEACCEL, &mut copy as *mut QMsg as u32, 0) == 0 {
+        return false;
+    }
+    *m = copy;
+    true
+}
+
+fn qmsg_at(pq: u32) -> Option<QMsg> {
+    (pq != 0).then(|| unsafe { (pq as *const QMsg).read_unaligned() })
+}
+
+/// A frame's WM_TRANSLATEACCEL, as IBM's FrameTranslateAccel: the
+/// frame's accelerator table, then an Alt+letter mnemonic of its action
+/// bar (IBM's frame passes it to FID_MENU, whose MenuTranslateMnemonic
+/// opens the item and empties the QMSG), then the queue's table; each
+/// command goes to this frame.
+pub fn frame_translate(frame: u32, pq: u32) -> u32 {
+    let Some(mut m) = qmsg_at(pq) else { return 0 };
+    if m.msg != WM_CHAR {
+        return 0;
+    }
+    let done = |m: &QMsg| {
+        unsafe { (pq as *mut QMsg).write_unaligned(*m) };
+        1
+    };
+    let a = st().frames.get(&frame).map_or(0, |f| f.accel);
+    if let Some(t) = table(a) {
+        if apply(&t.clone(), frame, &mut m) {
+            return done(&m);
+        }
+    }
+    if mnemonic_of(frame, &m) {
+        let k = Key::from(m.mp1, m.mp2);
+        crate::menu::open_mnemonic(win::WinWindowFromID(frame, FID_MENU), k.letter(m.mp1));
+        let t = (m.time, m.x, m.y, m.reserved);
+        m = QMsg { hwnd: 0, msg: 0, mp1: 0, mp2: 0, time: t.0, x: t.1, y: t.2, reserved: t.3 };
+        return done(&m);
+    }
     let qa = st().my_queue_mut().map_or(0, |q| q.accel);
     if let Some(t) = table(qa) {
-        if apply(&t.clone(), top, m) {
-            return true;
+        if apply(&t.clone(), frame, &mut m) {
+            return done(&m);
         }
     }
-    frame::is_frame(top) && apply(&SYSTEM, top, m)
+    0
+}
+
+/// WinDefWindowProc's WM_TRANSLATEACCEL: to the parent, as IBM's; a
+/// top-level window has the queue's table (for one that is not a
+/// frame) and then the system keys.
+pub fn def_translate(h: u32, pq: u32) -> u32 {
+    let parent = ctl::parent(h);
+    if parent != 0 && parent != pmwin::HWND_DESKTOP && parent != pmwin::HWND_OBJECT {
+        return crate::msg::send(parent, WM_TRANSLATEACCEL, pq, 0);
+    }
+    let Some(mut m) = qmsg_at(pq) else { return 0 };
+    if m.msg != WM_CHAR {
+        return 0;
+    }
+    let is_frame = frame::is_frame(h);
+    let qa = st().my_queue_mut().map_or(0, |q| q.accel);
+    let hit = match table(qa) {
+        Some(t) if !is_frame => apply(&t.clone(), h, &mut m),
+        _ => false,
+    } || is_frame && apply(&SYSTEM, h, &mut m);
+    if hit {
+        unsafe { (pq as *mut QMsg).write_unaligned(m) };
+    }
+    hit as u32
 }
 
 /// WinLoadAccelTable(hab, hmod, idAccelTable)

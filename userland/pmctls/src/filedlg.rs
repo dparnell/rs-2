@@ -128,12 +128,6 @@ fn is_dir(path: &[u8]) -> bool {
     unsafe { DosQueryPathInfo(p.as_ptr(), 1, fs.as_mut_ptr(), fs.len() as u32) == 0 && u32::from_le_bytes([fs[24], fs[25], fs[26], fs[27]]) & 0x10 != 0 }
 }
 
-fn exists(path: &[u8]) -> bool {
-    let p = z(path);
-    let mut fs = [0u8; 28];
-    unsafe { DosQueryPathInfo(p.as_ptr(), 1, fs.as_mut_ptr(), fs.len() as u32) == 0 }
-}
-
 /// `dir` joined with `name` (dir is `C:\` or `C:\DIR`).
 fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     let mut v = dir.to_vec();
@@ -355,13 +349,9 @@ fn ok(dlg: u32) {
         set_item_text(dlg, DID_FILENAME_ED as u32, b"");
         return;
     }
-    let fl = rd32(fild, F_FL);
-    if fl & FDS_SAVEAS_DIALOG == 0 && !exists(&path) {
-        let mut m = path.clone();
-        m.extend_from_slice(b"\nThe file was not found.");
-        message(dlg, &m, b"Open");
-        return;
-    }
+    // A name that does not exist is taken in an Open dialog too, as IBM's
+    // ProcessOKButtonMsg (only its extended-attribute dialogs look for
+    // the file); the application's FDM_VALIDATE may refuse it.
     if path.len() >= CCHMAXPATH {
         message(dlg, b"The path is too long.", b"File");
         return;
