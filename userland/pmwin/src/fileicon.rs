@@ -18,6 +18,11 @@ use crate::ctl::cstr;
 use crate::lock;
 use crate::pointer;
 
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.228"]
+    fn DosSearchPath(flags: u32, path: *const u8, name: *const u8, buf: *mut u8, cb: u32) -> u32;
+}
+
 const FIL_STANDARD: u32 = 1;
 const FIL_QUERYEASIZE: u32 = 2;
 const FIL_QUERYEASFROMLIST: u32 = 3;
@@ -192,9 +197,20 @@ fn find(path: &[u8]) -> Option<Source> {
 /// icon, a pointer of the caller (0 if the file does not exist).
 #[unsafe(no_mangle)]
 pub extern "C" fn Rs2LoadFileIcon(name: *const u8, _private: u32) -> u32 {
-    let path = cstr(name);
+    let mut path = cstr(name);
     if path.is_empty() {
         return 0;
+    }
+    // A bare name is looked for in the current directory and along PATH,
+    // as IBM's ShlQueryIconNGivenFEAL2 (DosSearchPath 7): the Open Watcom
+    // installer's "Getting Started" object runs view.exe.
+    if !path.iter().any(|&c| matches!(c, b'\\' | b'/' | b':')) {
+        let mut buf = [0u8; 260];
+        let mut z = path.clone();
+        z.push(0);
+        if unsafe { DosSearchPath(7, b"PATH\0".as_ptr(), z.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } == 0 {
+            path = cstr(buf.as_ptr());
+        }
     }
     let found = lock::unlocked(|| find(&path));
     let me = crate::state::pid();
