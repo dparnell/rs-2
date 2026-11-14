@@ -481,10 +481,21 @@ pub extern "C" fn listbox_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             reveal(h);
             ok as u32
         }
+        // As IBM's WinListboxWndProc: a single-selection list ignores
+        // mp1 (the Open Watcom GUI library asks with 0); a multiple or
+        // extended one looks after mp1 (LIT_FIRST from the start,
+        // LIT_CURSOR the cursor item).
         LM_QUERYSELECTION => {
+            let multi = ctl::style(h) & (LS_MULTIPLESEL | LS_EXTENDEDSEL) != 0;
             let Some(l) = data(h) else { return LIT_NONE };
             let start = mp1 as i16 as i32;
-            let from = if start < 0 { 0 } else { start as usize + 1 };
+            let from = match start {
+                _ if !multi => 0,
+                -4 => return if l.items.is_empty() { LIT_NONE } else { l.cursor as u32 },
+                -1 => 0,
+                s if s >= 0 && s as usize <= l.items.len() => s as usize + 1,
+                _ => return LIT_NONE,
+            };
             l.items.iter().enumerate().skip(from).find(|(_, it)| it.selected).map_or(LIT_NONE, |(i, _)| i as u32)
         }
         LM_SETITEMTEXT => {

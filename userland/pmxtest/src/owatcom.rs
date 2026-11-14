@@ -42,6 +42,32 @@ fn pel(h: u32, x: i32, y: i32) -> i32 {
     v
 }
 
+/// LM_QUERYSELECTION as IBM's: a single-selection list ignores mp1 (the
+/// GUI library's LB_GETCURSEL asks with 0: the IDE's New Target said
+/// "Select an image type." with the first one selected); a multiple one
+/// looks after mp1.
+unsafe fn list_selection(client: u32) {
+    unsafe {
+        let mk = |style: u32| {
+            let l = WinCreateWindow(client, 0xffff_0007 as *const u8, b"\0".as_ptr(), 0x8000_0000 | style, 10, 10, 100, 60, client, 3, 903, core::ptr::null(), core::ptr::null());
+            for t in [&b"one\0"[..], b"two\0", b"three\0"] {
+                WinSendMsg(l, 0x0161 /* LM_INSERTITEM */, 0xffff /* LIT_END */, t.as_ptr() as u32);
+            }
+            l
+        };
+        let l = mk(0);
+        WinSendMsg(l, 0x0164 /* LM_SELECTITEM */, 0, 1);
+        let q = |l: u32, from: u32| WinSendMsg(l, 0x0165 /* LM_QUERYSELECTION */, from, 0) as i32;
+        check("LM_QUERYSELECTION(0) of a single-selection list is its selected item 0", q(l, 0) == 0 && q(l, 0xffff) == 0);
+        WinDestroyWindow(l);
+        let m = mk(0x0001 /* LS_MULTIPLESEL */);
+        WinSendMsg(m, 0x0164, 0, 1);
+        WinSendMsg(m, 0x0164, 2, 1);
+        check("LM_QUERYSELECTION of a multiple-selection list: LIT_FIRST, then after an item", q(m, 0xffff) == 0 && q(m, 0) == 2 && q(m, 2) == -1);
+        WinDestroyWindow(m);
+    }
+}
+
 /// The IDE's New Target dialog makes its radio buttons, then the group
 /// box around them: a group box draws only its outline and title (IBM's
 /// StaticPaintGroupbox), so a window below it inside still shows.
@@ -255,5 +281,6 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         check("WinWaitMsg", w != 0 && left != 0 && q.mp1 == 1);
         gui_menu_keys(hab);
         group_box_over_sibling(client);
+        list_selection(client);
     }
 }
