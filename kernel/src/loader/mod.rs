@@ -412,27 +412,8 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
         m.cloned()
     }
     .or_else(|| if by_path { find_loaded_path(name) } else { None });
-    if let Some(m) = found {
-        if rewritten(&m) {
-            // A 16-bit DLL whose file was written since it was loaded (Delphi
-            // rebuilds its component library COMPLIB.DCL, frees it and loads
-            // it again): the new file, under a new handle. Programs using the
-            // old one keep it.
-            REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, &m));
-        } else {
-            // OS/2 discards a DLL no process uses any more and reads it again
-            // on the next load. rs2 keeps it: its shared data starts over and
-            // a global init runs again (the C runtime of VisualAge Smalltalk's
-            // ABTBMP50.DLL keeps its state there and freed it at termination).
-            let used = in_use(&m);
-            if crate::api::tracing() {
-                crate::trace!("    {} found, in use {used}", m.name);
-            }
-            if !used {
-                reset(&m);
-            }
-            return Ok(m);
-        }
+    if let Some(m) = found.and_then(reuse) {
+        return Ok(m);
     }
     let (path, data) = match crate::fs::find_module(name) {
         Ok(x) => x,
@@ -447,8 +428,10 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
             return Err(if e == err::FILE_NOT_FOUND { err::MOD_NOT_FOUND } else { e });
         }
     };
-    // The LIBPATH led to a file already loaded by its path.
-    if let Some(m) = find_loaded_path(&path) {
+    // The LIBPATH led to a file already loaded: by its path, or under an
+    // internal name that is not the file's (Open Watcom 2.0's wlink names
+    // MYDLL.DLL "MYDLL.DLL"), which a load by name does not find.
+    if let Some(m) = find_loaded_path(&path).and_then(reuse) {
         return Ok(m);
     }
     let m = load_image(&path, data, true, by_path, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
@@ -457,9 +440,38 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     Ok(m)
 }
 
-/// Is a loaded 16-bit DLL's file no longer what was loaded?
-fn rewritten(m: &Module) -> bool {
-    if m.format != Format::Ne {
+/// A DLL found loaded, as the next load gets it: None when it must be
+/// read from its file again.
+fn reuse(m: Arc<Module>) -> Option<Arc<Module>> {
+    let used = in_use(&m);
+    if crate::api::tracing() {
+        crate::trace!("    {} found, in use {used}", m.name);
+    }
+    // A DLL whose file was written since it was loaded: the new file, under
+    // a new handle; programs using the old one keep it. A 16-bit one even
+    // while in use (Delphi rebuilds its component library COMPLIB.DCL,
+    // frees it and loads it again), any other when no process uses it (a
+    // DLL rebuilt between two runs of its program, as OS/2 has discarded
+    // it by then).
+    if rewritten(&m, !used) {
+        REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, &m));
+        return None;
+    }
+    // OS/2 discards a DLL no process uses any more and reads it again on
+    // the next load. rs2 keeps it: its shared data starts over and a global
+    // init runs again (the C runtime of VisualAge Smalltalk's ABTBMP50.DLL
+    // keeps its state there and freed it at termination; Open Watcom's
+    // DLLs set up their C runtime's thread data in it).
+    if !used {
+        reset(&m);
+    }
+    Some(m)
+}
+
+/// Is a loaded DLL's file no longer what was loaded (a 16-bit one, or any
+/// with `any`)?
+fn rewritten(m: &Module, any: bool) -> bool {
+    if m.format != Format::Ne && !(any && m.format == Format::Lx) {
         return false;
     }
     let Some(img) = &m.image else { return false };

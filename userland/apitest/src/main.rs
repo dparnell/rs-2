@@ -57,6 +57,9 @@ fn main(s: &Startup) -> u32 {
     if s.args().trim_ascii() == b"pmchild" {
         return pm_child();
     }
+    if s.args().trim_ascii() == b"dllrn" {
+        return dll_renamed_child();
+    }
     // First: it checks the PM server that the child starts.
     pm_server_handles();
     info_blocks();
@@ -72,6 +75,7 @@ fn main(s: &Startup) -> u32 {
     pipes();
     named_pipes();
     dlls();
+    dll_renamed();
     app_types();
     timers();
     perf_counters();
@@ -111,6 +115,52 @@ fn pm_child() -> u32 {
         let create: extern "system" fn(u32, i32) -> u32 = core::mem::transmute(f(716));
         if create(init(0), 0) == 0 { 2 } else { 0 }
     }
+}
+
+/// `APITEST dllrn`: C:\TDLLRN.DLL's init count in this process (100 + rc
+/// if it does not load).
+fn dll_renamed_child() -> u32 {
+    let mut h = 0;
+    let mut p: usize = 0;
+    let rc = unsafe { DosLoadModule(null_mut(), 0, b"TDLLRN\0".as_ptr(), &mut h) };
+    if rc != 0 || unsafe { DosQueryProcAddr(h, 2, null(), &mut p) } != 0 {
+        return 100 + rc;
+    }
+    let count: extern "C" fn() -> u32 = unsafe { core::mem::transmute(p) };
+    count()
+}
+
+/// A DLL whose internal name is not its file's (Open Watcom 2.0's wlink
+/// names MYDLL.DLL "MYDLL.DLL"), with global initialisation and instance
+/// data, used by one program after another: each gets it initialised, as
+/// OS/2 discards it in between and loads it again. rs2 found it by its
+/// path, kept it, and skipped the initialisation: Open Watcom's C runtime
+/// in the DLL had no thread data and the second program faulted.
+fn dll_renamed() {
+    let rc = unsafe { DosCopy(b"C:\\RS2\\TESTDLLN.DLL\0".as_ptr(), b"C:\\TDLLRN.DLL\0".as_ptr(), 1) };
+    if rc != 0 {
+        check(&alloc::format!("copy TESTDLLN.DLL to C:\\TDLLRN.DLL (rc {rc})"), false);
+        return;
+    }
+    let mut pib = null_mut();
+    let mut tib = null_mut();
+    let mut path = [0u8; 260];
+    unsafe {
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr());
+    }
+    let n = path.iter().position(|&c| c == 0).unwrap_or(0);
+    let mut args = [0u8; 300];
+    args[..n].copy_from_slice(&path[..n]);
+    args[n + 1..n + 6].copy_from_slice(b"dllrn");
+    let mut got = [0u32; 2];
+    for g in got.iter_mut() {
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        let rc = unsafe { DosExecPgm(null_mut(), 0, EXEC_SYNC, args.as_ptr(), null(), &mut res, path.as_ptr()) };
+        *g = if rc == 0 { res.code_result } else { 200 + rc };
+    }
+    check(&alloc::format!("a DLL named otherwise inside, used by two programs in turn, initialises for each (got {got:?})"), got == [1, 1]);
+    unsafe { DosDelete(b"C:\\TDLLRN.DLL\0".as_ptr()) };
 }
 
 /// A program's handles stay its own: the PM server, started as the child
