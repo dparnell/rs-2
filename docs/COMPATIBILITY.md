@@ -745,6 +745,62 @@ Fixed for it:
   executable longer than 8 MB (the installer: 84 MB with its ZIP
   appended) still shows its icon (SHELLTST).
 
+## Open Watcom F77 1.9 (OS/2 host)
+
+`open-watcom-f77-os2-1.9.exe`, the FORTRAN 77 package (the same OS/2
+installer as the C/C++ one, 149 MB in its ZIP: wfc, wfc386, wfl, wfl386,
+the FORTRAN libraries for OS/2, DOS, Windows and the other targets, wlink,
+wd, the samples and the help books), on a system disk with only rs2's
+files (`cargo xtask disk --system --size 1500` with dist/manifest.txt's
+files and the installer as `C:\OWF77.EXE`). The test programs and
+BUILD.CMD (which builds them and the package's samples, then runs them,
+output in `D:\F77.LOG`) are in `tests/owatcom/f77`, on a second disk
+(`--virtio-disk`); `PMTESTS.CMD` (as `C:\STARTUP.CMD`) starts the ones that
+need the desktop, `DOSRUN.BAT` the DOS ones. Each test program checks its
+results numerically and ends with "all checks passed" or the failures.
+
+| What | Status | Notes |
+|------|--------|-------|
+| Installer, as the boot program | works | License, `C:\WATCOM`, Full installation (31 MB "required" for Selective, 147 MB copied for Full in about 4 minutes), "Setup needs to modify CONFIG.SYS": LIBPATH gets `C:\WATCOM\BINP\DLL`, PATH `BINP;BINW`, HELP and BOOKSHELF `BINP\HELP`, and INCLUDE, FINCLUDE (`SRC\FORTRAN;SRC\FORTRAN\OS2`), WATCOM, EDPATH, WIPFC and `RUN=...\NMPBIND.EXE` are added; the old file is kept as CONFIG.000. |
+| `wfl386 -l=os2v2` (32-bit OS/2 text programs) | works | FMTIO (I, F, E, D, G, L, A editing, scale factors, T/X, BZ, colon and sign editing, rounding, asterisks on overflow, list-directed and internal READ/WRITE), FILEIO (sequential formatted and unformatted files, BACKSPACE, ENDFILE, REWIND, direct access formatted and unformatted, INQUIRE by file and unit, END=/ERR=/IOSTAT=, STATUS='DELETE', ACCESS='APPEND'), FMATH (DOUBLE PRECISION intrinsics against known values to 1e-14, a 100000-term series, Newton's method, COMPLEX and DOUBLE COMPLEX arithmetic and intrinsics, underflow), FCHARS (CHARACTER substrings, concatenation, INDEX/LEN/ICHAR/LGE, CHARACTER functions, assumed-length arguments, COMMON with BLOCK DATA, adjustable arrays, EXTERNAL, SAVE, ENTRY, alternate returns, computed and assigned GO TO, EQUIVALENCE, DATA): all checks pass. |
+| `wfc386` + `wlink`, `wfc` + `wlink` | works | Compiled and linked separately: FILEIO (32-bit, `-d2`), FMTIO (16-bit). |
+| `wfl -l=os2` (16-bit OS/2) | works | FMATH and FCHARS, all checks pass. |
+| `wfl386 -l=os2v2_pm` (PM) | works | The FSHAPES sample: its window, boxes and ellipses drawn by a timer. |
+| Multithreaded runtime (`-bm`) | works | The MTHREAD sample: BEGINTHREAD, four threads print through the runtime under DosEnterCritSec. |
+| DLLs (`-bd`, `os2v2_dll`) | works | The DLL sample: DLLSAMP.DLL with its import library, DLLTEST calls both entries. The sample's own makefile (`wfl386 dlltest dllsamp.lib`) fails on OS/2 too: wfl386 1.9 writes `librarydllsamp.lib` (no blank) into its linker directives; BUILD.CMD links with wlink. |
+| REXX external functions in FORTRAN | works | The REXX sample (wmake): EZRXFUNC.DLL, then TESTDLL.CMD on rs2's REXX registers and calls EZFunc1/EZFunc2. |
+| Mixed FORTRAN and C | works with C/C++ installed | FMIX.FOR calls CMIX.C (wcc386) functions by reference, C calls a FORTRAN subroutine back, C's printf and FORTRAN's I/O share the console. Needs the C/C++ package in the same directory (see below). |
+| `wfl -l=dos`, DOS targets in a DOS session | works | FMATHD and FILEIOD (16-bit real mode) and FMATHX (`wfl386 -l=dos4g`, DOS/4GW 1.97 bound from `BINW`) pass all checks in rs2's DOS session (`DOSRUN.BAT`). Started from CMD, FMATHX gets SYS0191 as on OS/2 (an LE executable is not an OS/2 program); a .BAT starts it in a DOS session. |
+| `wfl -windows -l=windows -bw` (Windows 3.x) | works | FMATHW in the default windowing system's "Standard IO" window on rs2's WIN16: all checks pass. The ELLIPSE sample draws its ellipses. Code for Windows is compiled with `-windows`, as the samples' makefile does: without it the compiler loads DS with COMMON blocks' segments, which the runtime's Windows code does not expect (it faulted). |
+| The FWCOPY Windows sample | fails | The package's: its AppendMenu calls push 8 bytes of arguments where the function takes 10 (`value far` of a LOC() value in WINAPI.FI), so AppendMenu sees a wrong menu handle and the program ends. |
+| `wd` on a FORTRAN program | works | `wd fmathdbg` (built with `-d2`): stops at the program's first statement with FMATH.FOR's source, the locals (INTEGER, REAL, COMPLEX), steps over statements (F10) and runs the program to its end ("The task has completed running"). |
+| Help books in the help viewer | works | `view f77lr` (FORTRAN 77 Language Reference) with its contents; the folder's other books (User's Guide, Programmer's Reference, Tools, Graphics Library, Master Index, Read Me) are on BOOKSHELF. The installer's "Fortran Error Messages" object names WFCERRS.INF, which the package does not have (it has WFCERRS.HLP). |
+| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | As with the C/C++ package: it imports OS/2 1.x's NAMPIPES, which Warp does not have either. |
+
+Fixed for it:
+
+- DPMI (rs2's DOS sessions): when a protected-mode client's handler chains
+  to the default one (DOS/4GW's IRQ 0 handler does), the real-mode handler
+  gets the interrupted code's flags from the IRET frame on the client's
+  stack, not the flags the handler had left: a timer interrupt between a
+  CMP and its jump changed the program's flags, so DOS/4GW programs ended
+  loops early (a FORTRAN sum stopped after a few thousand of its 100000
+  terms) or printed "DOS/4GW warning (3304): unhandled or unknown
+  relocation" while loading (DPMITEST checks it; `dosrun --clock N` makes
+  timer interrupts as frequent as in QEMU).
+- Loader, as IBM's `_ldrOpenNewExe` and `LDRQAppType` (OS2KRNLB, studied
+  with Ghidra): an LE executable (a DOS extender's program) fails
+  DosQueryAppType and DosExecPgm with ERROR_INVALID_EXE_SIGNATURE (191),
+  as a DOS one does, instead of FAPPTYP_VIRTDRV and 193; a PE executable is
+  0x5000; CMD names the program in SYS0191 and SYS0193 ("An OS/2 session
+  cannot run D:\FMATHX.EXE.", it showed `%1`) (APITEST).
+- WIN16: KERNEL's `__0000H` ... `__F000H` are selectors for the segments
+  of an image of the first megabyte (the BIOS data area at 400h, the top of
+  the ROM BIOS with its date at F000:FFF5 and the model byte at F000:FFFE),
+  each a GDT selector of its own, instead of all being the BIOS data page:
+  Open Watcom's 16-bit Windows runtime reads F000:FFF5 at start, and every
+  FORTRAN Windows program (the samples too) page-faulted there (W16TEST).
+
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 
 Unmodified OS/2 builds from bitwiseworks' and netlabs' RPM repository

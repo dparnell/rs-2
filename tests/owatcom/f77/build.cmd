@@ -63,14 +63,14 @@ echo == DOS and Windows targets (built here, run separately) >> %LOG%
 wfl386 -q -l=dos4g -fe=fmathx.exe fmath.for >> %LOG% 2>&1
 wfl -q -l=dos -fe=fmathd.exe fmath.for >> %LOG% 2>&1
 wfl -q -l=dos -fe=fileiod.exe fileio.for >> %LOG% 2>&1
-wfl -q -l=windows -bw -fe=fmathw.exe fmath.for >> %LOG% 2>&1
+wfl -q -windows -l=windows -bw -fe=fmathw.exe fmath.for >> %LOG% 2>&1
 copy %WATCOM%\samples\fortran\win\*.for . > nul
 copy %WATCOM%\samples\fortran\win\*.fi . > nul
 set FINCLUDE=%WATCOM%\src\fortran\win;%FINCLUDE%
-wfc -q -windows -fo=ellips16 ellipse.for >> %LOG% 2>&1
-wlink op q system windows op heapsize=32K file ellips16 >> %LOG% 2>&1
-wfc -q -windows -fo=fwcopy16 fwcopy.for >> %LOG% 2>&1
-wlink op q system windows op heapsize=32K file fwcopy16 >> %LOG% 2>&1
+wfc -q -explicit -nowarn -d2 -windows -fo=ellips16 ellipse.for >> %LOG% 2>&1
+wlink d all op q system windows op heapsize=32K file ellips16 >> %LOG% 2>&1
+wfc -q -explicit -nowarn -d2 -windows -fo=fwcopy16 fwcopy.for >> %LOG% 2>&1
+wlink d all op q system windows op heapsize=32K file fwcopy16 >> %LOG% 2>&1
 copy %WATCOM%\binw\dos4gw.exe . > nul
 dir *.exe >> %LOG%
 echo == done >> %LOG%
