@@ -52,6 +52,7 @@ mod reg;
 mod region;
 mod res;
 mod scroll;
+mod stress;
 mod stubs;
 mod toolhelp;
 mod w16lock;
@@ -340,6 +341,8 @@ entries! {
     k_getselectorlimit = 1188, 2;
     k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
+    k_globalpagelock = 1191, 2;
+    k_globalpageunlock = 1192, 2;
     k_isdbcsleadbyte = 1207, 2;
     k_istask = 1320, 2;
     k_isbadreadptr = 1334, 6;
@@ -849,6 +852,18 @@ entries! {
     th_tasksetcsip = 6281, 6;
     th_taskgetcsip = 6282, 2;
     th_taskswitch = 6283, 6;
+    // STRESS
+    st_allocmem = 7902, 4;
+    st_freeallmem = 7903, 0;
+    st_allocfilehandles = 7906, 2;
+    st_unallocfilehandles = 7907, 0;
+    st_getfreefilehandles = 7908, 0;
+    st_allocdiskspace = 7910, 6;
+    st_unallocdiskspace = 7911, 2;
+    st_allocusermem = 7912, 2;
+    st_freeallusermem = 7913, 0;
+    st_allocgdimem = 7914, 2;
+    st_freeallgdimem = 7915, 0;
     // COMPOBJ, OLE2
     co_coinitialize = 7002, 4;
     co_couninitialize = 7003, 0;
@@ -955,6 +970,7 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
         1060 => &[1, 3],
         2001 => &[1, 3],
         2050 => &[0, 2],
+        2092 => &[2],
         6121 => &[2],
         _ => &[],
     };
@@ -967,8 +983,14 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
             }
         }
     }
+    if !os2::heap::check() {
+        trace(format_args!("W16 HEAP BROKEN before {}", idx));
+    }
     trace(format_args!("W16 {}{}", idx, s));
     let r = dispatch_(idx, args);
+    if !os2::heap::check() {
+        trace(format_args!("W16 HEAP BROKEN after {}", idx));
+    }
     trace(format_args!("W16 {} -> {:x}", idx, r));
     r
 }
@@ -991,6 +1013,7 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
         .or_else(|| draw::call(idx, &mut a))
         .or_else(|| lz::call(idx, &mut a))
         .or_else(|| ver::call(idx, &mut a))
+        .or_else(|| stress::call(idx, &mut a))
         .or_else(|| reg::call(idx, &mut a))
         .or_else(|| ole::call(idx, &mut a))
     {

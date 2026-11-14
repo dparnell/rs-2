@@ -183,3 +183,30 @@ unsafe impl GlobalAlloc for Os2Heap {
         unlock();
     }
 }
+
+/// Walk the free list (debugging): false if a node is not where a heap
+/// node can be (unaligned, or its size or next pointer broken).
+pub fn check() -> bool {
+    lock();
+    let mut ok = true;
+    unsafe {
+        let mut cur = (*ptr::addr_of!(HEAP)).head;
+        let mut n = 0;
+        while !cur.is_null() {
+            let a = cur as usize;
+            if a % MIN != 0 || (*cur).size % MIN != 0 || (*cur).size == 0 || (*cur).size > 1 << 28 || n > 1_000_000 {
+                ok = false;
+                break;
+            }
+            let next = (*cur).next as usize;
+            if next != 0 && (next % MIN != 0 || next <= a) {
+                ok = false;
+                break;
+            }
+            cur = (*cur).next;
+            n += 1;
+        }
+    }
+    unlock();
+    ok
+}

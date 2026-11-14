@@ -207,9 +207,11 @@ struct Timer {
 
 struct User {
     classes: Vec<Class>,
-    wnds: Vec<Wnd>,
+    /// Boxed: the `&'static mut Wnd` that `wnd` hands out stays valid
+    /// while windows are made meanwhile (a growing vector moved them).
+    wnds: Vec<alloc::boxed::Box<Wnd>>,
     /// Destroyed windows, freed when no built-in procedure is running.
-    gone: Vec<Wnd>,
+    gone: Vec<alloc::boxed::Box<Wnd>>,
     next_hwnd: u16,
     next_atom: u16,
     inflight: Vec<InFlight>,
@@ -253,7 +255,7 @@ pub fn wnd(h: u16) -> Option<&'static mut Wnd> {
     if h == 0 {
         return None;
     }
-    u().wnds.iter_mut().find(|w| w.hwnd == h)
+    u().wnds.iter_mut().find(|w| w.hwnd == h).map(|w| &mut **w)
 }
 
 /// The state of a built-in control.
@@ -262,11 +264,11 @@ pub fn data<T: 'static>(h: u16) -> Option<&'static mut T> {
 }
 
 fn by_client(pm: u32) -> Option<&'static mut Wnd> {
-    u().wnds.iter_mut().find(|w| w.client == pm)
+    u().wnds.iter_mut().find(|w| w.client == pm).map(|w| &mut **w)
 }
 
 fn by_frame(pm: u32) -> Option<&'static mut Wnd> {
-    u().wnds.iter_mut().find(|w| w.frame == pm || w.client == pm)
+    u().wnds.iter_mut().find(|w| w.frame == pm || w.client == pm).map(|w| &mut **w)
 }
 
 /// The Windows window of a PM window (0 if none).
@@ -1694,7 +1696,7 @@ pub fn create(c: &Create) -> u16 {
     let s = u();
     let hwnd = s.next_hwnd;
     s.next_hwnd = s.next_hwnd.wrapping_add(4).max(0x2004);
-    s.wnds.push(Wnd {
+    s.wnds.push(alloc::boxed::Box::new(Wnd {
         hwnd,
         frame,
         client,
@@ -1717,7 +1719,7 @@ pub fn create(c: &Create) -> u16 {
         created: false,
         need_size: style & (WS_CHILD | WS_POPUP) == 0,
         moved_to: None,
-    });
+    }));
     if !child && parent != 0 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
         unsafe { WinSetOwner(frame, of) };

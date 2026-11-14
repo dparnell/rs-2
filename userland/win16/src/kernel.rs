@@ -209,8 +209,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let s = a.w();
             if s == 0xffff { crate::caller_ds() as u32 } else { s as u32 }
         }
-        // GlobalCompact(min): the free memory.
-        25 => 0x00ff_0000,
+        // GlobalCompact(min): the largest free block (the free memory).
+        25 => {
+            a.l();
+            crate::stress::free_space()
+        }
         // DirectedYield(hTask): as Yield; a debugged task let go runs to
         // its next stop first (toolhelp.rs).
         150 => {
@@ -393,7 +396,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             };
             let (mut hf, mut action) = (0u32, 0u32);
             match unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut action, 0, attr, flags, mode, core::ptr::null_mut()) } {
-                0 => hf,
+                0 if crate::stress::jft_check(hf) => hf,
                 _ => HFILE_ERROR,
             }
         }
@@ -481,8 +484,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             unsafe { os2::DosExit(1, 0xff) };
             0
         }
+        // GlobalPageLock(h), GlobalPageUnlock(h): the page lock count
+        // (rs2 never pages a block out: 1 while locked, as one lock).
+        191 => {
+            let h = a.w();
+            GLOBALS.get().contains_key(&(h | 7)) as u32
+        }
+        192 => {
+            a.w();
+            0
+        }
         // SetHandleCount(n)
-        199 => a.w().min(255) as u32,
+        199 => crate::stress::set_handle_count(a.w()) as u32,
         // IsDBCSLeadByte(c): single-byte code pages.
         207 => 0,
         _ => 0,
@@ -700,6 +713,14 @@ pub fn undefined_dynalink(r: &crate::dos::Regs) {
 /// would have raised.
 pub fn application_error(r: &crate::dos::Regs) {
     use crate::dos::reg::*;
+    // The box is shown by a thread of its own while this one waits, so
+    // that none of the program's window procedures runs meanwhile (they
+    // may fault again; Windows' box is system modal). A fault while it is
+    // shown ends the program.
+    static SHOWN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+    if SHOWN.swap(true, core::sync::atomic::Ordering::Relaxed) {
+        unsafe { os2::DosExit(1, 0xff) };
+    }
     let (cs, ip) = (r[CS], r[IP]);
     let what = match r[INTNO] & 0xff {
         0 => "a Divide by Zero",
@@ -717,11 +738,41 @@ pub fn application_error(r: &crate::dos::Regs) {
     let seg = (1..=n).find(|&i| unsafe { pm::Rs2Win16Selector(6, hmod, i) } as u16 | 7 == cs | 7).unwrap_or(0);
     let (task, module) = (alloc::string::String::from_utf8_lossy(&task), alloc::string::String::from_utf8_lossy(&module));
     let at = if seg != 0 { alloc::format!("{seg:04X}:{ip:04X}") } else { alloc::format!("{cs:04X}:{ip:04X}") };
-    trace(format_args!("WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h)", r[INTNO] & 0xff));
+    trace(format_args!(
+        "WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h, error {:04X}; AX={:04X} BX={:04X} CX={:04X} DX={:04X} SI={:04X} DI={:04X} BP={:04X} SP={:04X} DS={:04X} ES={:04X})",
+        r[INTNO] & 0xff, r[ERROR], r[AX], r[BX], r[CX], r[DX], r[SI], r[DI], r[BP], r[SP], r[DS], r[ES]
+    ));
+    if crate::tracing() {
+        // The stack (the task's: SS is its DGROUP), for the callers.
+        let ss = TASK.get().hinst as u32;
+        let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+        let words: alloc::vec::Vec<u16> = (0..24).map(|i| unsafe { st.add(i).read_unaligned() }).collect();
+        trace(format_args!("WIN16: stack at {ss:04X}:{:04X}: {words:04X?}", r[SP]));
+    }
     let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
     crate::stderr_line(&alloc::format!("WIN16: {}", &t[..t.len() - 1]));
+    *ERROR_TEXT.get() = t.into_bytes();
+    let mut tid = 0u32;
+    if unsafe { os2::DosCreateThread(&mut tid, error_box, 0, 0, 0x1_0000) } == 0 {
+        loop {
+            unsafe { os2::DosSleep(1000) };
+        }
+    }
+    unsafe { error_box(1) };
+}
+
+static ERROR_TEXT: Global<alloc::vec::Vec<u8>> = Global::new(alloc::vec::Vec::new());
+
+/// The Application Error box (`own`: on the faulting thread, its queue
+/// there already), then the program ends.
+unsafe extern "C" fn error_box(own: u32) {
+    if own == 0 {
+        let hab = unsafe { pm::WinInitialize(0) };
+        unsafe { pm::WinCreateMsgQueue(hab, 0) };
+    }
+    let t = ERROR_TEXT.get().as_ptr();
     unsafe {
-        pm::WinMessageBox(pm::HWND_DESKTOP, 0, t.as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
+        pm::WinMessageBox(pm::HWND_DESKTOP, 0, t, b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
         os2::DosExit(1, 0xff);
     }
 }
@@ -832,9 +883,21 @@ pub fn global_handles() -> alloc::vec::Vec<u16> {
     GLOBALS.get().keys().copied().collect()
 }
 
+/// The bytes this task's GlobalAlloc blocks take (stress.rs: its part of
+/// the global heap all tasks share on Windows).
+pub fn global_used() -> u32 {
+    GLOBALS.get().values().fold(0u32, |t, b| t.saturating_add(b.size))
+}
+
 pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let size = n.max(1);
-    let room = size.next_multiple_of(0x10000);
+    // More than the global heap has left fails, as on Windows (STRESS's
+    // AllocMem makes programs meet that).
+    if size > crate::stress::free_space() {
+        return 0;
+    }
+    let shared = fl & GMEM_DDESHARE != 0;
+    let room = (size + if shared { SHARE_TAIL } else { 0 }).next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
     let rw = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE;
     // GMEM_DDESHARE blocks are giveable shared memory: the same address
@@ -852,7 +915,41 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let h = (far(p) >> 16) as u16;
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
+    if shared {
+        share_tail(p, room, size);
+    }
+    crate::stress::global_changed();
     h
+}
+
+/// A GMEM_DDESHARE block's size travels with it to the processes it is
+/// given to (dde.rs), in its last 8 bytes, which its own size never
+/// reaches: "W16S" and the size. Without it the receiver had only the
+/// memory object's size (64 KB) for GlobalSize and DdeGetData.
+const SHARE_TAIL: u32 = 8;
+const SHARE_MAGIC: u32 = 0x5336_3157;
+
+fn share_tail(base: *mut u8, room: u32, size: u32) {
+    if size + SHARE_TAIL <= room {
+        let t = unsafe { base.add((room - SHARE_TAIL) as usize) } as *mut u32;
+        unsafe {
+            t.write_unaligned(SHARE_MAGIC);
+            t.add(1).write_unaligned(size);
+        }
+    }
+}
+
+/// The size a GMEM_DDESHARE block of `room` bytes (its memory object's)
+/// was given by its owner.
+pub fn shared_size(base: *const u8, room: u32) -> u32 {
+    if room < SHARE_TAIL {
+        return room;
+    }
+    let t = unsafe { base.add((room - SHARE_TAIL) as usize) } as *const u32;
+    match unsafe { (t.read_unaligned(), t.add(1).read_unaligned()) } {
+        (SHARE_MAGIC, n) if n + SHARE_TAIL <= room => n,
+        _ => room,
+    }
 }
 
 /// A block over 64 KB: as on Windows, its first selector reaches the
@@ -868,15 +965,16 @@ fn huge_limits(h: u16, room: u32) {
 
 /// A GMEM_DDESHARE block another process gave this one (dde.rs): a
 /// global block here from now on.
-pub fn adopt(h: u16, size: u32) {
+pub fn adopt(h: u16, size: u32, room: u32) {
     let h = h | 7;
     if GLOBALS.get().contains_key(&h) {
         return;
     }
     let base = flat((h as u32) << 16);
-    let room = size.next_multiple_of(0x10000).max(0x10000);
+    let room = room.max(size).next_multiple_of(0x10000).max(0x10000);
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
+    crate::stress::global_changed();
 }
 
 /// Is `h` a GMEM_DDESHARE block of this process?
@@ -890,6 +988,7 @@ pub fn global_free(h: u16) -> bool {
         Some(b) => {
             unsafe { os2::DosFreeMem(b.base) };
             forget_selector(h | 7);
+            crate::stress::global_changed();
             true
         }
         None => false,
@@ -962,6 +1061,11 @@ pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
         set(if r == 110 { 2 } else { r as u16 });
         return HFILE_ERROR;
     }
+    // Beyond the task's handle table: too many open files.
+    if !crate::stress::jft_check(hf) {
+        set(4);
+        return HFILE_ERROR;
+    }
     set(0);
     if style & OF_EXIST != 0 {
         unsafe { os2::DosClose(hf) };
@@ -988,11 +1092,16 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
         return h;
     }
     let size = n.max(1);
-    if size <= b.room {
+    let tail = if b.flags & GMEM_DDESHARE != 0 { SHARE_TAIL } else { 0 };
+    if size + tail <= b.room {
         if size > b.size && fl & GMEM_ZEROINIT != 0 {
             unsafe { core::ptr::write_bytes(b.base.add(b.size as usize), 0, (size - b.size) as usize) };
         }
         b.size = size;
+        if tail != 0 {
+            share_tail(b.base, b.room, size);
+        }
+        crate::stress::global_changed();
         return h;
     }
     // Beyond the reserved tiles: a new block (a new handle).
@@ -1006,6 +1115,7 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     GLOBALS.get().remove(&h);
     unsafe { os2::DosFreeMem(old) };
     forget_selector(h);
+    crate::stress::global_changed();
     nh
 }
 
@@ -1054,6 +1164,26 @@ fn find_free(hp: &Heap, n: u16) -> Option<u16> {
         at = (off as u32 + size as u32).next_multiple_of(4);
     }
     (at + n as u32 <= hp.end as u32).then_some(at as u16)
+}
+
+/// A local heap's blocks in order, the free ones too (TOOLHELP's
+/// LocalFirst/LocalNext): (offset, size, flags (LMEM_), lock count,
+/// free).
+pub fn local_walk(seg: u16) -> Option<alloc::vec::Vec<(u16, u16, u16, u8, bool)>> {
+    let hp = HEAPS.get().iter().find(|(k, _)| **k | 7 == seg | 7)?.1;
+    let mut v = alloc::vec::Vec::new();
+    let mut at = hp.start as u32;
+    for (&off, &(size, fl, locks)) in &hp.blocks {
+        if off as u32 > at {
+            v.push((at as u16, (off as u32 - at) as u16, 0, 0, true));
+        }
+        v.push((off, size, fl, locks, false));
+        at = (off as u32 + size as u32).next_multiple_of(4);
+    }
+    if (hp.end as u32) > at {
+        v.push((at as u16, (hp.end as u32 - at) as u16, 0, 0, true));
+    }
+    Some(v)
 }
 
 fn largest_free(seg: u16) -> u16 {

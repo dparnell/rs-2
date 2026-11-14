@@ -58,6 +58,7 @@ pub const SYSTEM: &[(&[u8], u16, u32)] = &[
     (b"OLE2DISP", 0x0f8f, 7400),
     (b"OLE2NLS", 0x0f97, 7600),
     (b"TYPELIB", 0x0f9f, 7700),
+    (b"STRESS", 0x0fa7, 7900),
     (b"MMSYSTEM", 0x0f6f, 10000),
 ];
 
@@ -229,12 +230,17 @@ pub fn load_library(name: u32) -> u16 {
         }
         tries.push(base.clone());
     }
+    let mut why = alloc::string::String::new();
     for t in &tries {
         let mut z = t.clone();
         z.push(0);
         let mut hmod = 0u32;
         let mut fail = [0u8; 64];
         let r = unsafe { os2::DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, z.as_ptr(), &mut hmod) };
+        if r != 0 && r != 2 && r != 3 && crate::tracing() {
+            let f = unsafe { crate::cstr(fail.as_ptr()) };
+            why = alloc::format!(" ({}: error {r}, {})", t.iter().map(|&c| c as char).collect::<alloc::string::String>(), f.iter().map(|&c| c as char).collect::<alloc::string::String>());
+        }
         if r == 0 {
             let h = register(hmod, false);
             if let Some(m) = MODULES.get().iter_mut().find(|m| m.hmod == hmod) {
@@ -249,7 +255,7 @@ pub fn load_library(name: u32) -> u16 {
         }
     }
     if crate::tracing() {
-        trace(format_args!("W16 LoadLibrary({}) failed", n.iter().map(|&c| c as char).collect::<alloc::string::String>()));
+        trace(format_args!("W16 LoadLibrary({}) failed{why}", n.iter().map(|&c| c as char).collect::<alloc::string::String>()));
     }
     2
 }

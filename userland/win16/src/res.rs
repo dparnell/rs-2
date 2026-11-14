@@ -316,7 +316,7 @@ pub fn kernel(ord: u32, a: &mut Pascal) -> u32 {
             let Some(mut path) = crate::module::find(hi).and_then(|m| crate::module::path_of(m.hmod)) else { return 0xffff };
             path.push(0);
             let (mut hf, mut action, mut pos) = (0u32, 0u32, 0u32);
-            if unsafe { os2::DosOpen(path.as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x40, core::ptr::null_mut()) } != 0 {
+            if unsafe { os2::DosOpen(path.as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x40, core::ptr::null_mut()) } != 0 || !crate::stress::jft_check(hf) {
                 return 0xffff;
             }
             unsafe { os2::DosSetFilePtr(hf, off as i32, 0, &mut pos) };

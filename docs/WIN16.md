@@ -36,7 +36,8 @@ files are involved. This is the media-free alternative to Win-OS/2
 | Printing: printer DCs (CreateDC, CreateIC) on rs2's spooler and PostScript driver, Escape (STARTDOC, NEWFRAME, ENDDOC, ABORTDOC, NEXTBAND, GETPHYSPAGESIZE, PASSTHROUGH...), StartDoc...EndDoc, SetAbortProc, GetDeviceCaps, WIN.INI's printers | works (stage 3) |
 | DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
 | The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
-| TOOLHELP: the task, module and global heap databases, stack traces, MemoryRead/Write, NotifyRegister's task start and end across processes | works (stage 4, below) |
+| TOOLHELP: the task, module and global heap databases, local heap walks, stack traces, MemoryRead/Write, NotifyRegister's task start and end across processes | works (stage 4, below) |
+| STRESS (Windows 3.1's stress library): global memory, USER and GDI heap space, file handles, disk space taken away | works ("STRESS and the heaps") |
 | Debugging another task (breakpoints, single steps, a stopped task's registers) | works through the kernel's debug interface ("TOOLHELP and debuggers") |
 | MMSYSTEM, OLE 2, the rest of the compatibility tail | stage 4 |
 
@@ -152,6 +153,7 @@ OS 2 it
    | SOUND | WIN16.DLL | 5200 + n (stage 4) |
    | SYSTEM | WIN16.DLL | 5400 + n (stage 4) |
    | COMMDLG, SHELL, MMSYSTEM, TOOLHELP, ... | later stages | |
+   | STRESS | WIN16.DLL | 7900 + n ("STRESS and the heaps") |
    | any other name | that DLL, as for OS/2 modules | |
 
    One DLL keeps USER and GDI's shared state (windows, DCs, objects) in
@@ -386,7 +388,11 @@ level of undo, password characters, read-only, tab stops, EM_LIMITTEXT.
 A combo box is an edit control (CBS_SIMPLE, CBS_DROPDOWN) or a drawn
 selection field (CBS_DROPDOWNLIST) with a list box: a child below it, or
 a pop-up shown under it while dropped, the mouse captured by the combo
-box meanwhile as Windows does.
+box meanwhile as Windows does. A list box without LBS_NOINTEGRALHEIGHT
+shows whole items only: made, or given a font, it gets shorter to a
+whole number of items, as Windows' (dialog templates count on it: Open
+Watcom's Image Editor has a list that would otherwise cover its OK
+button).
 
 **Plain windows and the non-client area.** A child window (or a pop-up
 without a caption) with WS_BORDER, WS_DLGFRAME, WS_THICKFRAME or scroll
@@ -616,8 +622,12 @@ of its own, so DDE between two of them crosses processes:
   WM_DDE_DATA's, WM_DDE_POKE's and WM_DDE_ADVISE's block (lParam's low
   word) and WM_DDE_EXECUTE's commands (high word) are given to the
   receiver (DosGiveSharedMem), which adopts them as its own global
-  blocks (GlobalLock, GlobalFree work). GlobalFree clears the caller's
-  saved DS and ES when they hold the freed selector, as Windows does.
+  blocks (GlobalLock, GlobalFree work). A block's size goes with it in
+  its last 8 bytes, beyond the size ("W16S" and the size): the receiver
+  saw only the 64 KB memory object before, and DdeGetData gave Open
+  Watcom's Dialog Editor 65532 bytes for the Resource Editor's 25.
+  GlobalFree clears the caller's saved DS and ES when they hold the
+  freed selector, as Windows does.
 - **PM programs' DDE servers**: a Windows task's WM_DDE_INITIATE also
   goes to PM's DDE (WinDdeInitiate with the atoms' names). A PM server's
   WM_DDE_INITIATEACK, WM_DDE_DATA, WM_DDE_ACK and WM_DDE_TERMINATE come
@@ -1297,6 +1307,83 @@ register and memory handling above is what it would build on).
 
 ![Calmira 2.2, a Windows 3.1 shell written in Delphi, on rs2](images/rs2-win16-calmira.png)
 
+### STRESS and the heaps
+
+Windows 3.1 ships STRESS.DLL, which takes resources away so that a
+program can be tried with little of them left; Open Watcom's Heap
+Walker (`BINW\WHEAPWLK.EXE`) imports it. rs2's is part of WIN16
+(`userland/win16/src/stress.rs`, ordinals 7900 + Windows' own, new
+code after the SDK's description and the original's behaviour):
+
+- **AllocMem(dwLeft)** takes global memory until `dwLeft` bytes are
+  free, in GlobalAlloc blocks of 512 KB that halve when a block would
+  leave less than asked (2000 at most), and returns how many it took;
+  what it took before stays unless less than `dwLeft` is free, when it
+  is given back first. **FreeAllMem** gives it all back.
+- **AllocUserMem(uLeft)**, **AllocGDIMem(uLeft)** do the same with
+  USER's and GDI's local heaps (512-byte blocks, 500 at most), and
+  **FreeAllUserMem**, **FreeAllGDIMem** give it back.
+- **AllocFileHandles(left)** opens files until `left` entries of the
+  task's handle table are free (the number left free, -1 for a negative
+  `left`); **UnAllocFileHandles** closes them, **GetFreeFileHandles**
+  counts the free entries.
+- **AllocDiskSpace(lLeft, uDrive)** makes `STRESS.EAT` in the root of
+  the drive (EDS_WIN 1: the Windows directory's, EDS_CUR 2: the current
+  one, EDS_TEMP 3: GetTempDrive's) so that `lLeft` bytes are free: 1,
+  0 if no more than that was free, -1 for a negative `lLeft`;
+  **UnAllocDiskSpace(uDrive)** deletes it.
+
+What these take from had to be there first:
+
+- **The global heap.** Windows' tasks share one global heap; here each
+  task's blocks are its own process's memory. WIN16 keeps the global
+  heap as a budget of 64 MB that all Windows tasks' GlobalAlloc blocks
+  share: each task publishes the bytes its blocks hold in the TOOLHELP
+  task registry, and GetFreeSpace and GlobalCompact answer what is left
+  of the budget (never more than the system's free memory). GlobalAlloc
+  of more than that fails, as on Windows, so a block AllocMem takes in
+  one task is missing in every other one.
+- **USER's and GDI's heaps.** WIN16 keeps windows and GDI objects in
+  PM, not in 64 KB heaps, so these are 90% free (what GetHeapSpaces,
+  SystemHeapInfo and resource meters showed before) less what
+  AllocUserMem and AllocGDIMem took, in any task (they are published in
+  the registry too). SystemHeapInfo's hUserSegment and hGDISegment are
+  USER's and GDI's module handles; LocalInfo, LocalFirst and LocalNext
+  walk them as a block the system uses, STRESS's blocks
+  (LT_USER_USERSEEUSERDOALLOC in USER's) and the free rest, and
+  GlobalFirst lists them as their DGROUPs.
+- **The handle table.** A task's job file table has 20 entries;
+  SetHandleCount (and INT 21h AH=67h) grows it up to 255. A file that
+  OpenFile, `_lopen`, `_lcreat`, AccessResource or INT 21h opens gets a
+  handle in the table or the open fails (too many open files), as on
+  Windows; the files WIN16 reads for itself (modules, resources,
+  profiles) are closed again at once.
+
+TOOLHELP's heap calls gained what the Heap Walker needs: **LocalInfo,
+LocalFirst and LocalNext** walk a segment's local heap (LocalInit's,
+DGROUP's) block by block, the free ones too (LF_FIXED, LF_MOVEABLE,
+LF_FREE); **GlobalFirst/GlobalNext** list the task's TDB, the segments
+of the program and its DLLs (GT_CODE, GT_DATA, GT_DGROUP with its
+segment number, owned by their module), its GlobalAlloc blocks,
+USER's and GDI's DGROUPs and every other Windows task's TDB, module
+database and segments (its view); a segment with a local heap has
+wHeapPresent and the size its heap reaches (rs2 gives DGROUP a whole
+64 KB tile, Windows' DGROUP stays below 64 KB: the Heap Walker's local
+heap monitor divides by the size's low word). TaskFirst's
+wStackMinimum is how far down the stack has been used (its lowest byte
+that is not zero), and MemManInfo's free figures are GetFreeSpace's.
+
+The Heap Walker works with all of this: the global list (refresh, sort
+by address, handle, owner, size, type, flag), USER's, GDI's and a
+DGROUP's local walk, the local heap monitor (static data, stack
+allocated and used, fixed heap, free heap), the memory display of a
+block with its handle information, Allocate All Memory, Allocate all
+but n KB, Free All Memory, Global Heap Info, Memory Management Info,
+Set Swap Area Size, its configuration and font dialogs and File > Save
+(`C:\HWG000`). Display > Selector List needs Open Watcom's WDEBUG.386,
+a VxD (out of scope: "Later stages"), and says so. W16TEST's `STRESS`
+group checks STRESS, the heap figures and the local and global walks.
+
 ## Building the test programs
 
 The test programs are C, built with Open Watcom v2's Win16 target
@@ -1332,7 +1419,7 @@ on drive C: as `C:\RS2\*.EXE` when Open Watcom is installed.
   --timeout 260 --init "RS2\W16TEST.EXE"` ends with `w16test done: 0
   failure(s)`. `W16TEST GROUP...` runs only the named groups of stage
   2's rest: MDI, GDI (bitmaps, brushes, ROPs, DIBs, bitmap and cursor
-  resources), RGN, MAP, FONT, DLL, INI. It imports `W16IMP.DLL`
+  resources), RGN, MAP, FONT, DLL, INI, STRESS (STRESS, the heap figures, TOOLHELP's heap walks). It imports `W16IMP.DLL`
   (`w16imp.c`; its import library is made from the DLL by wlib), which
   the loader loads with it.
 
@@ -1369,6 +1456,16 @@ Windows 2.x programs, SOUND and SYSTEM.
 
 TOOLHELP is done, debugging another task included ("TOOLHELP and
 debuggers").
+
+**What needs Windows' one address space** (each Windows task is a
+process here) does not work and is not planned: a system-wide hook
+whose DLL calls back into the hooking program's code from another task
+(Open Watcom's Spy: its hooks see only its own process), and helper
+tasks that a program starts with LoadModule and then calls into (Dr.
+Watcom's debugging information processors, `BINW\DWARF.DLL` and the
+others, are Windows programs used that way). DDEML monitors
+(APPCLASS_MONITOR, Open Watcom's DDE Spy) could be done (each task's
+DDEML telling the monitors of its traffic) but are not yet.
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode

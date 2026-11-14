@@ -13,6 +13,7 @@
 //! message loop of their own (synchronous) or complete later with
 //! XTYP_XACT_COMPLETE (TIMEOUT_ASYNC).
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use thunk16::{flat, Pascal, PascalCall};
 
@@ -127,11 +128,14 @@ struct Conv {
     pending_mem: u16,
 }
 
+/// Boxed entries: the `&'static mut` that `inst`, `conv` and `data_of`
+/// hand out stay valid while entries are added meanwhile (a growing
+/// vector moved them: a callback making a conversation or data handle).
 struct Ddeml {
-    insts: Vec<Inst>,
-    convs: Vec<Conv>,
+    insts: Vec<Box<Inst>>,
+    convs: Vec<Box<Conv>>,
     /// Data handles: (handle, global block, size, format, item, owned).
-    data: Vec<(u32, u16, u32, u16, u16, bool)>,
+    data: Vec<Box<(u32, u16, u32, u16, u16, bool)>>,
     next: u32,
     /// A connection being made: (instance, window, list, single).
     connecting: Option<(u32, u16, u32, bool)>,
@@ -150,11 +154,11 @@ fn next() -> u32 {
 }
 
 fn inst(id: u32) -> Option<&'static mut Inst> {
-    d().insts.iter_mut().find(|i| i.id == id)
+    d().insts.iter_mut().find(|i| i.id == id).map(|i| &mut **i)
 }
 
 fn conv(h: u32) -> Option<&'static mut Conv> {
-    d().convs.iter_mut().find(|c| c.h == h)
+    d().convs.iter_mut().find(|c| c.h == h).map(|c| &mut **c)
 }
 
 fn set_error(id: u32, e: u16) {
@@ -172,12 +176,12 @@ fn new_data(bytes: &[u8], fmt: u16, item: u16, owned: bool) -> u32 {
     }
     unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), flat(((g | 7) as u32) << 16), bytes.len()) };
     let h = 0x0d00_0000 | next();
-    d().data.push((h, g | 7, bytes.len() as u32, fmt, item, owned));
+    d().data.push(Box::new((h, g | 7, bytes.len() as u32, fmt, item, owned)));
     h
 }
 
 fn data_of(h: u32) -> Option<&'static mut (u32, u16, u32, u16, u16, bool)> {
-    d().data.iter_mut().find(|x| x.0 == h)
+    d().data.iter_mut().find(|x| x.0 == h).map(|x| &mut **x)
 }
 
 fn data_bytes(h: u32) -> Option<Vec<u8>> {
@@ -187,7 +191,7 @@ fn data_bytes(h: u32) -> Option<Vec<u8>> {
 
 fn free_data(h: u32) -> bool {
     let Some(i) = d().data.iter().position(|x| x.0 == h) else { return false };
-    let (_, g, ..) = d().data.remove(i);
+    let (_, g, ..) = *d().data.remove(i);
     global_free(g);
     true
 }
@@ -290,7 +294,7 @@ pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
                 return 0;
             }
             let hc = 0x0c00_0000 | next();
-            d().convs.push(Conv { h: hc, inst: id, wnd: h, partner: wp, client: true, service: lo, topic: hi, connected: true, user: 0, list, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 });
+            d().convs.push(Box::new(Conv { h: hc, inst: id, wnd: h, partner: wp, client: true, service: lo, topic: hi, connected: true, user: 0, list, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 }));
             0
         }
         WM_DDE_TERMINATE => {
@@ -334,7 +338,7 @@ fn initiate(id: u32, client: u16, app: u16, topic: u16) {
             return;
         }
         let hc = 0x0c00_0000 | next();
-        d().convs.push(Conv { h: hc, inst: id, wnd: w, partner: client, client: false, service: svc, topic, connected: true, user: 0, list: 0, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 });
+        d().convs.push(Box::new(Conv { h: hc, inst: id, wnd: w, partner: client, client: false, service: svc, topic, connected: true, user: 0, list: 0, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 }));
         // The ACK carries atoms of our own (the client deletes them).
         let (a, t) = (add_atom_ref(svc), add_atom_ref(topic));
         send(client, WM_DDE_ACK, w, (t as u32) << 16 | a as u32);
@@ -754,7 +758,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             let id = 0x0001_0000 | next();
             let w = create_window(crate::kernel::TASK.get().hinst);
-            d().insts.push(Inst { id, callback: cb, flags: fl, error: 0, services: Vec::new(), wnd: w, blocked: false });
+            d().insts.push(Box::new(Inst { id, callback: cb, flags: fl, error: 0, services: Vec::new(), wnd: w, blocked: false }));
             unsafe { pid.write_unaligned(id) };
             0
         }

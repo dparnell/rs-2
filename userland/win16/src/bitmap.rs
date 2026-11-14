@@ -662,14 +662,18 @@ pub fn dib_pattern_brush(g: u16, _usage: u16) -> u16 {
 
 /// The average colour of a bitmap (a pattern brush's colour).
 fn average(h: u16) -> u32 {
-    let Some((_, w, bh, _)) = bitmap_of(h) else { return 0 };
-    let (w, bh) = (w.min(8), bh.min(8));
-    let mut bmi = info(w, bh, 24, &[]);
-    let stride = (w as usize * 3).div_ceil(4) * 4;
+    let Some((_, bw, bh, _)) = bitmap_of(h) else { return 0 };
+    // GpiQueryBitmapBits gives whole scan lines of the bitmap: the buffer
+    // holds its full width (an 8-pel stride for a wider bitmap overran the
+    // buffer and broke WIN16's heap: the Dialog Editor's pattern brushes).
+    let mut bmi = info(bw, bh, 24, &[]);
+    let stride = (bw as usize * 3).div_ceil(4) * 4;
     let mut buf = alloc::vec![0u8; stride * bh as usize];
     with_ps(h, |hps, _| unsafe { GpiQueryBitmapBits(hps, 0, bh, buf.as_mut_ptr(), bmi.as_mut_ptr()) });
+    // The top left 8 x 8 pels (PM's rows count from the bottom).
+    let (w, rows) = (bw.min(8), bh.min(8));
     let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
-    for y in 0..bh as usize {
+    for y in (bh - rows) as usize..bh as usize {
         for x in 0..w as usize {
             let o = y * stride + x * 3;
             b += buf[o] as u32;
@@ -677,7 +681,7 @@ fn average(h: u16) -> u32 {
             r += buf[o + 2] as u32;
         }
     }
-    let n = (w * bh).max(1) as u32;
+    let n = (w * rows).max(1) as u32;
     (b / n) << 16 | (g / n) << 8 | r / n
 }
 

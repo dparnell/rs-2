@@ -24,6 +24,7 @@ const LBS_OWNERDRAWFIXED: u32 = 0x0010;
 const LBS_OWNERDRAWVARIABLE: u32 = 0x0020;
 const LBS_HASSTRINGS: u32 = 0x0040;
 const LBS_USETABSTOPS: u32 = 0x0080;
+const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
 const LBS_WANTKEYBOARDINPUT: u32 = 0x0400;
 const LBS_EXTENDEDSEL: u32 = 0x0800;
 const LBS_DISABLENOSCROLL: u32 = 0x1000;
@@ -189,6 +190,27 @@ fn measure(h: u16) {
     if let Some(l) = lb(h) {
         l.item_h = ih.max(1);
     }
+}
+
+/// A list box without LBS_NOINTEGRALHEIGHT shows whole items only: as
+/// Windows' does when it is made or given a font, it is made shorter to
+/// the nearest number of items (a dialog's list then ends above the
+/// buttons its template puts right below it). A combo box's list is
+/// sized by the combo box.
+fn integral_height(h: u16) {
+    let st = style(h);
+    if st & (LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWVARIABLE) != 0 || lb(h).is_none_or(|l| l.combo != 0) {
+        return;
+    }
+    let ih = lb(h).map_or(16, |l| l.item_h).max(1);
+    let (_, ch) = client_size(h);
+    let extra = ch % ih;
+    if ch <= ih || extra == 0 {
+        return;
+    }
+    let r = window_rect(h);
+    // SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    set_window_pos(h, 0, 0, 0, r[2] - r[0], r[3] - r[1] - extra, 0x16);
 }
 
 /// Insert an item (sorted when LBS_SORT): its index.
@@ -421,6 +443,7 @@ pub fn proc_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
                 w.data = Some(alloc::boxed::Box::new(ListBox { items: Vec::new(), cur: -1, caret: 0, anchor: 0, top: 0, font: 0, item_h: 16, focus: false, captured: false, tabs: Vec::new(), combo, hext: 0 }));
             }
             measure(h);
+            integral_height(h);
             update_bar(h);
             0
         }
@@ -438,6 +461,7 @@ pub fn proc_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
                 l.font = wp;
             }
             measure(h);
+            integral_height(h);
             update_bar(h);
             if lp & 0xffff != 0 {
                 invalidate(h, None);

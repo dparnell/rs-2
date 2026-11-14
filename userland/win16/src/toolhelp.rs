@@ -92,6 +92,10 @@ struct Slot {
     path: [u8; 82],
     /// OutputDebugString's last string.
     out: [u8; 130],
+    /// What the task takes of the heaps Windows shares among tasks: its
+    /// GlobalAlloc bytes, and the USER and GDI heap bytes STRESS ate
+    /// (stress.rs).
+    heap: [u32; 3],
 }
 
 #[repr(C)]
@@ -324,6 +328,7 @@ pub fn task_started(hinst: u16, psp: u16, cmdshow: u16, stack: (u16, u16, u16, u
         name: [0; 10],
         path: [0; 82],
         out: [0; 130],
+        heap: crate::stress::own_usage(),
     };
     let hmod = exe_hmod();
     let n = (unsafe { crate::pm::Rs2Win16Selector(6, hmod, 0) } as usize).min(SEGS);
@@ -376,6 +381,26 @@ pub fn task_exiting(code: u16) {
         }
         unlock(r);
     }
+}
+
+/// What this task takes of the shared heaps changed (stress.rs): the
+/// other tasks see it in GetFreeSpace, GetHeapSpaces and SystemHeapInfo.
+pub fn publish_usage(heap: [u32; 3]) {
+    if ST.get().tdb != 0 {
+        with_slot(pid(), |s| s.heap = heap);
+    }
+}
+
+/// The other tasks' parts of the shared heaps (global, USER, GDI).
+pub fn others_usage() -> [u32; 3] {
+    let me = pid();
+    let mut t = [0u32; 3];
+    for s in tasks().iter().filter(|s| s.pid != me) {
+        for (a, b) in t.iter_mut().zip(s.heap) {
+            *a = a.saturating_add(b);
+        }
+    }
+    t
 }
 
 /// OutputDebugString: NFY_OUTSTR (the string travels in the registry).
@@ -1080,6 +1105,20 @@ fn task_list() -> Vec<(u16, u32)> {
 /// TASKENTRY: dwSize, hTask, hTaskParent, hInst, hModule, wSS, wSP,
 /// wStackTop, wStackMinimum, wStackBottom, wcEvents, hQueue,
 /// szModule[10], wPSPOffset, hNext.
+/// How far down a task's stack has been used (TASKENTRY's wStackMinimum,
+/// Windows' pStackMin): the lowest byte in it that is not zero, the
+/// stack's memory having started zeroed (`ss` this process's selector:
+/// the task's own, or the copy in its view).
+fn stack_low(ss: u16, top: u16, bottom: u16) -> Option<u16> {
+    let (base, limit) = selector(ss)?;
+    let end = (bottom as u32).min(limit + 1);
+    if top as u32 >= end {
+        return None;
+    }
+    let s = unsafe { core::slice::from_raw_parts((base as usize + top as usize) as *const u8, (end - top as u32) as usize) };
+    Some(s.iter().position(|&b| b != 0).map_or(bottom, |i| top + i as u16))
+}
+
 fn fill_task(p: *mut u8, h: u16, pid_: u32, next: u16) -> u32 {
     let Some(t) = slot(pid_) else { return 0 };
     let (inst, module, ss) = if pid_ == pid() {
@@ -1095,7 +1134,7 @@ fn fill_task(p: *mut u8, h: u16, pid_: u32, next: u16) -> u32 {
     put16(p, 12, ss);
     put16(p, 14, t.sp);
     put16(p, 16, t.stack_top);
-    put16(p, 18, t.stack_min);
+    put16(p, 18, stack_low(ss, t.stack_top, t.stack_bottom).unwrap_or(t.stack_min));
     put16(p, 20, t.stack_bottom);
     put16(p, 22, 0);
     put16(p, 24, (t.hmq >> 16) as u16 | 7);
@@ -1176,71 +1215,200 @@ fn selector(sel: u16) -> Option<(u32, u32)> {
     (sel & 4 != 0 && base != u32::MAX && limit != u32::MAX).then_some((base, limit))
 }
 
+/// Is `sel` a code selector (LAR's type bit 11)?
+fn is_code(sel: u16) -> bool {
+    let mut ar: u32 = 0;
+    unsafe { core::arch::asm!("lar {ar:e}, {sel:e}", ar = inout(reg) ar, sel = in(reg) sel as u32, options(nostack)) };
+    ar & 0x800 != 0
+}
+
+/// This process's Windows modules' segments: (selector, the module's
+/// handle, segment number, whether it is the module's DGROUP).
+fn own_segments() -> Vec<(u16, u16, u16, bool)> {
+    let mut v: Vec<(u16, u16, u16, bool)> = Vec::new();
+    for (h, _, _) in crate::module::list() {
+        let Some(m) = crate::module::find(h) else { continue };
+        let (hmod, dgroup) = (m.hmod, m.dgroup);
+        let n = unsafe { crate::pm::Rs2Win16Selector(6, hmod, 0) }.min(255);
+        for i in 1..=n {
+            let sel = unsafe { crate::pm::Rs2Win16Selector(6, hmod, i) } as u16;
+            if sel != 0 && !v.iter().any(|x| x.0 == sel | 7) {
+                v.push((sel | 7, h, i as u16, sel | 7 == dgroup | 7));
+            }
+        }
+    }
+    v
+}
+
+/// A segment of another task's view: its type from the module database's
+/// segment table (the data flag, the automatic data segment).
+fn view_seg_type(v: &View, seg: u16) -> u16 {
+    if v.moddb == 0 || seg == 0 {
+        return 3;
+    }
+    let p = flat((v.moddb as u32) << 16);
+    let (auto, segtab) = (get16(p, 0x0e), get16(p, 0x22) as usize);
+    let flags = get16(p, segtab + 10 * (seg as usize - 1) + 4);
+    if seg == auto {
+        1 // GT_DGROUP
+    } else if flags & 1 != 0 {
+        2 // GT_DATA
+    } else {
+        3 // GT_CODE
+    }
+}
+
+/// Another task's DGROUP as Windows allocates it: the automatic data
+/// segment's size, its local heap and its stack (the module database's
+/// header), below 64 KB.
+fn view_dgroup_size(v: &View) -> Option<u32> {
+    if v.moddb == 0 {
+        return None;
+    }
+    let p = flat((v.moddb as u32) << 16);
+    let (auto, segtab) = (get16(p, 0x0e) as usize, get16(p, 0x22) as usize);
+    if auto == 0 {
+        return None;
+    }
+    let min = match get16(p, segtab + 10 * (auto - 1) + 6) {
+        0 => 0x1_0000,
+        n => n as u32,
+    };
+    Some((min + get16(p, 0x10) as u32 + get16(p, 0x12) as u32).next_multiple_of(16).min(0xfff0))
+}
+
 /// GLOBALENTRY: dwSize, dwAddress, dwBlockSize, hBlock, wcLock,
 /// wcPageLock, wFlags, wHeapPresent, hOwner, wType, wData, dwNext,
 /// dwNextAlt.
 fn fill_global(p: *mut u8, h: u16, next: u32) -> bool {
-    let Some((base, limit)) = selector(h | 7) else { return false };
-    let tdb = ST.get().tdb;
-    let inst = crate::kernel::TASK.get().hinst;
-    // A block of another task's view.
-    if let Some((v, ty, seg)) = view_block(h) {
+    let entry = |base: u32, size: u32, h: u16, lock: u16, heap: bool, owner: u16, ty: u16, data: u16| {
         put32(p, 4, base);
-        put32(p, 8, limit + 1);
-        put16(p, 12, h | 7);
-        put16(p, 14, 0);
+        put32(p, 8, size);
+        put16(p, 12, h);
+        put16(p, 14, lock);
         put16(p, 16, 0);
         put16(p, 18, 0);
-        put16(p, 20, 0);
-        put16(p, 22, if ty == 4 { v.tdb } else { v.moddb });
+        put16(p, 20, heap as u16);
+        put16(p, 22, owner);
         put16(p, 24, ty);
-        put16(p, 26, seg);
+        put16(p, 26, data);
         put32(p, 28, next);
         put32(p, 32, 0);
+    };
+    // USER's and GDI's DGROUPs (their local heaps: stress.rs), which have
+    // no memory here.
+    for m in &crate::module::SYSTEM[1..3] {
+        if h | 7 == m.1 | 7 {
+            entry(0, 0x1_0000, m.1, 1, true, m.1, 1, 0);
+            return true;
+        }
+    }
+    let Some((base, limit)) = selector(h | 7) else { return false };
+    let tdb = ST.get().tdb;
+    // A block of another task's view.
+    if let Some((v, ty, seg)) = view_block(h) {
+        let ty = if ty == 3 { view_seg_type(v, seg) } else { ty };
+        let size = if ty == 1 { view_dgroup_size(v).unwrap_or(limit + 1) } else { limit + 1 };
+        entry(base, size, h | 7, 0, ty == 1, if ty == 4 { v.tdb } else { v.moddb }, ty, seg);
         return true;
     }
-    let ty = if h | 7 == tdb | 7 {
-        4 // GT_TASK
-    } else if h | 7 == inst | 7 {
-        1 // GT_DGROUP
-    } else if crate::module::find(h).is_some() {
-        3 // GT_CODE (a module's segment)
-    } else {
-        2 // GT_DATA
-    };
-    put32(p, 4, base);
-    put32(p, 8, limit + 1);
-    put16(p, 12, h);
-    put16(p, 14, crate::kernel::lock_count(h));
-    put16(p, 16, 0);
-    put16(p, 18, 0);
-    put16(p, 20, (ty == 1) as u16);
-    put16(p, 22, if ty == 4 { tdb } else { crate::module::exe() });
-    put16(p, 24, ty);
-    put16(p, 26, 0);
-    put32(p, 28, next);
-    put32(p, 32, 0);
+    if h | 7 == tdb | 7 {
+        entry(base, limit + 1, h, 0, false, tdb, 4, 0); // GT_TASK
+        return true;
+    }
+    // A segment of the program or one of its DLLs.
+    if let Some(&(_, owner, seg, dgroup)) = own_segments().iter().find(|x| x.0 == h | 7) {
+        let ty = if dgroup { 1 } else if is_code(h) { 3 } else { 2 };
+        let walk = crate::kernel::local_walk(h);
+        let heap = dgroup || walk.is_some();
+        // A segment with a local heap: as far as its heap reaches (rs2
+        // gives DGROUP a whole 64 KB tile; Windows' grows with the heap and
+        // stays below 64 KB, and the Heap Walker's local heap monitor
+        // divides by the size's low word).
+        let size = match walk.as_ref().and_then(|w| w.last()) {
+            Some(&(off, n, ..)) => (off as u32 + n as u32).next_multiple_of(16).min(limit + 1),
+            None => limit + 1,
+        };
+        entry(base, size, h, crate::kernel::lock_count(h), heap, owner, ty, seg);
+        return true;
+    }
+    // A GlobalAlloc block (GT_DATA, the program's).
+    let heap = crate::kernel::local_walk(h).is_some();
+    let size = crate::kernel::global_size(h).max(1);
+    entry(base, size.min(limit + 1), h, crate::kernel::lock_count(h), heap, crate::module::exe(), 2, 0);
     true
 }
 
-/// The global blocks GlobalFirst/GlobalNext walk: the task's TDB,
-/// DGROUP and its GlobalAlloc blocks.
-fn globals() -> Vec<u16> {
+/// The global blocks GlobalFirst/GlobalNext walk: the task's TDB, its
+/// modules' segments, its GlobalAlloc blocks, USER's and GDI's DGROUPs,
+/// then each other task's TDB, module database and segments (its view).
+/// `views`: make the views of tasks not seen yet (GlobalFirst; GlobalNext
+/// keeps the list GlobalFirst saw).
+fn globals(views: bool) -> Vec<u16> {
+    if views {
+        task_list();
+    }
     let mut v = Vec::new();
     let s = ST.get();
     if s.tdb != 0 {
-        v.push(s.tdb);
+        v.push(s.tdb | 7);
     }
-    v.push(crate::kernel::TASK.get().hinst);
-    v.extend(crate::kernel::global_handles());
-    v.dedup();
+    v.extend(own_segments().iter().map(|x| x.0));
+    v.extend(crate::kernel::global_handles().into_iter().map(|h| h | 7));
+    v.extend(crate::module::SYSTEM[1..3].iter().map(|m| m.1));
+    for w in s.views.iter().filter(|w| !w.exited) {
+        v.push(w.tdb | 7);
+        if w.moddb != 0 {
+            v.push(w.moddb | 7);
+        }
+        v.extend(w.segs.iter().map(|x| x.1 | 7));
+    }
+    let mut seen = alloc::collections::BTreeSet::new();
+    v.retain(|h| seen.insert(*h));
     v
 }
 
 fn global_at(p: *mut u8, i: usize) -> u32 {
-    let g = globals();
+    let g = globals(i == 0);
     let Some(&h) = g.get(i) else { return 0 };
     fill_global(p, h, if i + 1 < g.len() { i as u32 + 1 } else { 0 }) as u32
+}
+
+/// A local heap's blocks: (handle, offset, size, LF_ flags, lock count,
+/// LT_ type, heap type). A segment's heap (kernel.rs), or USER's and
+/// GDI's (stress.rs).
+fn local_entries(h: u16) -> Option<Vec<(u16, u16, u16, u16, u16, u16, u16)>> {
+    if let Some(v) = crate::stress::system_heap(h) {
+        let ty = if h | 7 == crate::module::SYSTEM[1].1 | 7 { 1 } else { 2 };
+        return Some(v.into_iter().map(|(off, n, fl, lt)| (if fl & 2 != 0 { 0 } else { off }, off, n, fl, 0, lt, ty)).collect());
+    }
+    let v = crate::kernel::local_walk(h)?;
+    Some(
+        v.into_iter()
+            .map(|(off, n, fl, locks, free)| {
+                // LMEM_MOVEABLE: LF_MOVEABLE, else LF_FIXED; LT_FREE.
+                let lf = if free { 2 } else if fl & 2 != 0 { 4 } else { 1 };
+                (if free { 0 } else { off }, off, n, lf, locks as u16, if free { 0xff } else { 0 }, 0)
+            })
+            .collect(),
+    )
+}
+
+/// LOCALENTRY: dwSize, hHandle, wAddress, wSize, wFlags, wcLock, wType,
+/// hHeap, wHeapType, wNext.
+fn local_at(p: *mut u8, h: u16, i: usize) -> u32 {
+    let Some(v) = local_entries(h) else { return 0 };
+    let Some(&(hh, off, n, fl, locks, ty, hty)) = v.get(i) else { return 0 };
+    put16(p, 4, hh);
+    put16(p, 6, off);
+    put16(p, 8, n);
+    put16(p, 10, fl);
+    put16(p, 12, locks);
+    put16(p, 14, ty);
+    put16(p, 16, h);
+    put16(p, 18, hty);
+    put16(p, 20, if i + 1 < v.len() { i as u16 + 1 } else { 0 });
+    1
 }
 
 /// STACKTRACEENTRY: dwSize, hTask, wSS, wBP, wCS, wIP, hModule, wSegment,
@@ -1319,7 +1487,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             if !sized(p, 10) {
                 return Some(0);
             }
-            put16(p, 4, globals().len() as u16);
+            put16(p, 4, globals(true).len() as u16);
             put16(p, 6, 0);
             put16(p, 8, 0);
             1
@@ -1345,16 +1513,34 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             };
             if sel == 0 || seg == 0 { 0 } else { fill_global(p, sel, 0) as u32 }
         }
-        // LocalInfo, LocalFirst, LocalNext: the local heaps are not
-        // walked.
-        6256 | 6257 => {
-            a.p();
-            a.w();
-            0
+        // LocalInfo(lpli: dwSize, wcItems, hHeap): the blocks of a local
+        // heap (a segment's, or USER's or GDI's).
+        6256 => {
+            let (p, h) = (a.p(), a.w());
+            if !sized(p, 6) {
+                return Some(0);
+            }
+            match local_entries(h) {
+                Some(v) => {
+                    put16(p, 4, v.len() as u16);
+                    1
+                }
+                None => 0,
+            }
+        }
+        // LocalFirst(lple, hHeap), LocalNext(lple): LOCALENTRY's wNext is
+        // the next block's index.
+        6257 => {
+            let (p, h) = (a.p(), a.w());
+            if !sized(p, 22) { 0 } else { local_at(p, h, 0) }
         }
         6258 => {
-            a.p();
-            0
+            let p = a.p();
+            if !sized(p, 22) {
+                return Some(0);
+            }
+            let (h, next) = (get16(p, 16), get16(p, 20));
+            if next == 0 { 0 } else { local_at(p, h, next as usize) }
         }
         // ModuleFirst(lpme), ModuleNext(lpme)
         6259 | 6260 => {
@@ -1467,8 +1653,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             if !sized(p, 12) {
                 return Some(0);
             }
-            put16(p, 4, 90);
-            put16(p, 6, 90);
+            put16(p, 4, crate::stress::free_percent(1));
+            put16(p, 6, crate::stress::free_percent(2));
             put16(p, 8, crate::module::SYSTEM[1].1);
             put16(p, 10, crate::module::SYSTEM[2].1);
             1
@@ -1482,7 +1668,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let mut total = 0u32;
             unsafe { os2::DosQuerySysInfo(17, 17, &mut total, 4) };
             let pages = (total / 4096).max(1024);
-            for (o, v) in [(4, total / 2), (8, pages / 2), (12, pages / 2), (16, pages * 4), (20, pages / 2), (24, pages / 2), (28, pages), (32, pages * 2), (36, 0)] {
+            // The largest free block and the free pages are GetFreeSpace's
+            // (the global heap, stress.rs); the linear space is the heap's.
+            let free = crate::stress::free_space();
+            let fp = free / 4096;
+            let linear = crate::stress::GLOBAL_HEAP / 4096;
+            for (o, v) in [(4, free), (8, fp), (12, fp), (16, linear), (20, pages), (24, fp.min(pages)), (28, pages), (32, fp), (36, 0)] {
                 put32(p, o, v);
             }
             put16(p, 40, 4096);

@@ -19,7 +19,8 @@ WATCOM = os.environ.get('WATCOM', os.path.expanduser('~/opt/watcom'))
 BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000, 'WIN87EM': 5000,
          'SOUND': 5200, 'SYSTEM': 5400, 'COMMDLG': 6000, 'DDEML': 6100, 'TOOLHELP': 6200,
          'VER': 6300, 'LZEXPAND': 6400, 'SHELL': 6500, 'COMPOBJ': 7000, 'OLE2': 7100,
-         'STORAGE': 7300, 'OLE2DISP': 7400, 'OLE2NLS': 7600, 'TYPELIB': 7700, 'MMSYSTEM': 10000}
+         'STORAGE': 7300, 'OLE2DISP': 7400, 'OLE2NLS': 7600, 'TYPELIB': 7700, 'STRESS': 7900,
+         'MMSYSTEM': 10000}
 # OLE's functions that are stubs succeed (S_OK) only here; the rest of
 # their HRESULT functions fail (E_FAIL), so that no caller uses an
 # output the stub never wrote.
