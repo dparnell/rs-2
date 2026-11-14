@@ -729,8 +729,9 @@ image. The whole run takes about 3 minutes in QEMU.
 | BINW's other Windows tools: `wimgedit`, `wre`, `wzoom`, `wspy` | works | Start on WIN16 with their menus, tool bars and palettes (UI2.CMD); not used further. CTL3DV2.DLL is looked for and not there, as on a Windows without it. |
 | `wheapwlk` (Heap Walker) | fails | Imports STRESS (Windows 3.1's STRESS.DLL), which rs2's WIN16 does not have. |
 | `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | works | It imports `NAMPIPES`, OS/2 1.x's named pipe module. Warp has it: `\OS2\DLL\NAMPIPES.DLL` (1 KB) is an LX forwarder module whose 14 entries go to the kernel's 16-bit DOSCALLS 399-412; rs2 has its own NAMPIPES.DLL made the same way and those kernel calls. NMPBIND starts at boot, runs, and answers the bindery requests (NMPSERV registers with it). |
-| Remote debugging over named pipes: `nmpserv`, `wdw -tr=nmp` | partial | NMPSERV starts and registers with NMPBIND; the debugger's NMP trap file finds the server, but the debugger does not come up (the link through NMPBIND's relay threads; not followed up). |
-| `ide2make`, the other remote debug servers (`tcpserv`, `serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | |
+| Remote debugging over named pipes: `nmpserv`, `wd -tr=nmp`, `wdw -tr=nmp` | works | On one machine (`tests/owatcom/NMP.CMD [wdw]`): NMPSERV in a VIO window, the debugger in another (or wdw on the desktop); NMPBIND (CONFIG.SYS `RUN=`) links them through its pipes and relay threads. The debugger loads HELLO.EXE through the server (NMPSERV starts it in its own session with `DosDebug`), stops at `main` with the source and the locals, F10 steps over (the locals change), F5 runs it to its end ("The task has completed running"). Startup takes about two minutes in QEMU. |
+| Remote debugging over TCP/IP: `tcpserv`, `wd -tr=tcp;127.0.0.1` | works | On one machine over rs2's loopback (`tests/owatcom/TCP.CMD`): TCPSERV listens on its port 3563, the debugger connects to it, stops at `main`, steps with the locals and runs HELLO.EXE to its end, as over named pipes. Nothing needed fixing. |
+| `ide2make`, the other remote debug servers (`serserv`, `parserv`, `netserv`, `batserv`), `os2edit` | not tried | SERSERV and PARSERV need two machines joined by a serial or parallel cable (QEMU could do it with two VMs; not tried); NETSERV is for NetBIOS. |
 | `ide` (IDE) | works | Started from its object in the "Open Watcom C/C++" folder (or by name). Menus from the mouse and the keyboard (Alt+letter, the accelerators: Ctrl+N, Ins, F4, Ctrl+R, Ctrl+D ...). File > New Project (`C:\OWTEST\TEST.WPJ`, a name that does not exist yet in the Open dialog), New Target (OS/2 32-bit, Executable), Sources > New Source (`hello.c`), File > Save Project, and the project opened again (Ctrl+O). Targets > Make (F4): the IDE's log window shows `wmake`, `wcc386` and `wlink` running through its batch server, "Execution complete". Targets > Run (Ctrl+R) starts TEST.EXE in its own session; the switch notebooks (Target Options > OS/2 Linking Switches, with its pages, Reset, CopyRel); a source opened from the target window in EPM (through EPMLINK.DLL and DDE, with Open Watcom's EPM macros: syntax colours, the Compiler menu); Local Debug (Ctrl+D) starts the windowed debugger on the target. F1 in the IDE's main window showed no help (not followed up). |
 | `wdw` (windowed debugger) | works | Local Debug from the IDE (and its "Windowed Debugger" object): the Source, Locals, Watches and Modules windows inside its main window, the action bar and tool bar, F10 steps over (the locals change), the Run menu from Alt+R, F5 runs the program to its end. |
 | `wbrw` (source browser) | works | `wbrw database test.dbr file hello.mbr` (a module file from `wcc386 -db`): it merges the database, shows the Inheritance view, View > List lists the symbols with their kinds; the menus. The IDE's Targets > Browse says the target needs `-db` first (and Open Watcom ships no OS/2 `wbrg`, the database merger the IDE runs). |
@@ -756,6 +757,24 @@ Fixed for it:
   completes the waiting read at once); NMPBIND answers and disconnects at
   once, and NMPSERV and the NMP trap file said "NMPBIND not found"
   (APITEST).
+- Named pipes: a read in byte read mode (the mode `DosOpen` leaves a
+  client in) on a message pipe returns one message, or what is left of
+  it, as IBM's kernel copies one message per read whatever the read mode;
+  `DosPeekNPipe` gives the first message. The NMP link writes a 1-byte
+  packet and then its length as two messages and tells them apart by the
+  count read; NMPSERV read both at once and the session stalled (APITEST).
+- Kernel: 16-bit `DosGetInfoSeg` gives the running thread's own copy of
+  the local information segment (as the DosLocalInfo constant already
+  did) instead of the process's shared page, whose tidCurrent holds only
+  one of the threads running on two CPUs. Open Watcom's 16-bit runtime
+  owns its locks by that thread ID; NMPBIND's relay threads corrupted one
+  and hung in `_beginthread` (APITEST: four threads at once).
+- PMWIN: a thread that took over another thread's message queue with
+  `WinThreadAssocQueue` sends to that queue's windows itself. wdw's pump
+  thread (which serves the main thread's queue while that waits on a
+  remote trap file) queued the message to the queue it serves and
+  recursed until its stack overflowed: wdw stayed at its splash screen
+  (PMXTEST).
 - `DosQueryAppType` as IBM's `_LDRQAppType`: FAPPTYP_DLL is 10h (rs2 gave
   08h, FAPPTYP_BOUND); a PE file is FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31;
   an LE file (a DOS/4GW program) gives ERROR_INVALID_EXE_SIGNATURE (rs2
