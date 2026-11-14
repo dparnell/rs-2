@@ -717,12 +717,21 @@ fn int21(r: &mut Regs) {
             let (mut hf, mut action) = (0u32, 0u32);
             let attr = if ah == 0x3c { r[CX] as u32 & 0x27 } else { 0 };
             match unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut action, 0, attr, open_flags, mode, core::ptr::null_mut()) } {
+                // Beyond the task's handle table: too many open files.
+                0 if !crate::stress::jft_check(hf) => fail(r, 4),
                 0 => r[AX] = hf as u16,
                 e => fail(r, e),
             }
         }
+        // Set handle count: BX entries in the task's handle table
+        // (SetHandleCount's).
+        0x67 => {
+            if crate::stress::set_handle_count(r[BX]) < r[BX] {
+                fail(r, 4);
+            }
+        }
         // Close.
-        0x3e => match unsafe { os2::DosClose(r[BX] as u32) } {
+        0x3e =>match unsafe { os2::DosClose(r[BX] as u32) } {
             0 => {}
             e => fail(r, e),
         },

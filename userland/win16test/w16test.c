@@ -26,12 +26,14 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <ver.h>
 #include <toolhelp.h>
 #include <shellapi.h>
+#include <stress.h>
 #include "w16test.h"
 
 #pragma library("commdlg")
 #pragma library("ddeml")
 #pragma library("toolhelp")
 #pragma library("shell")
+#pragma library("stress")
 
 static int failures;
 static char line[160];
@@ -3450,6 +3452,139 @@ static void ini2_tests(void)
     unlink("C:\\W16T3.INI");
 }
 
+/* STRESS (Windows 3.1's stress library) and the heap figures it takes
+ * from, and TOOLHELP's local and global heap walks. */
+/* KERNEL.138, undocumented: a module's local heap, free bytes and size. */
+DWORD WINAPI GetHeapSpaces(HINSTANCE);
+
+static DWORD disk_free_c(void)
+{
+    struct _diskfree_t d;
+
+    if (_dos_getdiskfree(3, &d) != 0)
+        return 0;
+    return (DWORD)d.avail_clusters * d.sectors_per_cluster * d.bytes_per_sector;
+}
+
+static void stress_tests(HINSTANCE hInst)
+{
+    HMODULE user = GetModuleHandle("USER"), gdi = GetModuleHandle("GDI");
+    SYSHEAPINFO shi, shi2;
+    LOCALENTRY le;
+    LOCALINFO li;
+    GLOBALENTRY ge;
+    DWORD before, after, disk0, disk1;
+    WORD ufree;
+    HGLOBAL hg;
+    HLOCAL hl;
+    int i, n, blocks, own_found, code_found, user_found, stress_blocks;
+    HFILE hf;
+    OFSTRUCT of;
+
+    /* The global heap: AllocMem leaves what it is asked to, GlobalAlloc
+     * fails beyond that, FreeAllMem gives it back. */
+    before = GetFreeSpace(0);
+    check(before > 4000000L, "GetFreeSpace: megabytes free");
+    check(GlobalCompact(0) == before, "GlobalCompact: the free memory");
+    blocks = AllocMem(1000000L);
+    after = GetFreeSpace(0);
+    sprintf(line, "AllocMem(1000000): %d blocks, GetFreeSpace %lu", blocks, after);
+    check(blocks > 0 && after >= 990000L && after <= 1000000L, line);
+    hg = GlobalAlloc(GMEM_MOVEABLE, 2000000L);
+    check(hg == 0, "GlobalAlloc beyond what AllocMem left fails");
+    if (hg)
+        GlobalFree(hg);
+    hg = GlobalAlloc(GMEM_MOVEABLE, 100000L);
+    check(hg != 0 && GetFreeSpace(0) <= after - 100000L, "GlobalAlloc within it takes from GetFreeSpace");
+    if (hg)
+        GlobalFree(hg);
+    blocks = AllocMem(1000000L);
+    check(blocks > 0 && AllocMem(before) == 0 && GetFreeSpace(0) == before, "AllocMem of more than is free first frees what it took");
+    FreeAllMem();
+    check(GetFreeSpace(0) == before, "FreeAllMem gives it all back");
+
+    /* USER's and GDI's heaps. */
+    shi.dwSize = sizeof shi;
+    check(SystemHeapInfo(&shi) && shi.wUserFreePercent > 50 && shi.wGDIFreePercent > 50, "SystemHeapInfo: USER and GDI mostly free");
+    n = AllocUserMem(0x1000);
+    ufree = LOWORD(GetHeapSpaces(user));
+    sprintf(line, "AllocUserMem(1000h): %d blocks, USER heap %04X free", n, ufree);
+    check(n > 0 && ufree >= 0x1000 && ufree < 0x1010 && HIWORD(GetHeapSpaces(user)) == 0xffff, line);
+    shi2.dwSize = sizeof shi2;
+    check(SystemHeapInfo(&shi2) && shi2.wUserFreePercent < 8 && shi2.wGDIFreePercent == shi.wGDIFreePercent,
+          "SystemHeapInfo: USER's free percentage falls");
+    li.dwSize = sizeof li;
+    check(LocalInfo(&li, (HGLOBAL)shi.hUserSegment) && li.wcItems > n, "LocalInfo of USER's heap: STRESS's blocks");
+    stress_blocks = 0;
+    le.dwSize = sizeof le;
+    for (i = LocalFirst(&le, (HGLOBAL)shi.hUserSegment); i; i = LocalNext(&le))
+        if (le.wType == LT_USER_USERSEEUSERDOALLOC && le.wHeapType == USER_HEAP)
+            stress_blocks++;
+    check(stress_blocks == n, "LocalFirst/LocalNext of USER's heap: each of STRESS's blocks");
+    FreeAllUserMem();
+    check(SystemHeapInfo(&shi2) && shi2.wUserFreePercent == shi.wUserFreePercent, "FreeAllUserMem");
+    n = AllocGDIMem(0x2000);
+    ufree = LOWORD(GetHeapSpaces(gdi));
+    check(n > 0 && ufree >= 0x2000 && ufree < 0x2010 && SystemHeapInfo(&shi2) && shi2.wGDIFreePercent < 14,
+          "AllocGDIMem(2000h)");
+    FreeAllGDIMem();
+    check(LOWORD(GetHeapSpaces(gdi)) > 0x8000, "FreeAllGDIMem");
+
+    /* File handles. */
+    n = GetFreeFileHandles();
+    sprintf(line, "GetFreeFileHandles: %d", n);
+    check(n > 3, line);
+    check(AllocFileHandles(2) == 2 && GetFreeFileHandles() == 2, "AllocFileHandles(2) leaves two");
+    UnAllocFileHandles();
+    check(GetFreeFileHandles() == n, "UnAllocFileHandles");
+    hf = HFILE_ERROR;
+    if (AllocFileHandles(0) == 0)
+        hf = _lopen("C:\\RS2\\W16TEST.EXE", OF_READ);
+    check(hf == HFILE_ERROR, "with no free handles, _lopen fails");
+    UnAllocFileHandles();
+    hf = _lopen("C:\\RS2\\W16TEST.EXE", OF_READ);
+    check(hf != HFILE_ERROR, "after UnAllocFileHandles it opens");
+    _lclose(hf);
+    check(SetHandleCount(30) == 30 && GetFreeFileHandles() == n + 10, "SetHandleCount(30): ten more free handles");
+
+    /* Disk space: STRESS.EAT in the root of drive C:. */
+    disk0 = disk_free_c();
+    check(AllocDiskSpace(disk0 - 300000L, EDS_CUR) == 1, "AllocDiskSpace(free - 300000, EDS_CUR)");
+    disk1 = disk_free_c();
+    sprintf(line, "it leaves that much (%lu of %lu free)", disk1, disk0);
+    check(disk1 <= disk0 - 290000L && disk1 >= disk0 - 340000L, line);
+    check(OpenFile("C:\\STRESS.EAT", &of, OF_EXIST) != HFILE_ERROR, "STRESS.EAT in the root directory");
+    UnAllocDiskSpace(EDS_CUR);
+    check(OpenFile("C:\\STRESS.EAT", &of, OF_EXIST) == HFILE_ERROR && disk_free_c() >= disk0 - 8192, "UnAllocDiskSpace");
+    check(AllocDiskSpace(-1L, EDS_CUR) == -1, "AllocDiskSpace of a negative amount: -1");
+
+    /* This task's local heap. */
+    hl = LocalAlloc(LMEM_FIXED, 100);
+    li.dwSize = sizeof li;
+    check(LocalInfo(&li, (HGLOBAL)hInst) && li.wcItems >= 2, "LocalInfo of DGROUP");
+    own_found = 0;
+    le.dwSize = sizeof le;
+    for (i = LocalFirst(&le, (HGLOBAL)hInst); i; i = LocalNext(&le))
+        if (le.hHandle == hl && le.wSize >= 100 && le.wFlags == LF_FIXED && le.wHeapType == NORMAL_HEAP)
+            own_found = 1;
+    check(own_found, "LocalFirst/LocalNext find a LocalAlloc block");
+    LocalFree(hl);
+
+    /* The global heap walk: DGROUP with its heap, a code segment of the
+     * program, USER's DGROUP. */
+    own_found = code_found = user_found = 0;
+    ge.dwSize = sizeof ge;
+    for (i = GlobalFirst(&ge, GLOBAL_ALL); i; i = GlobalNext(&ge, GLOBAL_ALL)) {
+        if (ge.hBlock == (HGLOBAL)hInst && ge.wType == GT_DGROUP && ge.wHeapPresent)
+            own_found = 1;
+        if (ge.wType == GT_CODE && ge.hOwner == (HANDLE)hInst && ge.wData >= 1)
+            code_found = 1;
+        if (ge.hBlock == (HGLOBAL)shi.hUserSegment && ge.wType == GT_DGROUP && ge.wHeapPresent)
+            user_found = 1;
+    }
+    check(own_found && code_found && user_found, "GlobalFirst/GlobalNext: DGROUP, a code segment, USER's DGROUP");
+}
+
 /* W16TEST NAME...: only those groups of checks. */
 static LPSTR only;
 
@@ -3501,6 +3636,8 @@ static void stage2b_tests(HINSTANCE hInst)
         dll2_tests();
     if (want("INI"))
         ini2_tests();
+    if (want("STRESS"))
+        stress_tests(hInst);
 }
 
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)

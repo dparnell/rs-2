@@ -396,7 +396,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             };
             let (mut hf, mut action) = (0u32, 0u32);
             match unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut action, 0, attr, flags, mode, core::ptr::null_mut()) } {
-                0 => hf,
+                0 if crate::stress::jft_check(hf) => hf,
                 _ => HFILE_ERROR,
             }
         }
@@ -485,7 +485,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             0
         }
         // SetHandleCount(n)
-        199 => a.w().min(255) as u32,
+        199 => crate::stress::set_handle_count(a.w()) as u32,
         // IsDBCSLeadByte(c): single-byte code pages.
         207 => 0,
         _ => 0,
@@ -703,6 +703,13 @@ pub fn undefined_dynalink(r: &crate::dos::Regs) {
 /// would have raised.
 pub fn application_error(r: &crate::dos::Regs) {
     use crate::dos::reg::*;
+    // The message box's message loop may call the program's window
+    // procedures, which may fault again (Windows' box is system modal and
+    // runs none): the program ends then.
+    static SHOWN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+    if SHOWN.swap(true, core::sync::atomic::Ordering::Relaxed) {
+        unsafe { os2::DosExit(1, 0xff) };
+    }
     let (cs, ip) = (r[CS], r[IP]);
     let what = match r[INTNO] & 0xff {
         0 => "a Divide by Zero",
@@ -977,6 +984,11 @@ pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     let r = unsafe { os2::DosOpen(z.as_ptr(), &mut hf, &mut action, 0, 0, flags, mode, core::ptr::null_mut()) };
     if r != 0 {
         set(if r == 110 { 2 } else { r as u16 });
+        return HFILE_ERROR;
+    }
+    // Beyond the task's handle table: too many open files.
+    if !crate::stress::jft_check(hf) {
+        set(4);
         return HFILE_ERROR;
     }
     set(0);

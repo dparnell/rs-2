@@ -201,56 +201,65 @@ fn free_all_local(which: usize) {
     global_changed();
 }
 
-/// Open the null device (a file handle taken).
+/// The task's file handle table (the PSP's job file table): 20 entries,
+/// as many as SetHandleCount asks for (up to 255). Windows' file calls
+/// give no handle beyond it (`jft_check`).
+static JFT: Global<u16> = Global::new(20);
+
+/// SetHandleCount(n): the table grows to `n` entries (it never shrinks);
+/// its size now.
+pub fn set_handle_count(n: u16) -> u16 {
+    let j = JFT.get();
+    *j = (*j).max(n.min(255));
+    *j
+}
+
+/// A file a Windows program opened (OpenFile, _lopen, _lcreat, INT 21h)
+/// got handle `hf`: beyond the task's handle table it is closed again and
+/// the open fails with ERROR_TOO_MANY_OPEN_FILES (4), as on Windows
+/// (AllocFileHandles takes the table's free entries).
+pub fn jft_check(hf: u32) -> bool {
+    if hf < *JFT.get() as u32 {
+        return true;
+    }
+    unsafe { os2::DosClose(hf) };
+    false
+}
+
+fn is_open(h: u32) -> bool {
+    let mut st = 0u32;
+    unsafe { os2::DosQueryFHState(h, &mut st) == 0 }
+}
+
+/// Open the null device (a file handle taken), if the handle is in the
+/// task's table.
 fn open_nul() -> Option<u32> {
     let (mut hf, mut action) = (0u32, 0u32);
     // OPEN_ACTION_OPEN_IF_EXISTS, OPEN_SHARE_DENYNONE | OPEN_ACCESS_READONLY.
     let rc = unsafe { os2::DosOpen(b"NUL\0".as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x40, core::ptr::null_mut()) };
-    (rc == 0).then_some(hf)
+    (rc == 0 && jft_check(hf)).then_some(hf)
 }
 
-/// GetFreeFileHandles: how many files the task could still open.
+/// GetFreeFileHandles: the free entries of the task's handle table.
 fn free_file_handles() -> u32 {
-    let mut open = Vec::new();
-    while open.len() < 256 {
-        match open_nul() {
-            Some(h) => open.push(h),
-            None => break,
-        }
-    }
-    let n = open.len() as u32;
-    for h in open {
-        unsafe { os2::DosClose(h) };
-    }
-    n
+    (0..*JFT.get() as u32).filter(|&h| !is_open(h)).count() as u32
 }
 
-/// AllocFileHandles(left): take file handles until `left` are free; the
-/// number left free (fewer than asked if there were not so many), -1 for a
-/// negative `left`.
+/// AllocFileHandles(left): take the handle table's entries until `left`
+/// are free; the number left free (fewer than asked if there were not so
+/// many), -1 for a negative `left`.
 fn alloc_file_handles(left: i16) -> u32 {
     if left < 0 {
         return 0xffff;
     }
     unalloc_file_handles();
-    let s = ST.get();
-    let mut n = 0;
-    while s.files.len() < 256 {
+    while free_file_handles() > left as u32 {
         match open_nul() {
-            Some(h) => {
-                s.files.push(h);
-                n += 1;
-            }
+            Some(h) => ST.get().files.push(h),
             None => break,
         }
     }
-    let give = n.min(left as u32);
-    for _ in 0..give {
-        if let Some(h) = s.files.pop() {
-            unsafe { os2::DosClose(h) };
-        }
-    }
-    give
+    free_file_handles()
 }
 
 fn unalloc_file_handles() {
