@@ -93,6 +93,13 @@ pub struct Dispatch {
     pub unwind: Option<Unwind>,
     /// Exception code (for the default action).
     pub code: u32,
+    /// Where the handlers' stack frames go: below the records the kernel
+    /// built, below the caller's stack pointer. Never below a report the
+    /// caller passed (DosUnwindException's pReport is usually a local of
+    /// the caller's frame: Open Watcom's C++ throw passes its own, and
+    /// the records and handler frames once went right below it, over
+    /// the throwing function's live stack).
+    pub stack: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -239,12 +246,12 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     // left its dispatch: one whose records are below the stack pointer
     // now is over.
     let esp = stack;
-    t.xcpt.lock().retain(|d| d.report > esp);
+    t.xcpt.lock().retain(|d| d.stack > esp);
     let nested = !t.xcpt.lock().is_empty();
     let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
     let Some((report, context)) = build_records(&mut sp, f, stack, code, flags, info, address) else { return false };
-    let d = Dispatch { report, context, reg: head, unwind: None, code };
-    call_handler(&mut sp, f, &d, report.wrapping_sub(16));
+    let d = Dispatch { report, context, reg: head, unwind: None, code, stack: report.wrapping_sub(16) };
+    call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
     true
@@ -283,10 +290,10 @@ pub fn records(p: &Arc<Process>, t: &Arc<Thread>, f: &TrapFrame, code: u32, info
 }
 
 /// Set up the frame to call the handler of `d.reg`.
-fn call_handler(sp: &mut vm::AddressSpace, f: &mut TrapFrame, d: &Dispatch, stack: u32) {
+fn call_handler(sp: &mut vm::AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
     let handler = rd(sp, d.reg + 4).unwrap_or(0);
     let ret = gate::slot_address(0, HANDLER_RETURN_ORDINAL);
-    let esp = stack.wrapping_sub(20) & !3;
+    let esp = d.stack.wrapping_sub(20) & !3;
     // [esp] = return, then (pReport, pRegistration, pContext, pDispatcherContext).
     let args = [ret, d.report, d.reg, d.context, 0];
     let mut b = Vec::new();
@@ -324,7 +331,7 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
             return;
         }
         d.reg = prev;
-        call_handler(&mut sp, f, &d, d.report.wrapping_sub(16));
+        call_handler(&mut sp, f, &d);
         drop(sp);
         t.xcpt.lock().push(d);
         return;
@@ -356,7 +363,7 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         return;
     }
     d.reg = prev;
-    call_handler(&mut sp, f, &d, d.report.wrapping_sub(16));
+    call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
 }
@@ -369,7 +376,7 @@ fn finish_unwind(sp: &mut vm::AddressSpace, f: &mut TrapFrame, u: &Unwind, t: &A
     // Dispatches of exceptions raised further down the stack than where
     // execution resumes are over (their handlers will never return).
     let resume_sp = u.resume.rsp as u32;
-    t.xcpt.lock().retain(|d| d.report > resume_sp);
+    t.xcpt.lock().retain(|d| d.stack > resume_sp);
     *f = u.resume;
     if u.target_ip != 0 {
         f.rip = u.target_ip as u64;
@@ -418,24 +425,26 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
         c.no_return = true;
         return 0;
     }
-    // Report record for the unwind (caller's or our own).
+    // Report record for the unwind (caller's or our own); our records
+    // and the handlers' frames go below the caller's stack pointer, as
+    // IBM's _xcptUnwindDispatcher keeps them in its own frame.
     let esp = (c.f.rsp as u32).wrapping_sub(512) & !15;
+    let own = esp.wrapping_sub(REPORT_SIZE) & !15;
     let report = if preport != 0 {
         preport
     } else {
-        let r = esp.wrapping_sub(REPORT_SIZE);
         let mut b = alloc::vec![0u8; REPORT_SIZE as usize];
         b[0..4].copy_from_slice(&xcpt::UNWIND.to_le_bytes());
-        sp.poke_bytes(r, &b);
-        r
+        sp.poke_bytes(own, &b);
+        own
     };
     let flags = rd(&mut sp, report + 4).unwrap_or(0);
     let unwind_flag = if target == xcpt::END_OF_CHAIN { xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND } else { xcpt::EH_UNWINDING };
     wr(&mut sp, report + 4, flags | unwind_flag);
-    let context = report.wrapping_sub(CONTEXT_SIZE) & !15;
+    let context = own.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, c.f);
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND };
-    call_handler(&mut sp, c.f, &d, context.wrapping_sub(16));
+    let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16) };
+    call_handler(&mut sp, c.f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
     c.no_return = true;
@@ -505,8 +514,8 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
     let context = report.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, f);
     let u = Unwind { target: xcpt::END_OF_CHAIN, target_ip: 0, resume: *f, exit: true };
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code };
-    call_handler(&mut sp, f, &d, context.wrapping_sub(16));
+    let d = Dispatch { report, context, reg: head, unwind: Some(u), code, stack: context.wrapping_sub(16) };
+    call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
     t.exit_unwind.store(1, Ordering::Relaxed);
