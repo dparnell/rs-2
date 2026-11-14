@@ -86,8 +86,6 @@ thunk16::entries16_pascal! {
     x_1156 = 1156, 4;
     x_1163 = 1163, 2;
     x_1164 = 1164, 2;
-    x_1191 = 1191, 2;
-    x_1192 = 1192, 2;
     x_1197 = 1197, 2;
     x_1198 = 1198, 2;
     x_1200 = 1200, 0;
@@ -576,8 +574,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1156, "KERNEL.156 LIMITEMSPAGES"),
     (1163, "KERNEL.163 GLOBALLRUOLDEST"),
     (1164, "KERNEL.164 GLOBALLRUNEWEST"),
-    (1191, "KERNEL.191 GLOBALPAGELOCK"),
-    (1192, "KERNEL.192 GLOBALPAGEUNLOCK"),
     (1197, "KERNEL.197 GLOBALFIX"),
     (1198, "KERNEL.198 GLOBALUNFIX"),
     (1200, "KERNEL.200 VALIDATEFREESPACES"),

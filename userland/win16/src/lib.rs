@@ -341,6 +341,8 @@ entries! {
     k_getselectorlimit = 1188, 2;
     k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
+    k_globalpagelock = 1191, 2;
+    k_globalpageunlock = 1192, 2;
     k_isdbcsleadbyte = 1207, 2;
     k_istask = 1320, 2;
     k_isbadreadptr = 1334, 6;

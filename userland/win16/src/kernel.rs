@@ -484,6 +484,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             unsafe { os2::DosExit(1, 0xff) };
             0
         }
+        // GlobalPageLock(h), GlobalPageUnlock(h): the page lock count
+        // (rs2 never pages a block out: 1 while locked, as one lock).
+        191 => {
+            let h = a.w();
+            GLOBALS.get().contains_key(&(h | 7)) as u32
+        }
+        192 => {
+            a.w();
+            0
+        }
         // SetHandleCount(n)
         199 => crate::stress::set_handle_count(a.w()) as u32,
         // IsDBCSLeadByte(c): single-byte code pages.
