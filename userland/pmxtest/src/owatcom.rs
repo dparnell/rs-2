@@ -1,6 +1,6 @@
 //! What the Open Watcom 1.9 installer (its GUI library) relies on: the
 //! CREATESTRUCT layout, NULLHANDLE parents as IBM treats them, a dialog
-//! dismissed before WinProcessDlg, WinWaitMsg.
+//! dismissed before WinProcessDlg, WinWaitMsg, menu keys on its frames.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -20,6 +20,14 @@ unsafe extern "C" {
     fn WinWaitMsg(hab: u32, first: u32, last: u32) -> u32;
     #[link_name = "PMWIN.907"]
     fn WinCreateMenu(parent: u32, t: *const u8) -> u32;
+    #[link_name = "PMWIN.929"]
+    fn WinSubclassWindow(h: u32, p: WndProc) -> u32;
+    #[link_name = "PMWIN.865"]
+    fn WinSetParent(h: u32, parent: u32, redraw: u32) -> u32;
+    #[link_name = "PMWIN.878"]
+    fn WinSetWindowULong(h: u32, i: i32, v: u32) -> u32;
+    #[link_name = "PMWIN.879"]
+    fn WinSetWindowUShort(h: u32, i: i32, v: u32) -> u32;
 }
 
 /// MENUITEM: iPosition, afStyle, afAttribute, id, hwndSubMenu, hItem.
@@ -37,6 +45,91 @@ struct MenuItem {
 const MM_INSERTITEM: u32 = 0x0180;
 const MM_QUERYITEM: u32 = 0x0182;
 const MM_QUERYITEMTEXT: u32 = 0x018b;
+const MM_ENDMENUMODE: u32 = 0x0186;
+const MM_QUERYSELITEMID: u32 = 0x018a;
+const WM_TRANSLATEACCEL: u32 = 0x004b;
+const WM_SYSCOMMAND: u32 = 0x0021;
+const FID_MENU: u32 = 0x8005;
+
+/// The frame's original procedure and the WM_CHARs its subclass took.
+static OLD_FRAME: AtomicU32 = AtomicU32::new(0);
+static FRAME_CHARS: AtomicU32 = AtomicU32::new(0);
+
+fn is_f10(mp1: u32, mp2: u32) -> bool {
+    mp1 & 2 != 0 && mp2 >> 16 == 0x2b
+}
+
+/// As the Open Watcom GUI library's GUIFrameProc: the frame's WM_CHARs
+/// go to the program's own key handling (never to the frame procedure),
+/// and F10 is kept from accelerator translation.
+extern "C" fn gui_frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    match msg {
+        WM_CHAR => {
+            FRAME_CHARS.fetch_add(1, Ordering::Relaxed);
+            1
+        }
+        WM_TRANSLATEACCEL if mp1 != 0 && {
+            let q = unsafe { (mp1 as *const QMsg).read_unaligned() };
+            is_f10(q.mp1, q.mp2)
+        } => 0,
+        _ => {
+            let old: WndProc = unsafe { core::mem::transmute(OLD_FRAME.load(Ordering::Relaxed) as usize) };
+            old(h, msg, mp1, mp2)
+        }
+    }
+}
+
+extern "C" fn gui_client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
+}
+
+/// The IDE's action bar: WinCreateMenu(HWND_DESKTOP) filled with
+/// MM_INSERTITEM, then made the frame's FID_MENU as the GUI library's
+/// _wpi_setmenu does. Alt+F must open File although the frame's
+/// subclass keeps every WM_CHAR (IBM: the frame's WM_TRANSLATEACCEL asks
+/// its menu, which opens the item and empties the message); F10 stays a
+/// key when the frame refuses to translate it; Alt+F4 is still SC_CLOSE.
+unsafe fn gui_menu_keys(hab: u32) {
+    unsafe {
+        WinRegisterClass(hab, b"OwGuiClient\0".as_ptr(), gui_client_proc, 0, 0);
+        let mut fcf = 0x0001 | 0x0008; // FCF_TITLEBAR | FCF_SIZEBORDER
+        let mut client = 0;
+        let frame = WinCreateStdWindow(HWND_DESKTOP, 0x8000_0000, &mut fcf, b"OwGuiClient\0".as_ptr(), b"GUI\0".as_ptr(), 0, 0, 0, &mut client);
+        WinSetWindowPos(frame, 3, 50, 50, 300, 200, 0x0003 | 0x0008 | 0x0080);
+        OLD_FRAME.store(WinSubclassWindow(frame, gui_frame_proc), Ordering::Relaxed);
+        let bar = WinCreateMenu(HWND_DESKTOP, core::ptr::null());
+        let sub = WinCreateMenu(HWND_DESKTOP, core::ptr::null());
+        let mut mi = MenuItem { pos: -1, id: 10, ..Default::default() };
+        WinSendMsg(sub, MM_INSERTITEM, &mi as *const MenuItem as u32, b"~Open\0".as_ptr() as u32);
+        mi.id = 1;
+        mi.sub = sub;
+        WinSendMsg(bar, MM_INSERTITEM, &mi as *const MenuItem as u32, b"~File\0".as_ptr() as u32);
+        WinSetWindowUShort(bar, -1 /* QWS_ID */, FID_MENU);
+        WinSetWindowULong(bar, -2 /* QWL_STYLE */, 0x8000_0000 | 0x0200_0000 | 0x0001 | 0x0008); // WS_VISIBLE | WS_SYNCPAINT | MS_ACTIONBAR | 8, as _wpi_setmenu
+        WinSetParent(bar, frame, 0);
+        WinSetOwner(bar, frame);
+        WinSendMsg(frame, 0x0042 /* WM_UPDATEFRAME */, 0x0004, 0);
+        WinSetFocus(HWND_DESKTOP, client);
+        let key = |mp1: u32, mp2: u32| {
+            WinPostMsg(client, WM_CHAR, mp1, mp2);
+            let mut q = QMsg::default();
+            WinGetMsg(hab, &mut q, 0, WM_CHAR, WM_CHAR);
+            q
+        };
+        // Alt+F: KC_ALT | KC_SCANCODE, scan code 0x21, no character.
+        let q = key(0x24 | 1 << 16 | 0x21 << 24, 0);
+        let sel = WinSendMsg(bar, MM_QUERYSELITEMID, 0, 0) & 0xffff;
+        check("Alt+F opens File on a GUI-library frame (WM_TRANSLATEACCEL, the message emptied)", q.msg == 0 && q.hwnd == 0 && sel == 1 && FRAME_CHARS.load(Ordering::Relaxed) == 0);
+        WinSendMsg(bar, MM_ENDMENUMODE, 1, 0);
+        // F10: KC_VIRTUALKEY | KC_SCANCODE, VK_F10.
+        let q = key(0x06 | 1 << 16 | 0x44 << 24, 0x2b << 16);
+        check("F10 refused by the frame's WM_TRANSLATEACCEL stays WM_CHAR", q.msg == WM_CHAR && q.hwnd == client);
+        // Alt+F4: KC_ALT | KC_VIRTUALKEY | KC_SCANCODE, VK_F4.
+        let q = key(0x26 | 1 << 16 | 0x3e << 24, 0x23 << 16);
+        check("Alt+F4 is still WM_SYSCOMMAND SC_CLOSE for the frame", q.msg == WM_SYSCOMMAND && q.hwnd == frame && q.mp1 & 0xffff == 0x8004);
+        WinDestroyWindow(frame);
+    }
+}
 
 /// What WM_CREATE brought: mp1, then the CREATESTRUCT's pPresParams,
 /// pCtlData, id and hwndParent.
@@ -130,5 +223,6 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         let mut q = QMsg::default();
         let left = WinPeekMsg(hab, &mut q, 0, WM_USER + 5, WM_USER + 5, 1);
         check("WinWaitMsg", w != 0 && left != 0 && q.mp1 == 1);
+        gui_menu_keys(hab);
     }
 }

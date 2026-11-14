@@ -1112,6 +1112,11 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             0
         }
+        // IBM's FrameTranslateAccel, then the default (the parent).
+        crate::accel::WM_TRANSLATEACCEL => match crate::accel::frame_translate(h, mp1) {
+            0 => WinDefWindowProc(h, msg, mp1, mp2),
+            r => r,
+        },
         WM_CHAR => {
             let k = Key::from(mp1, mp2);
             if !k.up() && k.alt() && !k.ctrl() {
