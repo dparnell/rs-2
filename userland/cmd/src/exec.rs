@@ -254,7 +254,11 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
         DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, flags, block.as_ptr(), env.as_ptr(), &mut res, cpath.as_ptr())
     };
     if rc != 0 {
-        sys_error(rc);
+        // %1: the module DosExecPgm names in its object buffer (a DLL that
+        // failed to load), else the program, as IBM's CMD shows them.
+        let n = fail.iter().position(|&b| b == 0).unwrap_or(0);
+        let object: String = if n > 0 { fail[..n].iter().map(|&b| b as char).collect() } else { path.to_ascii_uppercase() };
+        sys_error_ins(rc, &[&object]);
         return Err(rc);
     }
     if async_ {

@@ -46,6 +46,12 @@ pub fn sys_msg_err(n: u32, ins: &[&str], fallback: &str) {
 
 /// Print an error the way the system reports it: "SYSnnnn: text".
 pub fn sys_error(rc: u32) {
+    sys_error_ins(rc, &[]);
+}
+
+/// The same, with the message's insertions (%1: the program or module a
+/// DosExecPgm error is about).
+pub fn sys_error_ins(rc: u32, ins: &[&str]) {
     // Short texts for when OSO001.MSG is missing.
     let text = match rc {
         2 => "File not found.",
@@ -72,7 +78,7 @@ pub fn sys_error(rc: u32) {
         206 => "The file name or extension is too long.",
         _ => "Unexpected error.",
     };
-    sys_msg_err(rc, &[], text);
+    sys_msg_err(rc, ins, text);
 }
 
 pub fn current_drive() -> u32 {
