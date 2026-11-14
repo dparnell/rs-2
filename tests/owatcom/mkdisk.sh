@@ -30,6 +30,10 @@ for f in tests/owatcom/*; do
     [ -f "$f" ] || continue
     printf '%s -> OWT/%s\n' "$f" "$(basename "$f")"
 done >> $m
+# rs2's Windows DDE test pair (DDESPY.CMD watches them), when built.
+for f in userland/win16test/bin/DDECLI16.EXE userland/win16test/bin/DDESRV16.EXE; do
+    [ -f "$f" ] && printf '%s -> RS2/%s\n' "$f" "$(basename "$f")" >> $m
+done
 echo "tests/owatcom/config.sys -> CONFIG.SYS" >> $m
 [ -n "$1" ] && cat "$1" >> $m
 cargo xtask disk --system --size 1200 -o work/owsys.img --init "${INIT:-OS2\CMD.EXE /C C:\OWT\RUN.CMD}"

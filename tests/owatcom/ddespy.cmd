@@ -6,4 +6,4 @@ call RxFuncAdd "SysLoadFuncs", "RexxUtil", "SysLoadFuncs"
 call SysLoadFuncs
 "start" value("WATCOM",,"OS2ENVIRONMENT")"\binw\wddespy.exe"
 call SysSleep 30
-"start c:\rs2\ddecli16.exe"
+"c:\rs2\ddecli16.exe"
