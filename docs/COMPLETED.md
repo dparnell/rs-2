@@ -119,6 +119,13 @@ What is already done, by milestone. What is still to do is in
 - done: APM$ power events for programs as APM.SYS keeps them (event
   semaphores and queues per handle, broadcasts, the daemon's
   confirmation); suspend and standby are refused
+- done: the last small SMP races: each keyboard source keeps its own E0
+  prefix and a key's whole shift-state change is made under one lock;
+  the infoseg's time fields are written whole (one writer, dwords in
+  IBM's clock driver's order, a sequence count for lock-free readers);
+  select() checks its socket handles with the stack locked; DosDebug
+  stops a running debuggee thread before it reads or writes its
+  registers (STRESS smp, NETTEST race, APITEST check them)
 
 ## Milestone 2: storage and installed systems
 

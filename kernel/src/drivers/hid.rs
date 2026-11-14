@@ -3,7 +3,7 @@
 //! Keyboard reports (modifier byte, reserved byte, up to six usages) are
 //! compared with the previous report; every press and release becomes the
 //! set-1 scancode a PS/2 keyboard would send and goes through
-//! `kbd::scancode`, so shift state, Ctrl+C and character translation stay in
+//! `kbd::key`, so shift state, Ctrl+C and character translation stay in
 //! one place. USB keyboards do not repeat by themselves (we ask for idle
 //! rate 0), so typematic repeat is generated here.
 //!
@@ -128,24 +128,21 @@ fn repeats(u: u8) -> bool {
 /// Scancode bytes produced by one report, fed to `kbd` after the lock is
 /// released.
 struct Codes {
-    bytes: [u8; 64],
+    /// Set-1 scan codes (0x100 = E0-prefixed, 0x80 = release).
+    keys: [u16; 32],
     n: usize,
 }
 
 impl Codes {
     fn new() -> Codes {
-        Codes { bytes: [0; 64], n: 0 }
+        Codes { keys: [0; 32], n: 0 }
     }
 
     fn key(&mut self, sc: u16, release: bool) {
-        if self.n + 2 > self.bytes.len() {
+        if self.n >= self.keys.len() {
             return;
         }
-        if sc & 0x100 != 0 {
-            self.bytes[self.n] = 0xe0;
-            self.n += 1;
-        }
-        self.bytes[self.n] = sc as u8 | if release { 0x80 } else { 0 };
+        self.keys[self.n] = sc | if release { 0x80 } else { 0 };
         self.n += 1;
     }
 
@@ -162,9 +159,11 @@ impl Codes {
         }
     }
 
+    /// Whole keys (no E0 bytes): a prefix of this keyboard's cannot be
+    /// taken by a key from another.
     fn feed(&self) {
-        for &b in &self.bytes[..self.n] {
-            crate::kbd::scancode(b);
+        for &k in &self.keys[..self.n] {
+            crate::kbd::key(k as u8, k & 0x100 != 0);
         }
     }
 }

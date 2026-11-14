@@ -5,10 +5,6 @@ What is still to do. Everything already finished is in
 
 ## Milestone 1: unmodified text-mode programs
 
-- small SMP races left (docs/ARCHITECTURE.md "Locking"): the keyboard
-  shift state and E0 prefix shared between keyboard sources, torn time
-  fields in the infoseg, socket ids passed to select, DosDebug reading a
-  debuggee thread that never parks
 - parallel ports: try ECP/EPP transfers, IEEE 1284 device IDs and PCI
   cards on real hardware (only host-tested: QEMU has none); ECP reverse
   transfers and DMA, PCI combo cards that put the parallel port behind

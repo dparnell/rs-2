@@ -41,6 +41,16 @@ fn main(s: &Startup) -> u32 {
     if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "dbgchild") {
         return debug_child();
     }
+    if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "dbgspin") {
+        return debug_spin_child();
+    }
+    if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "debug") {
+        // The DosDebug checks alone.
+        debugging();
+        let n = FAILS.load(Ordering::Relaxed);
+        println!("apitest done: {n} failure(s)");
+        return n;
+    }
     if s.args().trim_ascii().starts_with(b"highchild") {
         return highmem::child(s.args().trim_ascii());
     }
@@ -1004,6 +1014,11 @@ fn dbg(b: &mut UDb, cmd: i32) -> i32 {
 
 /// Start `APITEST dbgchild` traced; its pid.
 fn start_traced() -> u32 {
+    start_traced_with(b"dbgchild")
+}
+
+/// Start `APITEST <arg>` traced; its pid.
+fn start_traced_with(arg: &[u8]) -> u32 {
     let mut pib = null_mut();
     let mut tib = null_mut();
     let mut path = [0u8; 260];
@@ -1014,7 +1029,7 @@ fn start_traced() -> u32 {
     let mut args = [0u8; 300];
     let n = path.iter().position(|&c| c == 0).unwrap_or(0);
     args[..n].copy_from_slice(&path[..n]);
-    args[n + 1..n + 9].copy_from_slice(b"dbgchild");
+    args[n + 1..n + 1 + arg.len()].copy_from_slice(arg);
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
     let mut fail = [0u8; 64];
     // EXEC_TRACE: asynchronous, the child under DosDebug control.
@@ -1022,7 +1037,127 @@ fn start_traced() -> u32 {
     if rc == 0 { res.code_terminate } else { 0 }
 }
 
+/// Written by the spinning thread of `APITEST dbgspin` with its EAX.
+static mut SPIN: u32 = 0;
+
+/// Runs user code only, never entering the kernel by itself: stores EAX
+/// in SPIN forever.
+unsafe extern "C" fn spinner(_: u32) {
+    unsafe {
+        core::arch::asm!("2:", "mov dword ptr [{p}], eax", "jmp 2b", p = in(reg) &raw mut SPIN, in("eax") 1u32, options(noreturn));
+    }
+}
+
+/// `APITEST dbgspin`: a thread that spins in user mode, a breakpoint once
+/// it runs, then two seconds for the debugger to change the spinner's
+/// EAX while the program runs; the exit code is what the spinner stored.
+fn debug_spin_child() -> u32 {
+    unsafe {
+        let mut tid = 0;
+        DosCreateThread(&mut tid, spinner, 0, 0, 65536);
+        while core::ptr::read_volatile(&raw const SPIN) == 0 {
+            DosSleep(10);
+        }
+        core::arch::asm!("int3");
+        DosSleep(2000);
+        core::ptr::read_volatile(&raw const SPIN)
+    }
+}
+
+static SPIN_END: AtomicU32 = AtomicU32::new(0);
+static SPIN_CODE: AtomicU32 = AtomicU32::new(0);
+
+/// Lets the debuggee of `pid` run to its end (DBG_C_Go), as a debugger's
+/// second thread.
+unsafe extern "C" fn spin_runner(pid: u32) {
+    let mut b = UDb { pid, ..Default::default() };
+    let mut n = dbg(&mut b, DBG_C_GO);
+    let mut guard = 0;
+    while n != DBG_N_PROC_TERM && n != DBG_N_ERROR && guard < 50 {
+        b.value = XCPT_CONTINUE_EXECUTION;
+        n = dbg(&mut b, DBG_C_CONTINUE);
+        guard += 1;
+    }
+    SPIN_CODE.store(b.value, Ordering::Relaxed);
+    SPIN_END.store(n as u32, Ordering::Relaxed);
+}
+
+/// DBG_C_ReadReg/WriteReg on a thread that runs user code on another CPU
+/// (it never enters the kernel by itself to be held): while the debuggee
+/// is stopped and while another thread of the debugger lets it run, the
+/// thread is stopped for the access, so the registers read are its own
+/// and the ones written are the ones it goes on with.
+fn debug_running_thread() {
+    let pid = start_traced_with(b"dbgspin");
+    if pid == 0 {
+        check("DosExecPgm EXEC_TRACE (dbgspin)", false);
+        return;
+    }
+    let mut b = UDb { pid, value: 1, ..Default::default() };
+    if dbg(&mut b, DBG_C_CONNECT) != 0 {
+        check("DBG_C_Connect (dbgspin)", false);
+        return;
+    }
+    let mut n;
+    let mut guard = 0;
+    loop {
+        b.tid = 0;
+        n = dbg(&mut b, DBG_C_GO);
+        guard += 1;
+        if n == DBG_N_EXCEPTION || n == DBG_N_PROC_TERM || n == DBG_N_ERROR || guard > 50 {
+            break;
+        }
+    }
+    let bp = b.addr;
+    check("spinning thread: the breakpoint", n == DBG_N_EXCEPTION && b.buffer == XCPT_BREAKPOINT && b.tid == 1);
+    let code = spinner as usize as u32;
+    let in_spinner = |b: &UDb| b.eip >= code && b.eip < code + 64;
+    let mut s = UDb { pid, tid: 2, ..Default::default() };
+    let ok = dbg(&mut s, DBG_C_READ_REG) == 0 && in_spinner(&s) && s.eax == 1;
+    unsafe { DosSleep(50) };
+    let mut s2 = UDb { pid, tid: 2, ..Default::default() };
+    let ok2 = dbg(&mut s2, DBG_C_READ_REG) == 0 && s2.eip == s.eip && s2.eax == 1;
+    check("DBG_C_ReadReg of a spinning thread while stopped", ok && ok2);
+    // Past the INT 3, then let it run from another thread.
+    b.tid = 1;
+    dbg(&mut b, DBG_C_READ_REG);
+    b.eip = bp + 1;
+    dbg(&mut b, DBG_C_WRITE_REG);
+    b.value = XCPT_CONTINUE_STOP;
+    dbg(&mut b, DBG_C_CONTINUE);
+    SPIN_END.store(0, Ordering::Relaxed);
+    let mut runner = 0;
+    unsafe { DosCreateThread(&mut runner, spin_runner, pid, 0, 65536) };
+    unsafe { DosSleep(300) };
+    let mut s = UDb { pid, tid: 2, ..Default::default() };
+    let read = dbg(&mut s, DBG_C_READ_REG) == 0 && in_spinner(&s) && s.eax == 1;
+    check("DBG_C_ReadReg of a thread running on another CPU", read);
+    s.eax = 0x5a5a;
+    let wrote = dbg(&mut s, DBG_C_WRITE_REG) == 0;
+    // The spinner goes on with the new EAX.
+    let (mut seen, mut tries) = (0u32, 0);
+    while tries < 100 {
+        let mut m = UDb { pid, addr: &raw mut SPIN as u32, buffer: &raw mut seen as u32, len: 4, ..Default::default() };
+        if dbg(&mut m, DBG_C_READ_MEM_BUF) == 0 && seen == 0x5a5a {
+            break;
+        }
+        unsafe { DosSleep(10) };
+        tries += 1;
+    }
+    check("DBG_C_WriteReg of a thread running on another CPU takes effect", wrote && seen == 0x5a5a);
+    let mut t = runner;
+    unsafe { DosWaitThread(&mut t, 0) };
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut got = 0;
+    let rc = unsafe { DosWaitChild(0, 0, &mut res, &mut got, pid) };
+    let end = SPIN_END.load(Ordering::Relaxed) as i32;
+    check("spinning debuggee ends with the EAX the debugger wrote", end == DBG_N_PROC_TERM && SPIN_CODE.load(Ordering::Relaxed) == 0x5a5a && rc == 0 && res.code_result == 0x5a5a);
+    b.pid = pid;
+    dbg(&mut b, DBG_C_TERM);
+}
+
 fn debugging() {
+    debug_running_thread();
     let pid = start_traced();
     check("DosExecPgm EXEC_TRACE", pid != 0);
     if pid == 0 {

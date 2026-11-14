@@ -206,6 +206,9 @@ struct Debuggee {
     frozen: Vec<u32>,
     /// Threads held in the kernel by the debugger.
     parked: Vec<u32>,
+    /// Threads the debugger stops for a moment to read or write their
+    /// registers (`with_frame`), even while the debuggee runs.
+    peek: Vec<u32>,
     /// FPU images DBG_C_WriteCoRegs set, which each thread loads itself
     /// when it wakes in park (its FPU state is live in a CPU while it runs).
     fpu_pending: Vec<(u32, alloc::boxed::Box<crate::task::thread::FpuState>)>,
@@ -225,12 +228,13 @@ struct Debuggee {
 
 impl Debuggee {
     fn released(&self, tid: u32) -> bool {
-        self.term
+        !self.peek.contains(&tid)
+            && (self.term
             || (self.debugger != 0
                 && self.running
                 && (self.step == 0 || self.step == tid)
                 && !self.frozen.contains(&tid)
-                && !self.events.iter().any(|e| e.tid == tid))
+                && !self.events.iter().any(|e| e.tid == tid)))
     }
 }
 
@@ -256,6 +260,7 @@ pub fn traced(p: &Arc<Process>) {
         verdicts: Vec::new(),
         frozen: Vec::new(),
         parked: Vec::new(),
+        peek: Vec::new(),
         fpu_pending: Vec::new(),
         announced: alloc::vec![1],
         modules: Vec::new(),
@@ -796,24 +801,54 @@ fn set_watch(p: &Process, u: &mut Udb) {
 /// Run `f` on a debuggee thread's saved user registers while that thread
 /// cannot touch them: it is parked (it takes DEBUGGEES before it looks at
 /// its frame again) or blocked in another kernel wait (its frame waits for
-/// the call's return). A thread between two parks is waited for briefly.
-fn with_frame<R>(p: &Process, t: &Thread, f: impl FnOnce(&mut TrapFrame) -> R) -> R {
+/// the call's return). Any other thread is stopped first, as all of a
+/// debuggee's threads are while IBM's DosDebug reads them: it is marked
+/// (`peek`), so it parks on its next return to user mode, and the CPUs
+/// are kicked so that one running user code enters the kernel. A frame
+/// of a thread that runs is never read: None if the thread does not stop
+/// within a second (it is ending, or the debuggee was let run to its end).
+fn with_frame<R>(p: &Process, t: &Thread, f: impl FnOnce(&mut TrapFrame) -> R) -> Option<R> {
+    let tid = t.tid;
     let mut f = Some(f);
-    for _ in 0..100 {
-        let r = with(p.pid, |d| {
-            if d.parked.contains(&t.tid) || t.state() == State::Blocked {
-                Some((f.take().unwrap())(t.user_frame()))
-            } else {
-                None
+    let mut call = |d: &mut Debuggee| -> Option<R> {
+        (d.parked.contains(&tid) || t.state() == State::Blocked).then(|| (f.take().unwrap())(t.user_frame()))
+    };
+    if let Some(r) = with(p.pid, |d| {
+        let r = call(d);
+        if r.is_none() {
+            d.peek.push(tid);
+        }
+        r
+    })? {
+        return Some(r);
+    }
+    let deadline = crate::irq::ticks() + crate::irq::HZ;
+    let mut kicked = 0;
+    let r = loop {
+        if t.state() == State::Dead || crate::irq::ticks() > deadline {
+            break None;
+        }
+        // A thread running user code on another CPU enters the kernel
+        // (again every 10 ms, in case it was between two checks).
+        if t.on_cpu.load(Ordering::Acquire) && crate::irq::ticks() >= kicked {
+            kicked = crate::irq::ticks() + 10 * crate::irq::HZ / 1000;
+            for cpu in crate::smp::online() {
+                crate::smp::kick(cpu);
             }
-        });
-        match r {
-            Some(Some(r)) => return r,
-            None => break,
+        }
+        match with(p.pid, |d| call(d)) {
+            None => break None,
+            Some(Some(r)) => break Some(r),
             Some(None) => sched::sleep_ms(1),
         }
-    }
-    (f.take().unwrap())(t.user_frame())
+    };
+    let _ = with(p.pid, |d| {
+        if let Some(i) = d.peek.iter().position(|&x| x == tid) {
+            d.peek.remove(i);
+        }
+    });
+    WAIT.wake_all();
+    r
 }
 
 fn thread_of(p: &Process, tid: u32) -> Option<Arc<Thread>> {
@@ -837,8 +872,10 @@ fn put_seg(u: &mut Udb, block: usize, space: &vm::AddressSpace, sel: u16, base: 
     u.0[block + 10..block + 12].copy_from_slice(&sel.to_le_bytes());
 }
 
-fn read_regs(p: &Process, t: &Thread, u: &mut Udb) {
-    let f = with_frame(p, t, |f| *f);
+/// The thread's registers into the buffer; false if it could not be
+/// stopped to read them (see `with_frame`).
+fn read_regs(p: &Process, t: &Thread, u: &mut Udb) -> bool {
+    let Some(f) = with_frame(p, t, |f| *f) else { return false };
     u.set(udb::TID, t.tid);
     u.set(udb::MTE, p.exe.hmte as u32);
     for (o, v) in [
@@ -865,6 +902,7 @@ fn read_regs(p: &Process, t: &Thread, u: &mut Udb) {
     put_seg(u, udb::FS, &space, f.fs as u16, fs_base);
     put_seg(u, udb::GS, &space, f.gs as u16, None);
     put_seg(u, udb::SS, &space, f.ss as u16, None);
+    true
 }
 
 /// A selector the thread may run with: CS a present DPL 3 code segment
@@ -885,9 +923,11 @@ fn selectors_ok(space: &vm::AddressSpace, u: &Udb) -> bool {
     cs_ok && ss_ok && data_ok
 }
 
-fn write_regs(p: &Process, t: &Thread, u: &Udb) -> bool {
+/// Set the thread's registers: Err(error code) for selectors it cannot
+/// run with, or when it could not be stopped (see `with_frame`).
+fn write_regs(p: &Process, t: &Thread, u: &Udb) -> Result<(), u32> {
     if !selectors_ok(&p.space.lock(), u) {
-        return false;
+        return Err(err::INVALID_ACCESS);
     }
     with_frame(p, t, |f| {
     f.rax = u.get(udb::EAX) as u64;
@@ -907,8 +947,8 @@ fn write_regs(p: &Process, t: &Thread, u: &Udb) -> bool {
     f.fs = u.sel(udb::FS) as u64;
     f.gs = u.sel(udb::GS) as u64;
     f.ss = u.sel(udb::SS) as u64;
-    });
-    true
+    })
+    .ok_or(err::INVALID_THREADID)
 }
 
 /// FXSAVE image to the 108-byte FSAVE format (32-bit protected mode).
@@ -1029,7 +1069,10 @@ fn run(_c: &Ctx, p: &Arc<Process>, u: &mut Udb, step: u32) {
             u.error(err::INVALID_THREADID);
             return;
         };
-        with_frame(p, &t, |f| f.rflags |= TF);
+        if with_frame(p, &t, |f| f.rflags |= TF).is_none() {
+            u.error(err::INVALID_THREADID);
+            return;
+        }
     }
     let _ = with(pid, |d| {
         d.running = true;
@@ -1341,10 +1384,14 @@ fn thread_command(c: &Ctx, p: &Arc<Process>, u: &mut Udb, cmd: i32, tid: u32, ti
         return;
     };
     match cmd {
-        cmd::READ_REG => read_regs(p, &t, u),
+        cmd::READ_REG => {
+            if !read_regs(p, &t, u) {
+                u.error(err::INVALID_THREADID);
+            }
+        }
         cmd::WRITE_REG => {
-            if !write_regs(p, &t, u) {
-                u.error(err::INVALID_ACCESS);
+            if let Err(e) = write_regs(p, &t, u) {
+                u.error(e);
             }
         }
         cmd::THRD_STAT => {
