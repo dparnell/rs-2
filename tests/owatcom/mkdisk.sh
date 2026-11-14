@@ -27,6 +27,7 @@ grep -v '^#' dist/manifest.txt | grep -v '^dist/CONFIG.SYS' > $m
 done >> $m
 for f in tests/owatcom/*; do
     case $f in *.sh) continue ;; esac
+    [ -f "$f" ] || continue
     printf '%s -> OWT/%s\n' "$f" "$(basename "$f")"
 done >> $m
 echo "tests/owatcom/config.sys -> CONFIG.SYS" >> $m
