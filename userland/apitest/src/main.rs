@@ -512,6 +512,47 @@ fn named_pipes() {
         DosClose(h);
         check("pipe gone", DosWaitNPipe(name, 10) == 2);
     }
+    reply_then_disconnect();
+}
+
+static PIPE_CLIENT: AtomicU32 = AtomicU32::new(0);
+static PIPE_GOT: AtomicU32 = AtomicU32::new(0);
+
+/// A client blocked in DosRead (its request sent).
+unsafe extern "C" fn pipe_reader(_: u32) {
+    let mut buf = [0u8; 8];
+    let mut n = 0;
+    let rc = unsafe { DosRead(PIPE_CLIENT.load(Ordering::Relaxed), buf.as_mut_ptr(), 8, &mut n) };
+    PIPE_GOT.store(if rc == 0 && n == 1 { buf[0] as u32 } else { 0x100 | rc }, Ordering::Relaxed);
+}
+
+/// A server that writes its one-byte answer and disconnects at once (Open
+/// Watcom's NMPBIND): the client already waiting in DosRead gets it, as
+/// on OS/2, where the write completes the waiting read.
+fn reply_then_disconnect() {
+    let name = b"\\PIPE\\RS2BIND\0".as_ptr();
+    unsafe {
+        let mut h = 0;
+        DosCreateNPipe(name, &mut h, NP_ACCESS_DUPLEX, NP_TYPE_MESSAGE | NP_READMODE_MESSAGE | 1, 64, 64, 0);
+        let (mut hc, mut act) = (0, 0);
+        let rc = DosOpen(name, &mut hc, &mut act, 0, 0, 1, 0x42, null_mut());
+        DosConnectNPipe(h);
+        PIPE_CLIENT.store(hc, Ordering::Relaxed);
+        PIPE_GOT.store(0, Ordering::Relaxed);
+        let mut tid = 0;
+        DosCreateThread(&mut tid, pipe_reader, 0, 0, 16384);
+        DosSleep(100);
+        let mut n = 0;
+        DosWrite(h, b"\x06".as_ptr(), 1, &mut n);
+        DosDisConnectNPipe(h);
+        DosWaitThread(&mut tid, DCWW_WAIT);
+        let got = PIPE_GOT.load(Ordering::Relaxed);
+        check(&alloc::format!("a reply written just before DosDisConnectNPipe reaches the waiting client (got {got:#x})"), rc == 0 && got == 6);
+        let mut buf = [0u8; 4];
+        check("then the client's handle is not connected", DosRead(hc, buf.as_mut_ptr(), 4, &mut n) == 233);
+        DosClose(hc);
+        DosClose(h);
+    }
 }
 
 fn sessions() {
