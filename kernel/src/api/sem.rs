@@ -896,6 +896,9 @@ pub fn dos16_sem_clear(c: &mut Ctx) -> u32 {
     let me = (c.process.pid, c.thread.tid);
     match sem16(c, c.arg(0)) {
         Some(Sem16::Ram(l)) => {
+            if super::tracing() {
+                crate::trace!("    sem {:x} (flat {:x}) value {:x}", c.arg(0), l, ram_value(c, l).unwrap_or(0));
+            }
             c.write_u32(l, 0);
         }
         Some(Sem16::Sys(i)) => {
@@ -981,6 +984,11 @@ pub fn dos16_sem_request(c: &mut Ctx) -> u32 {
     let Some(s) = sem16(c, c.arg(0)) else { return err::INVALID_HANDLE };
     let ms = c.arg(1);
     let me = (c.process.pid, c.thread.tid);
+    if super::tracing() {
+        if let Sem16::Ram(l) = &s {
+            crate::trace!("    sem {:x} (flat {:x}) value {:x}", c.arg(0), l, ram_value(c, *l).unwrap_or(0));
+        }
+    }
     if try_request(c, &s, me) {
         return 0;
     }

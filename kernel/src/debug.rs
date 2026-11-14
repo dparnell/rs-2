@@ -86,12 +86,15 @@ pub fn thread_report() -> alloc::string::String {
             emit!("pid {}: thread list busy", p.pid);
             continue;
         };
+        let name = &p.exe.name;
+        let name = &name[name.rfind('\\').map_or(0, |i| i + 1)..];
         for t in threads {
             let state = t.state();
             let f = t.user_frame();
             emit!(
-                "pid {} tid {} id {} {:?} prio {:#x} on_cpu {} user {:04x}:{:08x}",
+                "pid {} ({}) tid {} id {} {:?} prio {:#x} on_cpu {} user {:04x}:{:08x}",
                 p.pid,
+                name,
                 t.tid,
                 t.id,
                 state,
