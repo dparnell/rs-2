@@ -44,6 +44,46 @@ fn pel(h: u32, x: i32, y: i32) -> i32 {
     v
 }
 
+/// EN_KILLFOCUS notifications a client saw.
+static KILLFOCUS: AtomicU32 = AtomicU32::new(0);
+
+extern "C" fn edit_owner_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    // WM_CONTROL with EN_KILLFOCUS (2).
+    if msg == 0x0030 && mp1 >> 16 == 2 {
+        KILLFOCUS.fetch_add(1, Ordering::Relaxed);
+    }
+    unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
+}
+
+/// The focus leaves a window before it is destroyed (IBM's
+/// XDestroyWindow): an entry field with the focus tells its owner
+/// EN_KILLFOCUS, when the field goes and when its frame goes. The GUI
+/// library ignored every key after a dialog closed with the focus in a
+/// field.
+unsafe fn focus_leaves_destroyed(hab: u32) {
+    unsafe {
+        WinRegisterClass(hab, b"OwEditOwner\0".as_ptr(), edit_owner_proc, 0, 0);
+        let mk = || {
+            let mut fcf = 0x0001 | 0x0008;
+            let mut c = 0;
+            let f = WinCreateStdWindow(HWND_DESKTOP, 0x8000_0000, &mut fcf, b"OwEditOwner\0".as_ptr(), b"Dlg\0".as_ptr(), 0, 0, 0, &mut c);
+            WinSetWindowPos(f, 3, 200, 200, 200, 120, 0x0003 | 0x0008 | 0x0080);
+            // WC_ENTRYFIELD, ES_MARGIN | WS_VISIBLE.
+            let e = WinCreateWindow(c, 0xffff_0006 as *const u8, b"x\0".as_ptr(), 0x8000_0008, 10, 10, 100, 20, c, 3, 7, core::ptr::null(), core::ptr::null());
+            WinSetFocus(HWND_DESKTOP, e);
+            KILLFOCUS.store(0, Ordering::Relaxed);
+            (f, e)
+        };
+        let (f, e) = mk();
+        WinDestroyWindow(e);
+        check("an entry field destroyed with the focus tells its owner EN_KILLFOCUS", KILLFOCUS.load(Ordering::Relaxed) == 1);
+        WinDestroyWindow(f);
+        let (f, _) = mk();
+        WinDestroyWindow(f);
+        check("so does one whose frame is destroyed", KILLFOCUS.load(Ordering::Relaxed) == 1);
+    }
+}
+
 static CHILD_ACT: AtomicU32 = AtomicU32::new(0);
 static OLD_CHILD: AtomicU32 = AtomicU32::new(0);
 
@@ -320,5 +360,6 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         group_box_over_sibling(client);
         list_selection(client);
         child_frame_activation(client);
+        focus_leaves_destroyed(hab);
     }
 }

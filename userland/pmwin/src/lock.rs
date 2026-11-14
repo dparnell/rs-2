@@ -189,6 +189,14 @@ fn trace_call(idx: u32, args: u32) {
         let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{v:x}"));
     }
     s.push(')');
+    // The message a WinDispatchMsg dispatches (hwnd, msg, mp1, mp2).
+    if name == "WinDispatchMsg" {
+        let q = unsafe { ((args + 4) as *const u32).read_unaligned() };
+        if q != 0 {
+            let f = |i: u32| unsafe { ((q + i * 4) as *const u32).read_unaligned() };
+            let _ = core::fmt::Write::write_fmt(&mut s, format_args!(" [{:x} {:x} {:x} {:x}]", f(0), f(1), f(2), f(3)));
+        }
+    }
     // The caller: the return address above the arguments.
     let from = unsafe { ((args - 4) as *const u32).read_unaligned() };
     crate::trace(format_args!("{} {s} from {from:x}", tid()));
