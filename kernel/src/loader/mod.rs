@@ -762,6 +762,7 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("OLE2DISP", 7400),
     ("OLE2NLS", 7600),
     ("TYPELIB", 7700),
+    ("STRESS", 7900),
     ("MMSYSTEM", 10000),
 ];
 

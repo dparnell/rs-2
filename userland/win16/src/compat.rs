@@ -384,13 +384,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // GetFreeSpace(flags): bytes of global memory free.
         1169 => {
             a.w();
-            16 << 20
+            crate::stress::free_space()
         }
         // GetHeapSpaces(hmodule): the free bytes and the size of a module's
-        // local heap (USER's and GDI's, for resource meters: 90% free).
+        // local heap (USER's and GDI's, for resource meters: what STRESS
+        // left of them; other modules' 90% free).
         1138 => {
-            a.w();
-            0xffff_0000 | 0xe666
+            let h = a.w();
+            let (free, size) = crate::stress::heap_spaces(h);
+            (size as u32) << 16 | free as u32
         }
         // GetNumTasks, IsTask(htask), GetExePtr(h)
         1152 => 1,

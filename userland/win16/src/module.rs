@@ -58,6 +58,7 @@ pub const SYSTEM: &[(&[u8], u16, u32)] = &[
     (b"OLE2DISP", 0x0f8f, 7400),
     (b"OLE2NLS", 0x0f97, 7600),
     (b"TYPELIB", 0x0f9f, 7700),
+    (b"STRESS", 0x0fa7, 7900),
     (b"MMSYSTEM", 0x0f6f, 10000),
 ];
 

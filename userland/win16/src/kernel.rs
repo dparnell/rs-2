@@ -209,8 +209,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let s = a.w();
             if s == 0xffff { crate::caller_ds() as u32 } else { s as u32 }
         }
-        // GlobalCompact(min): the free memory.
-        25 => 0x00ff_0000,
+        // GlobalCompact(min): the largest free block (the free memory).
+        25 => {
+            a.l();
+            crate::stress::free_space()
+        }
         // DirectedYield(hTask): as Yield; a debugged task let go runs to
         // its next stop first (toolhelp.rs).
         150 => {
@@ -832,8 +835,19 @@ pub fn global_handles() -> alloc::vec::Vec<u16> {
     GLOBALS.get().keys().copied().collect()
 }
 
+/// The bytes this task's GlobalAlloc blocks take (stress.rs: its part of
+/// the global heap all tasks share on Windows).
+pub fn global_used() -> u32 {
+    GLOBALS.get().values().fold(0u32, |t, b| t.saturating_add(b.size))
+}
+
 pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let size = n.max(1);
+    // More than the global heap has left fails, as on Windows (STRESS's
+    // AllocMem makes programs meet that).
+    if size > crate::stress::free_space() {
+        return 0;
+    }
     let room = size.next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
     let rw = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE;
@@ -852,6 +866,7 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let h = (far(p) >> 16) as u16;
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
+    crate::stress::global_changed();
     h
 }
 
@@ -877,6 +892,7 @@ pub fn adopt(h: u16, size: u32) {
     let room = size.next_multiple_of(0x10000).max(0x10000);
     huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
+    crate::stress::global_changed();
 }
 
 /// Is `h` a GMEM_DDESHARE block of this process?
@@ -890,6 +906,7 @@ pub fn global_free(h: u16) -> bool {
         Some(b) => {
             unsafe { os2::DosFreeMem(b.base) };
             forget_selector(h | 7);
+            crate::stress::global_changed();
             true
         }
         None => false,
@@ -993,6 +1010,7 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
             unsafe { core::ptr::write_bytes(b.base.add(b.size as usize), 0, (size - b.size) as usize) };
         }
         b.size = size;
+        crate::stress::global_changed();
         return h;
     }
     // Beyond the reserved tiles: a new block (a new handle).
@@ -1006,6 +1024,7 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     GLOBALS.get().remove(&h);
     unsafe { os2::DosFreeMem(old) };
     forget_selector(h);
+    crate::stress::global_changed();
     nh
 }
 
@@ -1054,6 +1073,26 @@ fn find_free(hp: &Heap, n: u16) -> Option<u16> {
         at = (off as u32 + size as u32).next_multiple_of(4);
     }
     (at + n as u32 <= hp.end as u32).then_some(at as u16)
+}
+
+/// A local heap's blocks in order, the free ones too (TOOLHELP's
+/// LocalFirst/LocalNext): (offset, size, flags (LMEM_), lock count,
+/// free).
+pub fn local_walk(seg: u16) -> Option<alloc::vec::Vec<(u16, u16, u16, u8, bool)>> {
+    let hp = HEAPS.get().iter().find(|(k, _)| **k | 7 == seg | 7)?.1;
+    let mut v = alloc::vec::Vec::new();
+    let mut at = hp.start as u32;
+    for (&off, &(size, fl, locks)) in &hp.blocks {
+        if off as u32 > at {
+            v.push((at as u16, (off as u32 - at) as u16, 0, 0, true));
+        }
+        v.push((off, size, fl, locks, false));
+        at = (off as u32 + size as u32).next_multiple_of(4);
+    }
+    if (hp.end as u32) > at {
+        v.push((at as u16, (hp.end as u32 - at) as u16, 0, 0, true));
+    }
+    Some(v)
 }
 
 fn largest_free(seg: u16) -> u16 {
