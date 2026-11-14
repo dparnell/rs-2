@@ -229,9 +229,14 @@ pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
         let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
         res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default()
     };
+    // As IBM's WIN32CREATEMENU: always an action bar (style
+    // MS_ACTIONBAR), id FID_MENU, owned by the parent. One that becomes a
+    // submenu (MM_INSERTITEM) or pops up (WinPopupMenu) turns vertical
+    // then. EPM's tool bar (UCMenus, ETKUCMS.DLL) is such a menu inside a
+    // window of its own and sizes itself from MM_QUERYITEMRECT.
     let bar = frame::is_frame(parent);
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
-    create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 }, if bar { FID_MENU } else { 0 }, &items)
+    create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { MS_ACTIONBAR }, FID_MENU, &items)
 }
 
 /// WinPopupMenu(hwndParent, hwndOwner, hwndMenu, x, y, idItem, fs): show
@@ -665,12 +670,28 @@ fn insert(h: u32, p: *const MenuItem, text: *const u8) -> u32 {
     let at = if mi.pos == MIT_END || mi.pos < 0 { m.items.len() } else { (mi.pos as usize).min(m.items.len()) };
     m.items.insert(at, Item { style: mi.style, attr: mi.attr, id: mi.id, text: t, sub: mi.sub, handle: mi.handle, size: None });
     if mi.sub != 0 {
-        if let Some(w) = st().desk.get_mut(mi.sub) {
-            w.owner = h;
-        }
+        adopt_submenu(h, mi.sub);
     }
     ctl::invalidate(h);
     at as u32
+}
+
+/// A menu window given as an item's submenu (IBM's MenuInsertMenuItem):
+/// owned by the menu, vertical (MS_ACTIONBAR off: WinCreateMenu makes
+/// action bars), hidden, kept with the other hidden menus.
+fn adopt_submenu(h: u32, sub: u32) {
+    let bar = {
+        let Some(w) = st().desk.get_mut(sub) else { return };
+        w.owner = h;
+        let bar = w.style & MS_ACTIONBAR != 0;
+        if bar {
+            w.style &= !(MS_ACTIONBAR | ws::VISIBLE);
+        }
+        bar
+    };
+    if bar {
+        st().desk.set_parent(sub, HWND_DESKTOP);
+    }
 }
 
 // ---- Menu mode ----
@@ -1139,6 +1160,12 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 (it.style, it.attr, it.sub, it.handle) = (mi.style, mi.attr, mi.sub, mi.handle);
                 it.size = None;
             }
+            // As IBM's MenuSetItem: the submenu is owned by this menu.
+            if mi.sub != 0 {
+                if let Some(w) = st().desk.get_mut(mi.sub) {
+                    w.owner = m;
+                }
+            }
             ctl::invalidate(m);
             1
         }
@@ -1177,6 +1204,9 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         MM_QUERYITEMRECT => {
             let Some((m, i)) = find(h, lo(mp1) as u16, hi(mp1) != 0) else { return 0 };
+            // As IBM's MenuGetMenuItemRect: a menu not formatted yet is
+            // first (owner-drawn items measured with WM_MEASUREITEM).
+            measure(m);
             let r = rects(m).get(i).copied().unwrap_or_default();
             if mp2 != 0 {
                 unsafe { (mp2 as *mut crate::gpiapi::RectL).write_unaligned(crate::gpiapi::RectL::from(r)) };

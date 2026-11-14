@@ -38,6 +38,8 @@ unsafe extern "C" {
     pub fn WinQueryWindow(h: u32, cmd: i32) -> u32;
     #[link_name = "PMWIN.775"]
     fn WinIsWindowVisible(h: u32) -> u32;
+    #[link_name = "PMWIN.879"]
+    fn WinSetWindowUShort(h: u32, i: i32, v: u32) -> u32;
 }
 
 const WM_CONTROL: u32 = 0x0030;
@@ -198,6 +200,7 @@ pub fn owner_checks(hab: u32, client: u32) {
     pump(hab);
     check("a submenu made as a child of its menu drops down on the desktop", sub != 0 && on_desktop);
     unsafe { WinDestroyWindow(m) };
+    tool_bar_menu(client);
 
     // A user button.
     s.buttons.clear();
@@ -241,4 +244,51 @@ pub fn owner_checks(hab: u32, client: u32) {
     unsafe { WinUpdateWindow(nb) };
     check("a notebook tab without text is the owner's (BKA_TAB, the page ID)", page != 0 && drawn(ID_NOTEBOOK).iter().any(|o| o.id_item == 4 && o.h_item == page && o.fs_attribute & 0x40 != 0));
     unsafe { WinDestroyWindow(nb) };
+}
+
+/// A menu used as a tool bar, as EPM's (UCMenus in ETKUCMS.DLL): made by
+/// WinCreateMenu on the object window, which (as IBM's WIN32CREATEMENU)
+/// makes an action bar with the id FID_MENU; its owner-drawn items are
+/// measured when MM_QUERYITEMRECT asks for them before the menu is shown
+/// (IBM's MenuGetMenuItemRect formats the menu first), and UCMenus sizes
+/// the tool bar from those widths. A menu made the same way and given as
+/// an item's submenu turns vertical (IBM's MenuInsertMenuItem).
+fn tool_bar_menu(client: u32) {
+    const MM_INSERTITEM: u32 = 0x0180;
+    const MM_QUERYITEMRECT: u32 = 0x0194;
+    let s = seen();
+    let bar = unsafe { WinCreateMenu(2 /* HWND_OBJECT */, null()) };
+    let (style, id) = unsafe { (WinQueryWindowULong(bar, -2), WinQueryWindowUShort(bar, -1)) };
+    check("WinCreateMenu: an action bar (MS_ACTIONBAR), id FID_MENU, not shown", bar != 0 && style & 1 != 0 && style & 0x8000_0000 == 0 && id == 0x8005);
+    unsafe {
+        WinSetWindowUShort(bar, -1, ID_MENU);
+        crate::pm::WinSetOwner(bar, client);
+    }
+    let mut mi = [0u8; 16];
+    mi[0..2].copy_from_slice(&(-1i16).to_le_bytes());
+    mi[2..4].copy_from_slice(&8u16.to_le_bytes()); // MIS_OWNERDRAW
+    for n in 0..2u32 {
+        mi[6..8].copy_from_slice(&((ID_ITEM + 10 + n) as u16).to_le_bytes());
+        mi[12..16].copy_from_slice(&(0x7700 + n).to_le_bytes());
+        unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, 0) };
+    }
+    s.measured.clear();
+    let mut r = [RectL::default(); 2];
+    for n in 0..2u32 {
+        unsafe { WinSendMsg(bar, MM_QUERYITEMRECT, ID_ITEM + 10 + n, &mut r[n as usize] as *mut RectL as u32) };
+    }
+    let widths = r.iter().map(|r| r.right - r.left).sum::<i32>();
+    check(
+        "MM_QUERYITEMRECT of a menu not shown yet: owner-drawn items measured (WM_MEASUREITEM), side by side",
+        s.measured.contains(&(ID_MENU, 0x7700)) && s.measured.contains(&(ID_MENU, 0x7701)) && widths == 240 && r[1].left >= r[0].right,
+    );
+    let sub = unsafe { WinCreateMenu(2 /* HWND_OBJECT */, null()) };
+    mi[2..4].copy_from_slice(&(1u16 | 0x10).to_le_bytes()); // MIS_TEXT | MIS_SUBMENU
+    mi[6..8].copy_from_slice(&((ID_ITEM + 12) as u16).to_le_bytes());
+    mi[8..12].copy_from_slice(&sub.to_le_bytes());
+    mi[12..16].copy_from_slice(&0u32.to_le_bytes());
+    unsafe { WinSendMsg(bar, MM_INSERTITEM, mi.as_ptr() as u32, b"~More\0".as_ptr() as u32) };
+    let sub_style = unsafe { WinQueryWindowULong(sub, -2) };
+    check("a WinCreateMenu menu given as a submenu is vertical (MS_ACTIONBAR off)", sub != 0 && sub_style & 1 == 0 && unsafe { WinQueryWindow(sub, 7) } == bar);
+    unsafe { WinDestroyWindow(bar) };
 }
