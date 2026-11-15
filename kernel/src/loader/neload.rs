@@ -184,8 +184,9 @@ pub fn load(
 
     // The imported modules; DLLs may import each other (loader::Pending).
     let own = m.name().map(s).unwrap_or_else(|_| super::module_name(path)).to_ascii_uppercase();
-    // A DLL loaded by its path is not what imports of its name mean.
-    let _pending = (dll && !specific).then(|| Pending::add(&own, &exports, &names));
+    // A DLL loaded by its path is not what imports of its name mean, but
+    // what imports of that path mean (loader::PENDING).
+    let _pending = dll.then(|| Pending::add(&own, path, specific, &exports, &names));
     let imports = Imports::load(&own, &load_names)?;
 
     // Relocations.

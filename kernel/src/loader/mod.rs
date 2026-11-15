@@ -629,14 +629,41 @@ fn import_target(imports: &[Arc<Module>], module: u16, by: ImportBy<'_>) -> Resu
     }
 }
 
-/// DLLs being loaded: name, exports, exported names. DLLs may import
+/// DLLs being loaded: name, file path, loaded by its path, exports,
+/// exported names. DLLs may import
 /// each other (MMPM/2's MMPM, FILT and HHP; Resource Workshop's WORKLIB1
 /// and WORKLIB2), as OS/2's loader allows: while a DLL loads, its exports
 /// (its objects have their addresses already) are listed here, and a
 /// module importing it meanwhile resolves those imports from here and gets
 /// it in its [`Module::cyclic`] list once it is loaded. Loading the
 /// import again instead would recurse until the kernel stack overflowed.
-static PENDING: SpinLock<Vec<(String, Vec<Export>, BTreeMap<String, u16>)>> = SpinLock::new(Vec::new());
+///
+/// An import by name finds a DLL loading by name; an import by path (a
+/// Windows DLL's imports are paths, neload: the program's directory first)
+/// finds the DLL loading from that file, also one loaded by its path (a
+/// Windows DLL that LoadLibrary found only by its path: W16CYC1 and
+/// W16CYC2, each importing the other, recursed until the kernel stack
+/// overflowed).
+static PENDING: SpinLock<Vec<PendingDll>> = SpinLock::new(Vec::new());
+
+struct PendingDll {
+    name: String,
+    path: String,
+    specific: bool,
+    exports: Vec<Export>,
+    names: BTreeMap<String, u16>,
+}
+
+impl PendingDll {
+    /// Is it what an import of `key` (a module name or a path) means?
+    fn is(&self, key: &str) -> bool {
+        if key.contains(['\\', '/', ':']) {
+            self.path.eq_ignore_ascii_case(key)
+        } else {
+            !self.specific && self.name.eq_ignore_ascii_case(key)
+        }
+    }
+}
 
 /// Modules that imported a pending DLL: (importer, DLL).
 static WAITING: SpinLock<Vec<(String, String)>> = SpinLock::new(Vec::new());
@@ -645,27 +672,33 @@ static WAITING: SpinLock<Vec<(String, String)>> = SpinLock::new(Vec::new());
 struct Pending(String);
 
 impl Pending {
-    fn add(name: &str, exports: &[Export], names: &BTreeMap<String, u16>) -> Pending {
+    fn add(name: &str, path: &str, specific: bool, exports: &[Export], names: &BTreeMap<String, u16>) -> Pending {
         let e = exports.iter().map(|e| match e {
             Export::At(t) => Export::At(*t),
             _ => Export::None,
         });
-        PENDING.lock().push((name.to_string(), e.collect(), names.clone()));
+        PENDING.lock().push(PendingDll {
+            name: name.to_string(),
+            path: path.to_string(),
+            specific,
+            exports: e.collect(),
+            names: names.clone(),
+        });
         Pending(name.to_string())
     }
 
     fn has(name: &str) -> bool {
-        PENDING.lock().iter().any(|p| p.0.eq_ignore_ascii_case(name))
+        PENDING.lock().iter().rev().any(|p| p.is(name))
     }
 
     fn target(name: &str, by: ImportBy<'_>) -> Result<Target, u32> {
         let l = PENDING.lock();
-        let p = l.iter().find(|p| p.0.eq_ignore_ascii_case(name)).ok_or(err::MOD_NOT_FOUND)?;
+        let p = l.iter().rev().find(|p| p.is(name)).ok_or(err::MOD_NOT_FOUND)?;
         let ord = match by {
             ImportBy::Ordinal(o) => o,
-            ImportBy::Name(n) => p.2.get(n).or_else(|| p.2.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v)).copied().ok_or(err::PROC_NOT_FOUND)? as u32,
+            ImportBy::Name(n) => p.names.get(n).or_else(|| p.names.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v)).copied().ok_or(err::PROC_NOT_FOUND)? as u32,
         };
-        match p.1.get(ord.wrapping_sub(1) as usize) {
+        match p.exports.get(ord.wrapping_sub(1) as usize) {
             Some(Export::At(t)) => Ok(*t),
             // A forwarder of a DLL still loading.
             _ => Err(err::INVALID_ORDINAL),
@@ -696,7 +729,7 @@ impl Pending {
 impl Drop for Pending {
     fn drop(&mut self) {
         let mut l = PENDING.lock();
-        if let Some(i) = l.iter().rposition(|p| p.0 == self.0) {
+        if let Some(i) = l.iter().rposition(|p| p.name == self.0) {
             l.remove(i);
         }
     }
@@ -712,12 +745,15 @@ impl Imports {
         let mut v = Vec::with_capacity(names.len());
         for n in names {
             let mname = module_name(n);
-            if Pending::has(&mname) {
+            // A path finds the DLL loading from that file, a name one
+            // loading by name.
+            let key = if n.contains(['\\', '/', ':']) { n.clone() } else { mname.clone() };
+            if Pending::has(&key) {
                 if crate::api::tracing() {
                     crate::trace!("    {own} imports {mname}, which is loading (circular reference)");
                 }
                 WAITING.lock().push((own.to_string(), mname.clone()));
-                v.push(Err(mname));
+                v.push(Err(key));
             } else {
                 v.push(Ok(load_global(n)?));
             }
@@ -736,7 +772,7 @@ impl Imports {
     fn has(&self, name: &str) -> bool {
         self.0.iter().any(|i| match i {
             Ok(m) => m.name.eq_ignore_ascii_case(name),
-            Err(n) => n.eq_ignore_ascii_case(name),
+            Err(n) => module_name(n).eq_ignore_ascii_case(name),
         })
     }
 
