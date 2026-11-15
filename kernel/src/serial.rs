@@ -42,6 +42,7 @@ pub fn write_byte(b: u8) {
 }
 
 pub fn write_str(s: &str) {
+    crate::klog::write(s.as_bytes());
     for b in s.bytes() {
         if b == b'\n' {
             write_byte(b'\r');

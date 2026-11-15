@@ -985,6 +985,24 @@ pub fn with_session<R>(sid: u32, f: impl FnOnce(&mut Screen) -> R) -> Option<R> 
     SCREEN.lock().get(sid).map(f)
 }
 
+/// The framebuffer for the crash screen: without waiting long for the
+/// screen lock (a stopped CPU may hold it), else the loader's.
+pub fn framebuffer_for_crash() -> Option<Framebuffer> {
+    for _ in 0..100_000 {
+        if let Some(g) = SCREEN.try_lock() {
+            return g.boot.as_ref().map(|b| b.fb);
+        }
+        core::hint::spin_loop();
+    }
+    let fb = crate::boot_info().framebuffer;
+    (fb.base != 0).then_some(fb)
+}
+
+/// The 8x16 glyph of `c` in the built-in font ('?' if there is none).
+pub fn glyph16(c: char) -> &'static [u8] {
+    font_glyph(c, 16).or_else(|| font_glyph('?', 16)).unwrap()
+}
+
 /// The framebuffer, if there is one.
 pub fn framebuffer() -> Option<Framebuffer> {
     SCREEN.lock().boot.as_ref().map(|b| b.fb)

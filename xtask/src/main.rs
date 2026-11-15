@@ -13,7 +13,7 @@
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--guestfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
-//!                  [--smp N] [--mem SIZE]
+//!                  [--smp N] [--mem SIZE] [--bare] [--cmdline 'WORDS']
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask ir                            write the interface repositories
@@ -25,7 +25,10 @@
 //!
 //! `--desktop` boots into the Workplace Shell (`init=OS2\PMSHELL.EXE` in place
 //! of work/cmdline.txt's `init=`), `--init "PROGRAM ARGS"` into another
-//! program. `--type-file` reads the keys for `--type`
+//! program. `--bare` makes the machine more like real hardware (no PS/2
+//! controller or HPET; USB keyboard and mouse instead), `--cmdline` adds
+//! words to the kernel command line (`bootlog`, `crashtest=panic`).
+//! `--type-file` reads the keys for `--type`
 //! from a file (its line ends are not typed). In the keys, `{keydown K}` and
 //! `{keyup K}` hold and release a key (QEMU qcode, e.g. `alt`).
 //!
@@ -145,6 +148,8 @@ struct Opts {
     fat32: bool,
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
     usb_kbd: bool,
+    bare: bool,
+    cmdline_extra: Vec<String>,
     usb_mouse: bool,
     /// `run`: raw images attached as USB mass storage devices.
     usb_disks: Vec<PathBuf>,
@@ -219,6 +224,8 @@ fn parse(args: &[String]) -> Opts {
         hpfs: false,
         fat32: false,
         usb_kbd: false,
+        bare: false,
+        cmdline_extra: vec![],
         usb_mouse: false,
         usb_disks: vec![],
         usb_hubs: 0,
@@ -291,6 +298,15 @@ fn parse(args: &[String]) -> Opts {
             "--hpfs" => o.hpfs = true,
             "--fat32" => o.fat32 = true,
             "--usb-kbd" => o.usb_kbd = true,
+            "--bare" => {
+                o.bare = true;
+                o.usb_kbd = true;
+                o.usb_mouse = true;
+            }
+            "--cmdline" => {
+                i += 1;
+                o.cmdline_extra.extend(args[i].split_whitespace().map(String::from));
+            }
             "--usb-mouse" => o.usb_mouse = true,
             "--usb-hub" => o.usb_hubs += 1,
             "--vmware" => o.vmware = true,
@@ -537,6 +553,24 @@ fn build(o: &Opts) -> Option<PathBuf> {
         std::fs::write(esp.join("RS2/CMDLINE"), line).unwrap();
     } else if cmdline.exists() && !o.dist {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
+    }
+    if !o.cmdline_extra.is_empty() {
+        let f = esp.join("RS2/CMDLINE");
+        let mut line = std::fs::read_to_string(&f).unwrap_or_default().trim_end().to_string();
+        for w in &o.cmdline_extra {
+            // Words go before " -- " (the init program's arguments).
+            match line.find(" -- ") {
+                Some(i) => line.insert_str(i, &format!(" {w}")),
+                None => {
+                    if !line.is_empty() {
+                        line.push(' ');
+                    }
+                    line.push_str(w);
+                }
+            }
+        }
+        std::fs::create_dir_all(esp.join("RS2")).unwrap();
+        std::fs::write(f, line).unwrap();
     }
     // rs2 user programs (Rust, i686) converted to LX.
     let userland = build_userland()?;
@@ -1456,7 +1490,8 @@ fn run(o: &Opts) -> bool {
     let qmp_sock = socket_path(&work, "qemu-qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
     let mut c = Command::new("qemu-system-x86_64");
-    c.args(["-machine", "q35", "-cpu", "max", "-m", &o.mem, "-no-reboot", "-smp", &o.smp.to_string()])
+    let machine = if o.bare { "q35,i8042=off,hpet=off" } else { "q35" };
+    c.args(["-machine", machine, "-cpu", "max", "-m", &o.mem, "-no-reboot", "-smp", &o.smp.to_string()])
         .arg("-drive")
         .arg(format!("if=pflash,format=raw,readonly=on,file={}", code.display()))
         .arg("-drive")

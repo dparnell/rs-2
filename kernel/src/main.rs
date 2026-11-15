@@ -18,6 +18,7 @@ mod chardev;
 mod codepage;
 mod config;
 mod conkbd;
+mod crash;
 mod console;
 mod debug;
 mod display;
@@ -26,6 +27,7 @@ mod fs;
 mod infoseg;
 mod irq;
 mod kbd;
+mod klog;
 mod loader;
 mod lockdep;
 mod pipe;
@@ -129,6 +131,8 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     session::start();
     fs::cache::start();
     bench::start(cmdline);
+    klog::start_bootlog();
+    crash::start_test();
     boot::start(cmdline);
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();
@@ -370,9 +374,11 @@ pub fn backtrace(mut rbp: u64) {
 fn panic(info: &core::panic::PanicInfo) -> ! {
     arch::disable_interrupts();
     smp::halt_others();
+    let Some(mark) = crash::begin() else { arch::halt_forever() };
     log::print_unlocked(format_args!("\nKERNEL PANIC: {info}\n"));
     let rbp: u64;
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) rbp) };
     backtrace(rbp);
+    crash::show(mark, "kernel panic");
     arch::halt_forever();
 }

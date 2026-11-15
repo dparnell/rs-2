@@ -61,9 +61,18 @@ const NORMAL: &[u8; 0x3a] = b"\x00\x1b1234567890-=\x08\tqwertyuiop[]\r\x00asdfgh
 const SHIFTED: &[u8; 0x3a] = b"\x00\x1b!@#$%^&*()_+\x08\tQWERTYUIOP{}\r\x00ASDFGHJKL:\"~\x00|ZXCVBNM<>?\x00*\x00 ";
 
 pub fn init() {
-    // Drain anything pending, then take IRQ 1.
+    // Drain anything pending, then take IRQ 1. Without a keyboard
+    // controller (most machines since about 2015, the Surface Pro 4) port
+    // 64h reads FFh: its "output full" bit never clears.
     unsafe {
-        while inb(0x64) & 1 != 0 {
+        if inb(0x64) == 0xff {
+            crate::println!("kbd: no PS/2 controller");
+            return;
+        }
+        for _ in 0..64 {
+            if inb(0x64) & 1 == 0 {
+                break;
+            }
             inb(0x60);
         }
     }

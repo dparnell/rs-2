@@ -82,6 +82,7 @@ fn kernel_exception(f: &TrapFrame) -> ! {
     crate::arch::disable_interrupts();
     crate::smp::halt_others();
     let name = EXCEPTION_NAMES.get(f.vector as usize).copied().unwrap_or("?");
+    let Some(mark) = crate::crash::begin() else { crate::arch::halt_forever() };
     crate::log::print_unlocked(format_args!("\nKERNEL TRAP {:#x}: {name} (cr2 {cr2:#x})\n", f.vector));
     let c = crate::smp::this();
     match c.current().as_ref() {
@@ -112,5 +113,25 @@ fn kernel_exception(f: &TrapFrame) -> ! {
         }
     }
     crate::backtrace(f.rbp);
+    let mut head = [0u8; 64];
+    let n = {
+        use core::fmt::Write;
+        struct B<'a>(&'a mut [u8], usize);
+        impl Write for B<'_> {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                for &c in s.as_bytes() {
+                    if self.1 < self.0.len() {
+                        self.0[self.1] = c;
+                        self.1 += 1;
+                    }
+                }
+                Ok(())
+            }
+        }
+        let mut b = B(&mut head, 0);
+        let _ = write!(b, "kernel trap {:#x}: {name}", f.vector);
+        b.1
+    };
+    crate::crash::show(mark, core::str::from_utf8(&head[..n]).unwrap_or("kernel trap"));
     crate::arch::halt_forever();
 }

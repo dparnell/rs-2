@@ -160,6 +160,7 @@ name = "rs2-kernel"
 version = "0.1.0"
 dependencies = [
  "bootinfo",
+ "crashqr",
  "fat",
  "hpfs",
  "jfs",
