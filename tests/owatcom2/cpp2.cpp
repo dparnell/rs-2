@@ -60,7 +60,7 @@ static int thrower( int depth )
     return thrower( depth - 1 ) + 1;
 }
 
-#if !defined( _M_I86 )
+#if !defined( _M_I86 ) && !defined( NO_THREADS )
 static volatile int thread_ok[4];
 
 static void worker( void *arg )
@@ -159,7 +159,7 @@ int main()
         check( "fstream write and read", std::strcmp( w, "first" ) == 0 && n == 123 );
     }
     std::remove( "CPP2.TMP" );
-#if !defined( _M_I86 )
+#if !defined( _M_I86 ) && !defined( NO_THREADS )
     // exceptions in four threads at once
     int tids[4];
     for( int i = 0; i < 4; i++ )

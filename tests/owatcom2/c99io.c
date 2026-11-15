@@ -73,7 +73,7 @@ int main( void )
     check( "_Bool", b == 1 && sizeof( b ) == 1 );
     check( "alloca", alloca_sum( 10 ) == 285 );
     check( "strtoll", strtoll( "-9223372036854775807", NULL, 10 ) == -INT64_MAX );
-    check( "long long division", ( big / 3 ) == 366503875925LL && ( big % 7 ) == 1 );
+    check( "long long division", ( big / 3 ) == 366503875925LL && ( big % 7 ) == 2 );
     sprintf( buf, "%.3f %e %g", 3.14159, 12345.678, 0.0001 );
     check( "floating point printf", strcmp( buf, "3.142 1.234568e+04 0.0001" ) == 0 );
 

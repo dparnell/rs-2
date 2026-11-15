@@ -22,8 +22,11 @@ wcl -zq -za99 -ml -l=os2 -i=%WATCOM%\h\os21x -fe=c99io16.exe c99io.c >> %L% 2>&1
 c99io16 >> %L% 2>&1
 if errorlevel 1 echo c99io16 FAILED >> %L%
 
-echo == cpp2 (wcl386 -xs -xr -bm) >> %L%
-wcl386 -zq -xs -xr -bm -l=os2v2 cpp2.cpp >> %L% 2>&1
+rem Static C++ with -bm faults at start in Open Watcom 2.0 (its OS/2 C
+rem runtime allocates __ThreadData in _beginthread, the C++ runtime
+rem calls __InitMultipleThread before): the static build is single-threaded.
+echo == cpp2 (wcl386 -xs -xr, no threads) >> %L%
+wcl386 -zq -xs -xr -dNO_THREADS -l=os2v2 cpp2.cpp >> %L% 2>&1
 cpp2 >> %L% 2>&1
 if errorlevel 1 echo cpp2 FAILED >> %L%
 echo == cpp2 -br (runtime DLLs) >> %L%
