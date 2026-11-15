@@ -390,9 +390,46 @@ desktop, then either open a command prompt and run `WIFI STATUS` and
 status, the firmware blocks sent, each command), the first scan per
 channel group, and the networks found.
 
-Next rounds: association (802_11_ASSOCIATE with the profile from
-WIFI.CFG, link events), the data path (TX ring, received frames to a
-`net::Nic`), MSI, then WPA2-PSK in `crates/wlan`.
+### Status (2026-11-16): round 2, joining networks (WPA2-PSK)
+
+Written, not yet run on the chip:
+
+- `crates/wlan`: `crypto` (SHA-1, HMAC-SHA1, PBKDF2, the 802.11 PRF,
+  AES-128, RFC 3394 key wrap; FIPS/RFC/Annex J vectors) and `wpa`, the
+  supplicant: 4-way handshake and group rekeying for WPA2-PSK with CCMP
+  pairwise (TKIP or CCMP group), checked against a test authenticator,
+  with replay, MIC and RSN-element checks and no key reinstallation.
+  `mwifiex` gained ASSOCIATE, DEAUTHENTICATE, KEY_MATERIAL (both
+  layouts, chosen by the key API version GET_HW_SPEC reports), the TxPD
+  and received data (RxPD, 802.3 + SNAP to Ethernet II).
+- The driver: the transmit ring (under its own lock, so the network
+  thread never waits behind a scan), received frames, association, keys,
+  link events, and MSI waking the wlan thread (it also polls every 5 ms,
+  in case MSI does not arrive: `WIFI STATUS` shows `interrupts=`).
+- `net::wlan`: a connection manager on the wlan thread. It joins the
+  network from `WIFI CONNECT`, else the first network of WIFI.CFG in
+  range; open and WPA2-Personal (also WPA2/WPA3 transition networks)
+  work, WEP, WPA1, WPA3-only, Enterprise and networks that require
+  protected management frames are refused with a reason. It runs the
+  supplicant on EAPOL frames, installs the keys (message 4 is flushed
+  before the pairwise key goes in, so it leaves unencrypted), and retries
+  with growing pauses after failures or a lost link. Each adapter is a
+  `net::Nic` (an `eth`N interface) registered once the chip is up; its
+  link is up only while associated and keyed, so DHCP runs then.
+- RS2API 623/624 and `WIFI CONNECT ssid [passphrase]` (saves the
+  network first in WIFI.CFG, then follows the state until connected or
+  failed), `WIFI DISCONNECT`, `WIFI FORGET ssid`. The passphrase is kept
+  in WIFI.CFG in plain text, as wpa_supplicant keeps it. On the live
+  stick C: is a RAM disk, so WIFI.CFG does not survive a reboot there;
+  on an installed system it does.
+- Not yet: 802.11n/ac (association offers legacy rates only, up to
+  54 Mbit/s), power saving (kept off on purpose), hidden networks, roaming
+  between access points of one network, a PM applet.
+
+Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
+`IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
+on lines starting `wlan0` and `88W8897` (key API version, association
+result, handshake failures).
 
 ### The first driver: Marvell 88W8897
 
