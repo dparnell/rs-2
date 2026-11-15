@@ -3426,6 +3426,13 @@ fn window_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
                 let f = w.frame;
                 unsafe { WinSetWindowBits(f, QWL_STYLE, if v & W_CLIPSIBLINGS != 0 { WS_CLIPSIBLINGS } else { 0 }, WS_CLIPSIBLINGS) };
             }
+            // WS_VISIBLE set or cleared: the window is shown or hidden (no
+            // messages, as Windows: Open Watcom's Dialog Editor shows the
+            // dialogs it reads from a file so).
+            if (old ^ v) & WS_VISIBLE != 0 {
+                let f = w.frame;
+                unsafe { WinShowWindow(f, (v & WS_VISIBLE != 0) as u32) };
+            }
         }
         return old;
     }

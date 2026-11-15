@@ -1,0 +1,2 @@
+#include <windows.h>
+#include "t2.dlg"
