@@ -1210,6 +1210,20 @@ What they needed (W16TEST checks each):
   clicks on the dialog so; statics and group boxes are transparent, as
   on Windows), **captions of child windows** (the editor's windows and
   palettes; the edited dialog's controls were a caption's height off).
+- **Disabled child windows** get no mouse input: as Windows' hit
+  testing passes over them, the nearest enabled window they are in gets
+  it (`hit_target`, and pm_wndproc for mouse messages PM sends). A child
+  window's PM windows therefore stay enabled when the program disables
+  it (WIN16 keeps the state; PM would drop the input). Open Watcom's
+  Dialog Editor edits a disabled dialog under disabled selection
+  windows: its form editor (FMEDIT) gets the clicks that place, select
+  and move the controls. Without this a click on a selected control
+  went to FMEDIT's selection window, and the editor then asked a
+  dragged object's parent (an action that object does not answer),
+  used the uninitialized pointer and faulted.
+- **The desktop window** (GetDesktopWindow's 0 here) has the screen as
+  its window and client rectangle: the Dialog Editor puts its toolbox
+  where it intersects the desktop's, and placed it off the screen.
 - **LocalInit(seg, 0, size)**: a start of 0 is the end of the segment's
   static data, the heap growing from there; WIN16 put the heap over
   WORKLIB1's static data, which LocalAlloc's zeroing wiped (Resource
@@ -1507,14 +1521,24 @@ TOOLHELP is done, debugging another task included ("TOOLHELP and
 debuggers").
 
 **What needs Windows' one address space** (each Windows task is a
-process here) does not work and is not planned: a system-wide hook
-whose DLL calls back into the hooking program's code from another task
-(Open Watcom's Spy: its hooks see only its own process), and helper
-tasks that a program starts with LoadModule and then calls into (Dr.
-Watcom's debugging information processors, `BINW\DWARF.DLL` and the
-others, are Windows programs used that way). DDEML monitors
-(APPCLASS_MONITOR, Open Watcom's DDE Spy) are done the other way: each
-task's DDEML tells the monitors of its traffic ("DDE and DDEML").
+process here) does not work and is not planned: helper tasks that a
+program starts with LoadModule and then calls into (Dr. Watcom's
+debugging information processors, `BINW\DWARF.DLL` and the others, are
+Windows programs used that way). Two things that look as if they did
+are done the other way, each task telling the one that wants to know:
+DDEML monitors (APPCLASS_MONITOR, Open Watcom's DDE Spy: "DDE and
+DDEML"), and **system-wide hooks**. A WH_CALLWNDPROC or WH_GETMESSAGE
+hook set with SetWindowsHookEx and no task runs in every task on
+Windows; its DLL usually only hands the message to its program (Open
+Watcom's Spy: WSPYHK calls a procedure of WSPY's), which cannot run in
+another process. So it runs in the task that set it: a named shared
+block (`\SHAREMEM\WIN16\HOOKS`) lists the tasks with such hooks (a
+hidden window of theirs, the hook types, the process), every other task
+posts each message those hooks would see to that window (the message in
+a giveable block), and the hooking task calls its hook with a
+CWPSTRUCT or MSG whose window is its proxy of the other task's
+(`compat.rs`; GetWindowTask of a proxy is that task). W16TEST checks
+with DDESRV16; Spy > All Windows shows the other tasks' messages.
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode
