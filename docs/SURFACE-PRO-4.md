@@ -26,21 +26,54 @@ been in QEMU, VirtualBox and VMware).
 
 ## Phase 0: get any log out of the machine
 
-The SP4 has no serial port, and today `log.rs` writes to serial and the
-screen only. That is the first thing to fix, before any driver work:
+The SP4 has no serial port. Done (2026-11-15):
 
-- keep the kernel log in a RAM ring buffer and write it to the boot
-  stick's FAT partition (`\RS2\BOOT.LOG`) as soon as storage is up, and
-  again on panic (a panic handler that can still write through the USB
-  mass-storage or NVMe driver is worth having);
-- a large-font panic screen on the GOP framebuffer (2736x1824 makes the
-  normal 8x16 console text tiny);
-- optional, once a USB Ethernet adapter works (phase 2): UDP syslog to the
-  dev machine;
-- in QEMU, test with `-machine q35` **without** the PS/2 controller and
-  HPET (`-machine q35,i8042=off,hpet=off`) and with `-nodefaults`, so the
-  real-hardware differences turn up before the stick goes into the
-  Surface.
+- **The log in memory** (`kernel/src/klog.rs`): everything written to the
+  serial port also goes into a 256 KB ring buffer.
+- **`bootlog`** on the kernel command line: a kernel thread copies the
+  ring to `\RS2\BOOT.LOG` on the boot volume (the drive holding
+  `\RS2\KERNEL` that is not the RAM C: or a CD: on a live USB stick, the
+  stick's EFI partition) every 5 s while the log grows. Make the stick
+  with
+  `cargo xtask iso --dist -o work/rs2-live.iso --cmdline bootlog`. Nothing
+  is written from a crashed kernel, so the file can miss the last
+  seconds; the QR code below has them.
+- **The crash screen** (`kernel/src/crash.rs`): a kernel panic or kernel
+  trap fills the framebuffer with what happened in large text (message,
+  registers, backtrace), the end of the log, and a QR code holding a crash
+  report: a header (version, uptime, command line) plus as much of the
+  log as fits, compressed (`crates/crashqr`: zlib, base45 into the QR
+  alphanumeric mode, up to version 40; 20-25 KB of log). Scan it with any
+  phone QR reader and decode it on the development machine:
+  `python3 -I tools/scripts/crashqr.py 'RS2C1:...'`, or give it a photo
+  or screenshot (decoded by macOS Core Image through
+  `tools/scripts/qrdecode.swift`). The screen code allocates nothing and
+  takes no lock another CPU may hold. At 2736x1824 the code is drawn at
+  about 6 pixels per module.
+- **`crashtest=panic|trap[,SECONDS]`** crashes on purpose (default after
+  5 s), to try the crash screen on a new machine first.
+- **`cargo xtask run --bare`**: q35 without the PS/2 controller and HPET,
+  USB keyboard and mouse; `--cmdline 'WORDS'` adds kernel options. The
+  first run found a real-hardware bug at once: `kbd::init` drained port
+  60h while port 64h's "output full" bit was set, and without a keyboard
+  controller port 64h reads FFh, so boot hung forever. Booting the dist
+  ISO as a USB stick on such a machine:
+  `cargo xtask run --bare --boot-hdd --usb-disk work/rs2-live.iso`.
+
+Found on the way, not fixed: `boot::start` (CONFIG.SYS, starting the
+shell) runs on CPU 0's idle thread. While it runs, disk I/O from another
+thread (the first bootlog writes, which create BOOT.LOG and update its
+directory entry) corrupted the idle thread's saved registers: a kernel
+page fault in `schedule()` right after `config.sys:`, reproducible on
+fresh images on both USB and AHCI disks. Not a stray CPU write through
+the stack's address (a QEMU watchpoint saw none) and not a frame handed
+out twice. bootlog now waits until `boot::start` has returned, but any
+other kernel thread doing I/O during boot (USB devices arriving on real
+hardware) can still meet it.
+
+Still to do: UDP syslog once a network adapter works (phase 2); saving a
+crash report across a warm reboot (a RAM region the loader writes to
+`\RS2\CRASH.LOG` on the next boot, with `panic=SECONDS` to restart).
 
 ## Phase 1: boot to CMD and PM with an external keyboard
 

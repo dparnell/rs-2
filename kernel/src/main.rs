@@ -134,6 +134,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     klog::start_bootlog();
     crash::start_test();
     boot::start(cmdline);
+    klog::BOOTED.store(true, core::sync::atomic::Ordering::Release);
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();
 }

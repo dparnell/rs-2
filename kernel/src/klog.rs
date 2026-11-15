@@ -50,6 +50,10 @@ pub fn tail(out: &mut [u8]) -> usize {
     since(0, out)
 }
 
+/// Set once `boot::start` has returned (CONFIG.SYS read, the shell
+/// started).
+pub static BOOTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// `bootlog`: copy the log to `\RS2\BOOT.LOG` on the boot volume every
 /// few seconds while it grows (the first copy once the disks are up).
 pub fn start_bootlog() {
@@ -60,6 +64,13 @@ pub fn start_bootlog() {
         let mut written = usize::MAX;
         let mut buf = alloc::vec![0u8; SIZE];
         let mut warned = false;
+        // Not while boot::start runs: it does its file I/O on CPU 0's idle
+        // thread, and disk I/O from here contending with it corrupted the
+        // idle thread's stack (a kernel trap in schedule() right after
+        // "config.sys:", 2026-11-15; docs/SURFACE-PRO-4.md, phase 0).
+        while !BOOTED.load(Ordering::Acquire) {
+            crate::task::sched::sleep_ms(200);
+        }
         loop {
             let head = position();
             if head != written {
