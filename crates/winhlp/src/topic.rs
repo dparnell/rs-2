@@ -3,6 +3,7 @@
 //! text, and the decoding of displayable text records into [`Ev`]ents.
 
 use crate::hfs::{lz77, u16_at, u32_at, Cur};
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// Record types.
@@ -337,9 +338,10 @@ pub struct Para {
 /// Events of a displayable text record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ev<'a> {
-    /// A table starts: its column widths and gaps.
-    Table(Vec<(i16, i16)>),
-    /// A table cell in column n starts (with its paragraph settings next).
+    /// A table starts: where its columns start (paragraph units).
+    Table(Vec<i32>),
+    /// A paragraph of a table cell in column n starts (its settings
+    /// next); a cell may have several.
     Cell(i16),
     /// A paragraph's settings (start of the record or of a cell).
     Para(Para),
@@ -422,10 +424,11 @@ fn para(c: &mut Cur<'_>) -> Option<Para> {
 /// Decode a displayable text record (types 0x01, 0x20, 0x23): LinkData1
 /// is a compressed long (the record's size), for 0x20 and 0x23 a
 /// compressed word (its text length), for tables the columns (u8 count,
-/// u8 type, for types 0 and 2 an i16 width, then i16 width and gap per
-/// column) and then per paragraph (tables: per cell, which first has
-/// i16 column (-1 ends the table), i16, u8) the paragraph settings and
-/// formatting commands up to 0xFF. LinkData2 is the text: its strings
+/// u8 type, for types 0 and 2 an i16 table width that the column
+/// widths are 1/32767 of, then i16 width and gap per column) and then
+/// per paragraph (tables: each first has i16 column (-1 ends the
+/// table), i16, u8) the paragraph settings and formatting commands up
+/// to 0xFF. LinkData2 is the text: its strings
 /// end where the next command applies.
 pub fn decode<'a>(kind: u8, d1: &'a [u8], d2: &'a [u8], f: &mut dyn FnMut(Ev<'a>)) -> Option<()> {
     let mut c = Cur::new(d1);
@@ -437,16 +440,24 @@ pub fn decode<'a>(kind: u8, d1: &'a [u8], d2: &'a [u8], f: &mut dyn FnMut(Ev<'a>
     if table {
         let cols = c.u8()?;
         let ty = c.u8()?;
-        if ty == 0 || ty == 2 {
-            c.i16()?;
-        }
-        let mut v = Vec::new();
+        // Types 0 and 2: widths in 1/32767 of the table's width.
+        let scale = if ty == 0 || ty == 2 { c.i16()? as i32 } else { 32767 };
+        let mut wg = Vec::new();
         for _ in 0..cols {
-            let w = c.i16()?;
-            let g = c.i16()?;
-            v.push((w, g));
+            let w = c.i16()? as i32 * scale / 32767;
+            let g = c.i16()? as i32 * scale / 32767;
+            wg.push((w, g));
         }
-        f(Ev::Table(v));
+        // Where each column starts: the first cell ends half the second
+        // gap past its width and gap, the others a width and gap on.
+        let mut starts = vec![0];
+        let mut x = 0;
+        for (i, &(w, g)) in wg.iter().enumerate() {
+            x += w + g + if i == 0 { wg.get(1).map_or(0, |n| n.1 / 2) } else { 0 };
+            starts.push(x);
+        }
+        starts.truncate(cols as usize);
+        f(Ev::Table(starts));
     }
     let mut t = 0usize; // position in the text
     let mut text = |f: &mut dyn FnMut(Ev<'a>)| {

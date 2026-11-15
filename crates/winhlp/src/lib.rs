@@ -124,6 +124,7 @@ pub mod help;
 pub mod hfs;
 pub mod pict;
 pub mod topic;
+pub mod wmf;
 
 #[cfg(test)]
 mod tests;

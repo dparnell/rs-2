@@ -339,6 +339,8 @@ struct Writer<'c, 'h, 'a> {
     /// Anything written since the last paragraph.
     content: bool,
     table: Option<Table>,
+    /// A table ended with the last record (the next may be its next row).
+    table_ended: bool,
     pics: &'c RefCell<Pics>,
     centred_pic: bool,
 }
@@ -370,6 +372,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
             gap: Gap::None,
             content: false,
             table: None,
+            table_ended: false,
             pics,
             centred_pic: false,
         }
@@ -532,30 +535,36 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
         match e {
             Ev::Table(cols) => {
                 self.end_link();
-                if self.content {
+                // Rows are records of their own: a row after a row is a
+                // line on.
+                if self.table_ended {
+                    self.gap = self.gap.max(Gap::Break);
+                } else if self.content {
                     self.gap = self.gap.max(Gap::Para);
                 }
-                let mut margins = Vec::new();
-                let mut x = 0i32;
-                for (w, g) in &cols {
-                    margins.push(chars(x + *g as i32 / 2));
-                    x += (*w as i32).max(0) + (*g as i32).max(0);
-                }
+                self.table_ended = false;
+                let mut margins: Vec<u8> = cols.iter().map(|&x| chars(x)).collect();
                 // Columns at least a few characters apart.
                 for i in 1..margins.len() {
                     if margins[i] < margins[i - 1].saturating_add(4) {
                         margins[i] = margins[i - 1].saturating_add(4);
                     }
                 }
-                self.table = Some(Table { margins, last: i16::MAX });
+                self.table = Some(Table { margins, last: i16::MAX - 1 });
             }
             Ev::Cell(col) => {
                 self.end_link();
                 let Some(t) = self.table.as_mut() else { return };
-                let new_row = col <= t.last;
+                // A column again: another paragraph of the cell.
+                let same = col == t.last;
+                let new_row = col < t.last;
                 t.last = col;
                 let m = t.margins.get(col.max(0) as usize).copied().unwrap_or(1);
-                if new_row {
+                if same {
+                    if self.content {
+                        self.gap = self.gap.max(Gap::Break);
+                    }
+                } else if new_row {
                     if self.content {
                         self.gap = self.gap.max(Gap::Break);
                     }
@@ -567,13 +576,14 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                     self.gap = Gap::None;
                     self.margin = m;
                     self.put(format!(":tab margin={m}.").as_bytes());
+                    self.content = false;
                 }
             }
             Ev::TableEnd => {
                 self.end_link();
                 self.table = None;
-                self.gap = self.gap.max(Gap::Para);
-                self.set_margin(1);
+                self.table_ended = true;
+                self.content = true;
             }
             Ev::Para(p) => {
                 self.tabs = 0;
@@ -581,6 +591,10 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                 if self.table.is_some() {
                     self.para = p;
                     return;
+                }
+                if self.table_ended {
+                    self.table_ended = false;
+                    self.gap = self.gap.max(Gap::Para);
                 }
                 let first = chars(p.left as i32 + p.first as i32);
                 let left = chars(p.left as i32);
@@ -682,16 +696,19 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
             }
             p.decoded[&name].clone()
         };
-        let Some((_, cy, hotspots)) = info else {
+        let Some((cx, cy, hotspots)) = info else {
             // A metafile or a missing picture.
             return;
         };
-        let inline = align == 0 && !(self.centred_pic && !self.content);
+        // In the text (bmc), except alone in a centred paragraph; small
+        // pictures at the left (bml, text beside them) too.
+        let inline = (align == 0 && !(self.centred_pic && !self.content)) || (align == 1 && cx <= 160);
         self.begin_content();
-        let a = match (align, self.centred_pic) {
-            (1, _) => " align=left",
-            (2, _) => " align=right",
-            (_, true) => " align=center",
+        let a = match align {
+            _ if inline => "",
+            1 => " align=left",
+            2 => " align=right",
+            _ if self.centred_pic => " align=center",
             _ => "",
         };
         let areas: Vec<(Target, &pict::Hotspot)> = hotspots

@@ -36,7 +36,8 @@ const VGA: [u32; 16] = [
 ];
 
 /// The best picture of a picture file (`lp`/`lP` magic, u16 count, u32
-/// offsets): the one with the most colours, then the largest.
+/// offsets): the one with the most colours, then the largest (bitmaps
+/// before metafiles, which are drawn).
 pub fn decode(file: &[u8]) -> Option<Picture> {
     let magic = u16_at(file, 0)?;
     if magic != 0x506c && magic != 0x706c {
@@ -48,7 +49,7 @@ pub fn decode(file: &[u8]) -> Option<Picture> {
     for i in 0..n.min(16) {
         let o = u32_at(file, 4 + 4 * i)? as usize;
         let Some(p) = file.get(o..) else { continue };
-        let Some((pic, bpp)) = picture(p) else { continue };
+        let Some((pic, bpp)) = picture(p).or_else(|| metafile_picture(p).map(|m| (m, 0))) else { continue };
         let key = (bpp, pic.cx as u64 * pic.cy as u64);
         if best.is_none() || key > best_key {
             best_key = key;
@@ -86,6 +87,11 @@ fn unpack(data: &[u8], method: u8, size: usize) -> Option<Vec<u8>> {
 /// offsets of the data and the hotspots. Returns the mapping mode, the
 /// size and the metafile's records.
 pub fn metafile(p: &[u8]) -> Option<(u16, u16, u16, Vec<u8>)> {
+    metafile_hot(p).map(|m| (m.0, m.1, m.2, m.3))
+}
+
+/// [`metafile`] and the hotspots.
+fn metafile_hot(p: &[u8]) -> Option<(u16, u16, u16, Vec<u8>, Vec<Hotspot>)> {
     if *p.first()? != 8 {
         return None;
     }
@@ -96,10 +102,19 @@ pub fn metafile(p: &[u8]) -> Option<(u16, u16, u16, Vec<u8>)> {
     let cy = c.u16()?;
     let size = c.cdword()? as usize;
     let csize = c.cdword()? as usize;
-    c.cdword()?;
+    let hsize = c.cdword()? as usize;
     let coff = c.u32()? as usize;
+    let hoff = c.u32()? as usize;
     let data = p.get(coff..coff.checked_add(csize)?.min(p.len()))?;
-    Some((mode, cx, cy, unpack(data, method, size)?))
+    let hot = if hsize > 0 { p.get(hoff..hoff + hsize).map(hotspots).unwrap_or_default() } else { Vec::new() };
+    Some((mode, cx, cy, unpack(data, method, size)?, hot))
+}
+
+/// A metafile picture drawn into a bitmap (see [`crate::wmf`]).
+fn metafile_picture(p: &[u8]) -> Option<Picture> {
+    let (mode, cx, cy, m, hotspots) = metafile_hot(p)?;
+    let (w, h, px) = crate::wmf::render(mode, cx, cy, &m)?;
+    Some(Picture { bmp: crate::wmf::bmp(w, h, &px), cx: w, cy: h, hotspots })
 }
 
 fn picture(p: &[u8]) -> Option<(Picture, u16)> {

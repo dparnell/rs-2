@@ -281,6 +281,26 @@ fn picture_hotspots() {
     assert!(areas > 100, "{areas}");
 }
 
+/// Metafiles are drawn: HELPEX.HLP's window definition diagram has its
+/// lines, text and the two colour squares.
+#[test]
+fn metafile_drawn() {
+    let Some(d) = media(&[BIN, "HELPEX.HLP"].concat()) else { return };
+    let h = help::Help::parse(&d).unwrap();
+    let f = h.hfs.file(b"|bm2").unwrap();
+    let o = hfs::u32_at(f, 4).unwrap() as usize;
+    let (mode, cx, cy, m) = pict::metafile(&f[o..]).unwrap();
+    assert_eq!((mode, cx, cy), (8, 11853, 3933));
+    let (w, hh, px) = wmf::render(mode, cx, cy, &m).unwrap();
+    assert_eq!((w, hh), (447, 148));
+    let black = px.iter().filter(|&&c| c == 0).count();
+    assert!(black > 2000, "{black}");
+    assert!(px.contains(&0x00ffff));
+    assert!(px.contains(&0x008080));
+    let p = pict::decode(f).unwrap();
+    assert_eq!((p.cx, p.cy), (447, 148));
+}
+
 #[test]
 fn lz77_and_rle() {
     // "abcabcabcd": 3 literals, a reference 3 back of length 6, a literal.
