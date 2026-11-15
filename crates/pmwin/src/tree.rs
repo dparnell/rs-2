@@ -99,12 +99,13 @@ impl Desktop {
     pub fn set_shape(&mut self, h: Hwnd, shape: Option<Region>) {
         let r = self.screen_rect(h);
         let showing = self.is_showing(h);
+        let above = self.above_painted(h);
         if let Some(w) = self.windows.get_mut(&h) {
             w.shape = shape;
         }
         self.generation = self.generation.wrapping_add(1);
         if showing {
-            self.invalidate_screen(r);
+            self.invalidate_screen_below(r, &above);
         }
     }
 }
@@ -390,24 +391,81 @@ impl Desktop {
         }
     }
 
-    /// Mark a device rectangle for repainting in every showing window it
-    /// touches.
+    /// Mark a device rectangle for repainting in every showing window
+    /// that can be seen there (a window shown, hidden, moved or destroyed
+    /// there: what it uncovers, and itself where it now shows), as IBM's
+    /// PM does: each window only in its visible region (clipped by its
+    /// ancestors and by the siblings above it, as it paints), so a window
+    /// above the area (a tool palette over its own window) is not
+    /// repainted.
     pub fn invalidate_screen(&mut self, r: Rect) {
+        self.invalidate_screen_below(r, &BTreeSet::new());
+    }
+
+    /// The windows above `h` in the z-order (and their descendants): the
+    /// siblings above it and above each of its ancestors. What happens to
+    /// `h` (moved, shown, hidden, destroyed) never uncovers them.
+    pub fn above(&self, h: Hwnd) -> BTreeSet<Hwnd> {
+        let mut out = BTreeSet::new();
+        let mut cur = h;
+        while let Some(w) = self.get(cur) {
+            let Some(p) = self.get(w.parent) else { break };
+            for &s in p.children.iter().skip_while(|&&c| c != cur).skip(1) {
+                let mut sub = Vec::new();
+                self.collect(s, &mut sub);
+                out.extend(sub);
+            }
+            cur = w.parent;
+        }
+        out
+    }
+
+    /// The windows above `h` that are not painted over where `h` now
+    /// shows: Desktop::above, less its own siblings when it does not clip
+    /// them (WS_CLIPSIBLINGS: as in PM, it then paints over them, and
+    /// they paint again).
+    pub fn above_painted(&self, h: Hwnd) -> BTreeSet<Hwnd> {
+        let mut out = self.above(h);
+        let Some(w) = self.get(h) else { return out };
+        if w.parent != HWND_DESKTOP && w.style & ws::CLIPSIBLINGS == 0 {
+            if let Some(p) = self.get(w.parent) {
+                for &s in p.children.iter().skip_while(|&&c| c != h).skip(1) {
+                    let mut sub = Vec::new();
+                    self.collect(s, &mut sub);
+                    for x in sub {
+                        out.remove(&x);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// invalidate_screen for a change of a window below the windows in
+    /// `above` (Desktop::above of it): those are left alone.
+    pub fn invalidate_screen_below(&mut self, r: Rect, above: &BTreeSet<Hwnd>) {
         let hs: Vec<Hwnd> = self.windows.keys().copied().collect();
         for h in hs {
-            if !self.is_showing(h) {
+            if above.contains(&h) || !self.is_showing(h) {
                 continue;
             }
             let sr = self.screen_rect(h);
-            let i = r.intersect(&sr);
-            if !i.is_empty() {
-                let local = i.offset(-sr.left, -sr.bottom);
-                if let Some(w) = self.windows.get_mut(&h) {
+            if r.intersect(&sr).is_empty() {
+                continue;
+            }
+            let mut vis = self.visible_region(h, false);
+            vis.intersect(&r);
+            if vis.is_empty() {
+                continue;
+            }
+            if let Some(w) = self.windows.get_mut(&h) {
+                for i in &vis.rects {
+                    let local = i.offset(-sr.left, -sr.bottom);
                     w.update.add(local);
                     w.ghost.subtract(&local);
                 }
-                self.dirty(h);
             }
+            self.dirty(h);
         }
     }
 
@@ -430,6 +488,7 @@ impl Desktop {
     pub fn set_pos(&mut self, h: Hwnd, x: i32, y: i32, cx: i32, cy: i32) {
         let old = self.screen_rect(h);
         let showing = self.is_showing(h);
+        let (above, painted) = if showing { (self.above(h), self.above_painted(h)) } else { (BTreeSet::new(), BTreeSet::new()) };
         if let Some(w) = self.windows.get_mut(&h) {
             w.x = x;
             w.y = y;
@@ -438,9 +497,9 @@ impl Desktop {
         }
         self.generation = self.generation.wrapping_add(1);
         if showing {
-            self.invalidate_screen(old);
+            self.invalidate_screen_below(old, &above);
             let new = self.screen_rect(h);
-            self.invalidate_screen(new);
+            self.invalidate_screen_below(new, &painted);
         }
     }
 
@@ -477,6 +536,8 @@ impl Desktop {
             return (Region::new(), 0, 0);
         }
         let old = self.screen_rect(h);
+        let above = self.above(h);
+        let painted = self.above_painted(h);
         let mut keep = self.shown_region(h);
         if let Some(w) = self.windows.get_mut(&h) {
             w.x = x;
@@ -502,11 +563,11 @@ impl Desktop {
             if own {
                 self.invalidate(h, Some(r.offset(-new.left, -new.bottom)), true);
             } else {
-                self.invalidate_screen(*r);
+                self.invalidate_screen_below(*r, &painted);
             }
         }
         for r in &uncovered.rects {
-            self.invalidate_screen(*r);
+            self.invalidate_screen_below(*r, &above);
         }
         (copy, dx, dy)
     }
@@ -665,6 +726,7 @@ impl Desktop {
 
     pub fn set_visible(&mut self, h: Hwnd, on: bool) {
         let r = self.screen_rect(h);
+        let above = if on { self.above_painted(h) } else { self.above(h) };
         if let Some(w) = self.windows.get_mut(&h) {
             if on {
                 w.style |= ws::VISIBLE;
@@ -673,7 +735,7 @@ impl Desktop {
             }
         }
         self.generation = self.generation.wrapping_add(1);
-        self.invalidate_screen(r);
+        self.invalidate_screen_below(r, &above);
     }
 
     /// The next window of `queue` that needs painting (parents first).
@@ -815,17 +877,50 @@ mod tests {
             d.get_mut(h).unwrap().update = Region::new();
         }
         let g = d.generation;
-        // Moving b over a: both repaint, both queues are woken.
+        // Moving b over a: b repaints (its queue is woken); a, now under
+        // it, has nothing new to show.
         d.set_pos(b, 25, 0, 50, 50);
         assert_ne!(d.generation, g);
         let w = d.take_wake();
-        assert!(w.contains(&7) && w.contains(&8));
+        assert!(w.contains(&8) && !w.contains(&7));
         assert!(d.take_wake().is_empty());
         d.invalidate(a, None, false);
         assert_eq!(d.take_wake().into_iter().collect::<Vec<_>>(), alloc::vec![7]);
         assert_eq!(d.windows_of(8), alloc::vec![b]);
         d.to_bottom(b);
         assert_eq!(d.window_at(Point::new(30, 10)), a);
+    }
+
+    #[test]
+    fn a_window_above_a_moved_or_destroyed_one_is_not_repainted() {
+        let mut d = desk();
+        let low = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 200, 200), 1, 7, 0, 0).unwrap();
+        let mid = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(20, 20, 60, 60), 2, 8, 0, 0).unwrap();
+        let top = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(30, 30, 100, 100), 3, 9, 0, 0).unwrap();
+        for h in [low, mid, top, HWND_DESKTOP] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        // mid moves from under top: top keeps its pixels; low gets only
+        // what mid uncovered (less what top still covers).
+        d.set_pos(mid, 120, 120, 40, 40);
+        assert!(d.get(top).unwrap().update.is_empty());
+        let mut expect = Region::from_rect(Rect::new(20, 20, 60, 60));
+        expect.subtract(&Rect::new(30, 30, 100, 100));
+        let mut got = d.get(low).unwrap().update.clone();
+        got.subtract(&Rect::new(120, 120, 160, 160));
+        let mut diff = got.clone();
+        for r in &expect.rects {
+            diff.subtract(r);
+        }
+        assert!(diff.is_empty());
+        for h in [low, mid, top] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        // A window under top destroyed: top is not repainted either.
+        d.destroy(mid);
+        d.invalidate_screen(Rect::new(120, 120, 160, 160));
+        assert!(d.get(top).unwrap().update.is_empty());
+        assert!(!d.get(low).unwrap().update.is_empty());
     }
 
     #[test]

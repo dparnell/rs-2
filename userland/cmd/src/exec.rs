@@ -145,7 +145,15 @@ pub fn run_simple(sh: &mut Shell, s: &Simple, async_: bool) -> Option<u32> {
     };
     let mut pid = None;
     if let Some(rc) = crate::builtin::run(sh, s) {
-        sh.rc = rc;
+        // ERRORLEVEL is the last program's code: commands that only show
+        // or steer (ECHO, REM, GOTO, IF whose condition fails ...) leave
+        // it as it was when they succeed, as IBM's CMD does
+        // (`IF ERRORLEVEL 1 ECHO FAILED` then `IF NOT ERRORLEVEL 1 ECHO
+        // OK` printed both).
+        let keeps = ["ECHO", "REM", "GOTO", "IF", "SHIFT", "PAUSE", "SETLOCAL", "ENDLOCAL", "CLS"];
+        if rc != 0 || !keeps.iter().any(|k| s.name.eq_ignore_ascii_case(k) || s.name.to_ascii_uppercase().starts_with(&alloc::format!("{k}."))) {
+            sh.rc = rc;
+        }
     } else {
         match run_program(sh, &s.name, &s.args, async_) {
             Ok(Some(p)) => pid = Some(p),

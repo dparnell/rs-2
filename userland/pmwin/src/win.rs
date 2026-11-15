@@ -186,7 +186,8 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     }
     if style & ws::VISIBLE != 0 {
         let r = st().desk.screen_rect(h);
-        st().desk.invalidate_screen(r);
+        let above = st().desk.above_painted(h);
+        st().desk.invalidate_screen_below(r, &above);
     }
     h
 }
@@ -249,6 +250,8 @@ pub fn remove(h: u32) {
     }
     let r = s.desk.screen_rect(h);
     let showing = s.desk.is_showing(h);
+    // (what was above it is not uncovered)
+    let above = if showing { s.desk.above(h) } else { Default::default() };
     let gone = s.desk.destroy(h);
     crate::cursor::windows_gone(s, &gone);
     crate::gpiapi::windows_gone(s, &gone);
@@ -282,7 +285,7 @@ pub fn remove(h: u32) {
         q.sent.retain(|m| !gone.contains(&m.hwnd) || m.reply);
     }
     if showing {
-        s.desk.invalidate_screen(r);
+        s.desk.invalidate_screen_below(r, &above);
     }
     crate::menu::forget(&gone);
     // The next window up becomes active when the active one went.
