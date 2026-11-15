@@ -67,6 +67,31 @@ const APPCMD_CLIENTONLY: u32 = 0x10;
 const DNS_REGISTER: u16 = 1;
 const DNS_UNREGISTER: u16 = 2;
 
+const XTYP_REGISTER: u16 = 0x80a2;
+const XTYP_UNREGISTER: u16 = 0x80d2;
+const XTYP_MONITOR: u16 = 0x80f2;
+const CBF_SKIP_REGISTRATIONS: u32 = 0x80000;
+const CBF_SKIP_UNREGISTRATIONS: u32 = 0x100000;
+const APPCLASS_MASK: u32 = 0xf;
+const APPCLASS_MONITOR: u32 = 1;
+pub const MF_HSZ_INFO: u32 = 0x0100_0000;
+pub const MF_SENDMSGS: u32 = 0x0200_0000;
+pub const MF_POSTMSGS: u32 = 0x0400_0000;
+const MF_CALLBACKS: u32 = 0x0800_0000;
+const MF_ERRORS: u32 = 0x1000_0000;
+const MF_LINKS: u32 = 0x2000_0000;
+const MF_CONV: u32 = 0x4000_0000;
+const MH_CREATE: u16 = 1;
+const MH_KEEP: u16 = 2;
+const MH_DELETE: u16 = 3;
+
+/// DDEML's own messages between its windows (tasks): a monitor's
+/// event (wParam the MF_ flag >> 24, lParam a giveable block with the
+/// MON*STRUCT), an XTYP_REGISTER or XTYP_UNREGISTER (wParam 1 or 0,
+/// lParam the service's atom and the instance's name's).
+const WM_DDEML_MONITOR: u16 = 0x03ef;
+const WM_DDEML_REGISTER: u16 = 0x03ee;
+
 const ST_CONNECTED: u16 = 1;
 const ST_ADVISE: u16 = 2;
 const ST_ISLOCAL: u16 = 4;
@@ -136,12 +161,14 @@ struct Ddeml {
     convs: Vec<Box<Conv>>,
     /// Data handles: (handle, global block, size, format, item, owned).
     data: Vec<Box<(u32, u16, u32, u16, u16, bool)>>,
+    /// Monitor data handles in the task's DGROUP: (handle, offset, size).
+    local: Vec<(u32, u16, u32)>,
     next: u32,
     /// A connection being made: (instance, window, list, single).
     connecting: Option<(u32, u16, u32, bool)>,
 }
 
-static D: Global<Ddeml> = Global::new(Ddeml { insts: Vec::new(), convs: Vec::new(), data: Vec::new(), next: 1, connecting: None });
+static D: Global<Ddeml> = Global::new(Ddeml { insts: Vec::new(), convs: Vec::new(), data: Vec::new(), local: Vec::new(), next: 1, connecting: None });
 
 fn d() -> &'static mut Ddeml {
     D.get()
@@ -165,6 +192,406 @@ fn set_error(id: u32, e: u16) {
     if let Some(i) = inst(id) {
         i.error = e;
     }
+    if e != 0 {
+        // MONERRSTRUCT: cb, wLastError, dwTime, hTask.
+        monitor_with(MF_ERRORS, || {
+            let mut b = Mon::new(10);
+            b.w(e).l(now()).w(task());
+            b.0
+        });
+    }
+}
+
+// ---- Monitors ----
+//
+// Windows' DDEML is one DLL every task shares, so its monitors
+// (APPCLASS_MONITOR instances: DDE Spy) see every task's DDE. Here each
+// task has its own: a small named shared memory block lists every task's
+// instances (their windows' PM windows and afCmd), and a task with
+// something to report gives each monitor that asked for it (MF_ flags)
+// the MON*STRUCT in a giveable block, posted to the monitor's window
+// (WM_DDEML_MONITOR); the monitor's task makes it a data handle for
+// XTYP_MONITOR. The same list carries XTYP_REGISTER and XTYP_UNREGISTER
+// to every instance.
+
+const REG_NAME: &[u8] = b"\\SHAREMEM\\WIN16\\DDEML\0";
+const REG_SLOTS: usize = 64;
+
+/// Each slot: an instance's window's PM window and its afCmd.
+struct Registry {
+    slots: [[u32; 2]; REG_SLOTS],
+}
+
+fn registry() -> Option<&'static mut Registry> {
+    static P: Global<usize> = Global::new(0);
+    if *P.get() == 0 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        let rw = os2::PAG_READ | os2::PAG_WRITE;
+        let size = core::mem::size_of::<Registry>() as u32;
+        unsafe {
+            if os2::DosGetNamedSharedMem(&mut p, REG_NAME.as_ptr(), rw) != 0
+                && os2::DosAllocSharedMem(&mut p, REG_NAME.as_ptr(), size, rw | os2::PAG_COMMIT) != 0
+                && os2::DosGetNamedSharedMem(&mut p, REG_NAME.as_ptr(), rw) != 0
+            {
+                return None;
+            }
+        }
+        *P.get() = p as usize;
+    }
+    unsafe { (*P.get() as *mut Registry).as_mut() }
+}
+
+fn alive(pm: u32) -> bool {
+    pm != 0 && unsafe { crate::pm::WinIsWindow(crate::kernel::TASK.get().hab, pm) } != 0
+}
+
+/// The PM window of one of this task's windows.
+fn pm_window(h: u16) -> u32 {
+    wnd(h).map_or(0, |w| w.client)
+}
+
+/// Enter (or update) an instance in the list.
+fn register_inst(i: &Inst) {
+    let pm = pm_window(i.wnd);
+    let Some(r) = registry() else { return };
+    if pm == 0 {
+        return;
+    }
+    let slot = r.slots.iter().position(|s| s[0] == pm).or_else(|| r.slots.iter().position(|s| !alive(s[0])));
+    if let Some(k) = slot {
+        r.slots[k] = [pm, i.flags];
+    }
+}
+
+fn unregister_inst(i: &Inst) {
+    let pm = pm_window(i.wnd);
+    if let Some(r) = registry() {
+        for s in r.slots.iter_mut().filter(|s| s[0] == pm && pm != 0) {
+            *s = [0, 0];
+        }
+    }
+}
+
+/// The other instances' PM windows (every task's): with their afCmd.
+fn instances() -> Vec<(u32, u32)> {
+    let Some(r) = registry() else { return Vec::new() };
+    r.slots.iter().filter(|s| alive(s[0])).map(|s| (s[0], s[1])).collect()
+}
+
+fn is_monitor(fl: u32) -> bool {
+    fl & APPCLASS_MASK == APPCLASS_MONITOR
+}
+
+/// A MON*STRUCT being made: its bytes (cb first).
+struct Mon(Vec<u8>);
+
+impl Mon {
+    fn new(cb: u16) -> Mon {
+        let mut v = Vec::with_capacity(cb as usize);
+        v.extend_from_slice(&cb.to_le_bytes());
+        Mon(v)
+    }
+    fn w(&mut self, x: u16) -> &mut Mon {
+        self.0.extend_from_slice(&x.to_le_bytes());
+        self
+    }
+    fn l(&mut self, x: u32) -> &mut Mon {
+        self.0.extend_from_slice(&x.to_le_bytes());
+        self
+    }
+}
+
+fn now() -> u32 {
+    unsafe { crate::pm::WinGetCurrentTime(crate::kernel::TASK.get().hab) }
+}
+
+fn task() -> u16 {
+    crate::toolhelp::current_task()
+}
+
+/// Is any monitor watching for `mf`? (Cheap: most DDE has none.)
+pub fn monitoring(mf: u32) -> bool {
+    let Some(r) = registry() else { return false };
+    r.slots.iter().any(|s| s[0] != 0 && is_monitor(s[1]) && s[1] & mf != 0 && alive(s[0]))
+}
+
+/// Report an event to the monitors that asked for `mf`: the structure is
+/// made only when one did.
+fn monitor_with(mf: u32, make: impl FnOnce() -> Vec<u8>) {
+    if !monitoring(mf) {
+        return;
+    }
+    let mut bytes = make();
+    // After the structure: the sender's process and, for a message, the
+    // PM windows of its hwndTo and wParam, so that the monitor's task
+    // shows them by its own handles (a task handle or window handle is
+    // a selector or number of one process).
+    let cb = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+    if bytes.len() == cb + 8 {
+        bytes.splice(cb..cb, crate::dde::pid().to_le_bytes());
+    } else {
+        bytes.extend_from_slice(&crate::dde::pid().to_le_bytes());
+        bytes.extend_from_slice(&[0; 8]);
+    }
+    let fields = hsz_fields(mf);
+    let atom = |b: &[u8], at: usize| u16::from_le_bytes([b[at], b[at + 1]]);
+    for (pm, fl) in instances() {
+        if is_monitor(fl) && fl & mf != 0 {
+            // The monitor holds the strings until it has seen them (they
+            // may be gone here by then): which ones it holds goes in the
+            // trailer's second word.
+            let mut held = 0u32;
+            for (k, &at) in fields.iter().enumerate() {
+                let a = atom(&bytes, at);
+                if a >= 0xc000 && !global_atom_name(a).is_empty() && add_atom_ref(a) != 0 {
+                    held |= 1 << k;
+                }
+            }
+            if !fields.is_empty() {
+                bytes[cb + 4..cb + 8].copy_from_slice(&held.to_le_bytes());
+            }
+            if !give_post(pm, WM_DDEML_MONITOR, (mf >> 24) as u16, &bytes) {
+                release(&bytes, fields, held);
+            }
+        }
+    }
+}
+
+/// Where the string handles of each MON*STRUCT are.
+fn hsz_fields(mf: u32) -> &'static [usize] {
+    match mf {
+        MF_CALLBACKS => &[22, 26],
+        MF_CONV => &[10, 14],
+        MF_LINKS => &[12, 16, 20],
+        _ => &[],
+    }
+}
+
+/// Let go of the strings a monitor held.
+fn release(b: &[u8], fields: &[usize], held: u32) {
+    for (k, &at) in fields.iter().enumerate() {
+        if held & 1 << k != 0 && at + 2 <= b.len() {
+            delete_global_atom(u16::from_le_bytes([b[at], b[at + 1]]));
+        }
+    }
+}
+
+/// Where the hTask of each MON*STRUCT is.
+fn htask_at(mf: u32) -> usize {
+    match mf {
+        MF_HSZ_INFO => 12,
+        MF_LINKS => 6,
+        _ => 8,
+    }
+}
+
+/// Post one of DDEML's own messages to an instance window of any task,
+/// with `bytes` in a giveable block (lParam, a flat pointer) the receiver
+/// frees.
+fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) -> bool {
+    unsafe extern "C" {
+        #[link_name = "DOSCALLS.303"]
+        fn DosGiveSharedMem(p: *const u8, pid: u32, flags: u32) -> u32;
+    }
+    let mut p: *mut u8 = core::ptr::null_mut();
+    let fl = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_GIVEABLE;
+    if unsafe { os2::DosAllocSharedMem(&mut p, core::ptr::null(), bytes.len().max(1) as u32, fl) } != 0 {
+        return false;
+    }
+    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len()) };
+    let (me, them) = (crate::dde::pid(), crate::dde::window_pid(pm));
+    if them != me && unsafe { DosGiveSharedMem(p, them, os2::PAG_READ | os2::PAG_WRITE) } != 0 {
+        unsafe { os2::DosFreeMem(p) };
+        return false;
+    }
+    let ok = unsafe { crate::pm::WinPostMsg(pm, crate::dde::W16X | m as u32, wp as u32, p as u32) } != 0;
+    // Ours goes (theirs stays with the receiver), or both if not posted.
+    if them != me || !ok {
+        unsafe { os2::DosFreeMem(p) };
+    }
+    ok
+}
+
+/// A WM_DDEML_MONITOR at a monitor's window: XTYP_MONITOR.
+fn monitor_event(h: u16, mf: u16, p: *mut u8) {
+    if p.is_null() {
+        return;
+    }
+    let cb = unsafe { (p as *const u16).read_unaligned() } as usize;
+    let mut bytes = unsafe { core::slice::from_raw_parts(p, cb.max(2)) }.to_vec();
+    let tail = |i: usize| unsafe { (p.add(cb + 4 * i) as *const u32).read_unaligned() };
+    let (from, to, wp) = (tail(0), tail(1), tail(2));
+    // (Not a message: the strings held for us.)
+    let (fields, held) = (hsz_fields((mf as u32) << 24), to);
+    unsafe { os2::DosFreeMem(p) };
+    // The sender's handles as this task knows them.
+    if from != crate::dde::pid() {
+        let mut put = |at: usize, v: u16| {
+            if at + 2 <= bytes.len() {
+                bytes[at..at + 2].copy_from_slice(&v.to_le_bytes());
+            }
+        };
+        put(htask_at((mf as u32) << 24), crate::toolhelp::task_of_pid(from));
+        if (mf as u32) << 24 & (MF_SENDMSGS | MF_POSTMSGS) != 0 {
+            if to != 0 && to != 0xffff {
+                put(2, crate::dde::proxy(to));
+            }
+            if wp != 0 {
+                put(12, crate::dde::proxy(wp));
+            }
+        }
+    }
+    if let Some(id) = d().insts.iter().find(|i| i.wnd == h && is_monitor(i.flags)).map(|i| i.id) {
+        let data = new_local_data(&bytes);
+        callback(id, XTYP_MONITOR, 0, 0, 0, 0, data, 0, (mf as u32) << 24);
+        free_data(data);
+    }
+    release(&bytes, fields, held);
+}
+
+/// MF_HSZ_INFO: a string handle made, kept or freed.
+fn monitor_hsz(action: u16, h: u16) {
+    monitor_with(MF_HSZ_INFO, || {
+        let name = global_atom_name(h);
+        // MONHSZSTRUCT: cb, fsAction, dwTime, hsz, hTask, wReserved, str.
+        let mut b = Mon::new((16 + name.len() + 1) as u16);
+        b.w(action).l(now()).l(hsz(h)).w(task()).w(0);
+        b.0.extend_from_slice(&name);
+        b.0.push(0);
+        b.0
+    });
+}
+
+/// MF_SENDMSGS, MF_POSTMSGS: a DDE message sent or posted (user.rs).
+pub fn monitor_msg(posted: bool, to: u16, m: u16, wp: u16, lp: u32) {
+    if !(WM_DDE_INITIATE..=WM_DDE_EXECUTE).contains(&m) {
+        return;
+    }
+    monitor_with(if posted { MF_POSTMSGS } else { MF_SENDMSGS }, || {
+        // MONMSGSTRUCT: cb, hwndTo, dwTime, hTask, wMsg, wParam, lParam
+        // (and the PM windows of hwndTo and wParam: monitor_with).
+        let mut b = Mon::new(18);
+        b.w(to).l(now()).w(task()).w(m).w(wp).l(lp);
+        let pm = |h: u16| if h == 0xffff { 0xffff } else { wnd(h).map(|w| w.client).or_else(|| crate::dde::foreign(h)).unwrap_or(0) };
+        b.l(pm(to)).l(pm(wp));
+        b.0
+    });
+}
+
+/// MF_CONV: a conversation made or ended. A DDEML client tells (it knows
+/// both handles, the server's being its window's PM window); a server
+/// tells when its client is no DDEML client (its window's PM window
+/// stands for the client's handle).
+fn monitor_conv(c: &Conv, connect: bool) {
+    if !reports(c) {
+        return;
+    }
+    let (svc, topic, (client, server)) = (c.service, c.topic, handles(c));
+    monitor_with(MF_CONV, || {
+        // MONCONVSTRUCT: cb, fConnect, dwTime, hTask, hszSvc, hszTopic,
+        // hConvClient, hConvServer.
+        let mut b = Mon::new(26);
+        b.w(connect as u16).l(now()).w(task()).l(hsz(svc)).l(hsz(topic)).l(client).l(server);
+        b.0
+    });
+}
+
+/// MF_LINKS: an advise loop started or stopped (told as MF_CONV is).
+fn monitor_link(c: &Conv, item: u16, fmt: u16, nodata: bool, established: bool) {
+    if !reports(c) {
+        return;
+    }
+    let (svc, topic, (client, server)) = (c.service, c.topic, handles(c));
+    monitor_with(MF_LINKS, || {
+        // MONLINKSTRUCT: cb, dwTime, hTask, fEstablished, fNoData, hszSvc,
+        // hszTopic, hszItem, wFmt, fServer, hConvServer, hConvClient.
+        let mut b = Mon::new(36);
+        b.l(now()).w(task()).w(established as u16).w(nodata as u16).l(hsz(svc)).l(hsz(topic)).l(hsz(item)).w(fmt).w(!c.client as u16).l(server).l(client);
+        b.0
+    });
+}
+
+/// The PM window of the partner of a conversation.
+fn partner_pm(c: &Conv) -> u32 {
+    wnd(c.partner).map(|w| w.client).or_else(|| crate::dde::foreign(c.partner)).unwrap_or(0)
+}
+
+/// A conversation's (client, server) handles for the monitors: a server
+/// conversation's handle is its window's PM window (initiate), so the
+/// client knows it.
+fn handles(c: &Conv) -> (u32, u32) {
+    if c.client { (c.h, partner_pm(c)) } else { (partner_pm(c), c.h) }
+}
+
+/// Does this side of a conversation tell the monitors about it?
+fn reports(c: &Conv) -> bool {
+    c.client || !is_ddeml_window(partner_pm(c))
+}
+
+/// DDEML's windows are known by their PM window's ID, in every task.
+const DDEML_ID: u16 = 0xdde1;
+
+fn is_ddeml_window(pm: u32) -> bool {
+    unsafe extern "C" {
+        #[link_name = "PMWIN.844"]
+        fn WinQueryWindowUShort(h: u32, i: i32) -> u32;
+    }
+    pm != 0 && unsafe { WinQueryWindowUShort(pm, crate::pm::QWS_ID) } as u16 == DDEML_ID
+}
+
+/// MF_CALLBACKS: an instance's callback ran.
+#[allow(clippy::too_many_arguments)]
+fn monitor_callback(ty: u16, fmt: u16, hconv: u32, hsz1: u32, hsz2: u32, data: u32, d1: u32, d2: u32, ret: u32) {
+    monitor_with(MF_CALLBACKS, || {
+        // MONCBSTRUCT: cb, wReserved, dwTime, hTask, dwRet, wType, wFmt,
+        // hConv, hsz1, hsz2, hData, dwData1, dwData2.
+        let mut b = Mon::new(42);
+        b.w(0).l(now()).w(task()).l(ret).w(ty).w(fmt).l(hconv).l(hsz1).l(hsz2).l(data).l(d1).l(d2);
+        b.0
+    });
+}
+
+/// The instance-specific name of a service (XTYP_REGISTER's hsz2):
+/// "NAME(0xHHHHHHHH)" with the instance's window.
+fn instance_name(svc: u16, w: u16) -> u16 {
+    let mut n = global_atom_name(svc);
+    n.extend_from_slice(alloc::format!("(0x{:08x})", pm_window(w)).as_bytes());
+    add_global_atom(&n)
+}
+
+/// DdeNameService: XTYP_REGISTER (or UNREGISTER) to every other instance
+/// of every task (not monitors: they see it as a callback).
+fn announce(id: u32, svc: u16, register: bool) {
+    let Some(i) = inst(id) else { return };
+    let (own, w) = (pm_window(i.wnd), i.wnd);
+    let spec = instance_name(svc, w);
+    let ty = if register { XTYP_REGISTER } else { XTYP_UNREGISTER };
+    monitor_callback(ty, 0, 0, hsz(svc), hsz(spec), 0, 0, 0, 0);
+    for (pm, fl) in instances() {
+        let skip = if register { CBF_SKIP_REGISTRATIONS } else { CBF_SKIP_UNREGISTRATIONS };
+        if pm == own || is_monitor(fl) || fl & skip != 0 {
+            continue;
+        }
+        // The receiver deletes the atoms.
+        let (a, s) = (add_atom_ref(svc), add_atom_ref(spec));
+        let b = [a.to_le_bytes(), s.to_le_bytes()].concat();
+        give_post(pm, WM_DDEML_REGISTER, register as u16, &b);
+    }
+    delete_global_atom(spec);
+}
+
+/// A WM_DDEML_REGISTER at an instance's window.
+fn registered(h: u16, register: bool, p: *mut u8) {
+    if p.is_null() {
+        return;
+    }
+    let (a, s) = unsafe { ((p as *const u16).read_unaligned(), (p as *const u16).add(1).read_unaligned()) };
+    unsafe { os2::DosFreeMem(p) };
+    if let Some(id) = d().insts.iter().find(|i| i.wnd == h && !is_monitor(i.flags)).map(|i| i.id) {
+        callback(id, if register { XTYP_REGISTER } else { XTYP_UNREGISTER }, 0, 0, hsz(a), hsz(s), 0, 0, 0);
+    }
+    delete_global_atom(a);
+    delete_global_atom(s);
 }
 
 // ---- Data handles ----
@@ -184,12 +611,42 @@ fn data_of(h: u32) -> Option<&'static mut (u32, u16, u32, u16, u16, bool)> {
     d().data.iter_mut().find(|x| x.0 == h).map(|x| &mut **x)
 }
 
+/// XTYP_MONITOR's data: in the task's DGROUP (its local heap) when there
+/// is room. Open Watcom's DDE Spy declares DdeAccessData near (its
+/// ddeml.h: PBYTE) and reads the MON*STRUCT at that offset in its DS;
+/// with the data there, near and far readers both find it.
+fn new_local_data(bytes: &[u8]) -> u32 {
+    let ds = crate::kernel::TASK.get().hinst;
+    let off = crate::kernel::local_alloc_in(ds, bytes.len() as u16);
+    if off == 0 {
+        return new_data(bytes, 0, 0, false);
+    }
+    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), flat((ds as u32) << 16 | off as u32), bytes.len()) };
+    let h = 0x0d00_0000 | next();
+    d().local.push((h, off, bytes.len() as u32));
+    h
+}
+
+/// The far pointer and size of a data handle in the DGROUP.
+fn local_of(h: u32) -> Option<(u32, u32)> {
+    let ds = crate::kernel::TASK.get().hinst as u32;
+    d().local.iter().find(|x| x.0 == h).map(|x| (ds << 16 | x.1 as u32, x.2))
+}
+
 fn data_bytes(h: u32) -> Option<Vec<u8>> {
+    if let Some((p, n)) = local_of(h) {
+        return Some(unsafe { core::slice::from_raw_parts(flat(p), n as usize) }.to_vec());
+    }
     let &mut (_, g, n, ..) = data_of(h)?;
     Some(unsafe { core::slice::from_raw_parts(flat((g as u32) << 16), n as usize) }.to_vec())
 }
 
 fn free_data(h: u32) -> bool {
+    if let Some(i) = d().local.iter().position(|x| x.0 == h) {
+        let (_, off, _) = d().local.remove(i);
+        crate::kernel::local_free_in(crate::kernel::TASK.get().hinst, off);
+        return true;
+    }
     let Some(i) = d().data.iter().position(|x| x.0 == h) else { return false };
     let (_, g, ..) = *d().data.remove(i);
     global_free(g);
@@ -240,12 +697,19 @@ fn callback(id: u32, ty: u16, fmt: u16, hconv: u32, hsz1: u32, hsz2: u32, data: 
         XTYP_REQUEST | XTYP_ADVREQ => fl & CBF_FAIL_REQUESTS != 0,
         XTYP_CONNECT_CONFIRM => fl & CBF_SKIP_CONNECT_CONFIRMS != 0,
         XTYP_DISCONNECT => fl & CBF_SKIP_DISCONNECTS != 0,
+        XTYP_REGISTER => fl & CBF_SKIP_REGISTRATIONS != 0,
+        XTYP_UNREGISTER => fl & CBF_SKIP_UNREGISTRATIONS != 0,
         _ => false,
     };
     if fail || i.callback == 0 {
         return 0;
     }
-    PascalCall::new().w(ty).w(fmt).l(hconv).l(hsz1).l(hsz2).l(data).l(d1).l(d2).call(i.callback)
+    let r = PascalCall::new().w(ty).w(fmt).l(hconv).l(hsz1).l(hsz2).l(data).l(d1).l(d2).call(i.callback);
+    // (Registrations are told once, by the instance that registers.)
+    if !is_monitor(fl) && ty != XTYP_REGISTER && ty != XTYP_UNREGISTER {
+        monitor_callback(ty, fmt, hconv, hsz1, hsz2, data, d1, d2, r);
+    }
+    r
 }
 
 // ---- Windows ----
@@ -272,13 +736,26 @@ fn create_window(hinst: u16) -> u16 {
         *CLASS.get() = ok != 0;
     }
     let Some(ci) = user::find_class_name(b"DDEMLWnd") else { return 0 };
-    user::create(&user::Create { exstyle: 0, class: ci, title: b"", title_far: 0, class_far: 0, style: user::WS_POPUP, pos: [0, 0, 0, 0], parent: 0, menu: 0, hinst, param: 0 })
+    let w = user::create(&user::Create { exstyle: 0, class: ci, title: b"", title_far: 0, class_far: 0, style: user::WS_POPUP, pos: [0, 0, 0, 0], parent: 0, menu: 0, hinst, param: 0 });
+    // (A plain popup: one PM window, no frame whose client ID counts.)
+    if let Some(pm) = wnd(w).filter(|x| x.frame == x.client).map(|x| x.client) {
+        unsafe { crate::pm::WinSetWindowUShort(pm, crate::pm::QWS_ID, DDEML_ID) };
+    }
+    w
 }
 
 /// The DDEML windows' procedure (entry 10).
 pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     let (lo, hi) = (lp as u16, (lp >> 16) as u16);
     match m {
+        WM_DDEML_MONITOR => {
+            monitor_event(h, wp, lp as *mut u8);
+            0
+        }
+        WM_DDEML_REGISTER => {
+            registered(h, wp != 0, lp as *mut u8);
+            0
+        }
         WM_DDE_INITIATE => {
             if let Some(id) = d().insts.iter().find(|i| i.wnd == h).map(|i| i.id) {
                 initiate(id, wp, lo, hi);
@@ -295,6 +772,9 @@ pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             }
             let hc = 0x0c00_0000 | next();
             d().convs.push(Box::new(Conv { h: hc, inst: id, wnd: h, partner: wp, client: true, service: lo, topic: hi, connected: true, user: 0, list, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 }));
+            if let Some(c) = conv(hc) {
+                monitor_conv(c, true);
+            }
             0
         }
         WM_DDE_TERMINATE => {
@@ -324,7 +804,7 @@ pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
 /// A WM_DDE_INITIATE to an instance's window.
 fn initiate(id: u32, client: u16, app: u16, topic: u16) {
     let Some(i) = inst(id) else { return };
-    if i.flags & APPCMD_CLIENTONLY != 0 || i.blocked {
+    if i.flags & APPCMD_CLIENTONLY != 0 || i.blocked || is_monitor(i.flags) {
         return;
     }
     let services = i.services.clone();
@@ -337,11 +817,20 @@ fn initiate(id: u32, client: u16, app: u16, topic: u16) {
         if w == 0 {
             return;
         }
-        let hc = 0x0c00_0000 | next();
+        // The conversation's handle is its window's PM window: the
+        // client's DDEML knows it too (monitors, MF_CONV).
+        let hc = match pm_window(w) {
+            0 => 0x0c00_0000 | next(),
+            pm => pm,
+        };
         d().convs.push(Box::new(Conv { h: hc, inst: id, wnd: w, partner: client, client: false, service: svc, topic, connected: true, user: 0, list: 0, advises: Vec::new(), xact: None, wait: Wait::None, result: (0, 0), pending_mem: 0 }));
         // The ACK carries atoms of our own (the client deletes them).
         let (a, t) = (add_atom_ref(svc), add_atom_ref(topic));
+        monitor_msg(false, client, WM_DDE_ACK, w, (t as u32) << 16 | a as u32);
         send(client, WM_DDE_ACK, w, (t as u32) << 16 | a as u32);
+        if let Some(c) = conv(hc) {
+            monitor_conv(c, true);
+        }
         callback(id, XTYP_CONNECT_CONFIRM, 0, hc, topic as u32, svc as u32, 0, 0, 0);
     };
     if app != 0 {
@@ -435,6 +924,7 @@ fn server_msg(hc: u32, m: u16, lo: u16, hi: u16) {
             if ok {
                 c.advises.retain(|a| !(same_atom(a.item, item) && a.fmt == fmt));
                 c.advises.push(Advise { item: add_atom_ref(item), fmt, defer: flags & 0x4000 != 0, ack_req: flags & 0x8000 != 0 });
+                monitor_link(c, item, fmt, flags & 0x4000 != 0, true);
                 ack(c, DDE_FACK, item);
                 global_free(g);
             } else {
@@ -448,6 +938,10 @@ fn server_msg(hc: u32, m: u16, lo: u16, hi: u16) {
                 callback(id, XTYP_ADVSTOP, *f, hc, topic, *it as u32, 0, 0, 0);
             }
             let Some(c) = conv(hc) else { return };
+            for &(it, f) in &advs {
+                let nodata = c.advises.iter().any(|a| a.item == it && a.fmt == f && a.defer);
+                monitor_link(c, it, f, nodata, false);
+            }
             c.advises.retain(|a| !advs.iter().any(|x| x.0 == a.item && x.1 == a.fmt));
             ack(c, if advs.is_empty() { 0 } else { DDE_FACK }, item);
         }
@@ -462,6 +956,7 @@ fn terminated(hc: u32, theirs: bool) {
         return;
     }
     c.connected = false;
+    end_links(c);
     let (id, w, partner, client) = (c.inst, c.wnd, c.partner, c.client);
     if theirs {
         post(partner, WM_DDE_TERMINATE, w, 0);
@@ -697,10 +1192,14 @@ fn client_transaction(pdata: u32, cb: u32, hc: u32, item: u16, fmt: u16, ty: u16
         }
         _ if status & DDE_FACK != 0 => {
             if base == XTYP_ADVSTART {
+                c.advises.retain(|a| !(same_atom(a.item, item) && a.fmt == fmt));
                 c.advises.push(Advise { item: add_atom_ref(item), fmt, defer: ty & XTYPF_NODATA != 0, ack_req: ty & XTYPF_ACKREQ != 0 });
+                monitor_link(c, item, fmt, ty & XTYPF_NODATA != 0, true);
             }
             if base == XTYP_ADVSTOP {
+                let nodata = c.advises.iter().any(|a| same_atom(a.item, item) && a.fmt == fmt && a.defer);
                 c.advises.retain(|a| !(same_atom(a.item, item) && a.fmt == fmt));
+                monitor_link(c, item, fmt, nodata, false);
             }
             1
         }
@@ -721,6 +1220,7 @@ fn connect(id: u32, service: u16, topic: u16, list: u32, single: bool) -> Vec<u3
     }
     d().connecting = Some((id, w, list, single));
     let (a, t) = (add_atom_ref(service), add_atom_ref(topic));
+    monitor_msg(false, 0xffff, WM_DDE_INITIATE, w, (t as u32) << 16 | a as u32);
     send(0xffff, WM_DDE_INITIATE, w, (t as u32) << 16 | a as u32);
     d().connecting = None;
     let made: Vec<u32> = d().convs.iter().filter(|c| c.wnd == w && c.connected).map(|c| c.h).collect();
@@ -751,6 +1251,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                         if cb != 0 {
                             i.callback = cb;
                         }
+                        register_inst(i);
                         0
                     }
                     None => DMLERR_INVALIDPARAMETER as u32,
@@ -759,6 +1260,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let id = 0x0001_0000 | next();
             let w = create_window(crate::kernel::TASK.get().hinst);
             d().insts.push(Box::new(Inst { id, callback: cb, flags: fl, error: 0, services: Vec::new(), wnd: w, blocked: false }));
+            if let Some(i) = inst(id) {
+                register_inst(i);
+            }
             unsafe { pid.write_unaligned(id) };
             0
         }
@@ -770,7 +1274,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 disconnect(hc);
             }
             let Some(i) = d().insts.iter().position(|i| i.id == id) else { return 0 };
+            for s in d().insts[i].services.clone() {
+                announce(id, s, false);
+            }
             let ins = d().insts.remove(i);
+            unregister_inst(&ins);
             for s in ins.services {
                 delete_global_atom(s);
             }
@@ -950,6 +1458,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DdeAccessData(hData, pcbDataSize): a far pointer to the data.
         17 => {
             let (h, pcb) = (a.l(), a.p() as *mut u32);
+            if let Some((p, n)) = local_of(h) {
+                if !pcb.is_null() {
+                    unsafe { pcb.write_unaligned(n) };
+                }
+                return p;
+            }
             let Some(&mut (_, g, n, ..)) = data_of(h) else { return 0 };
             if !pcb.is_null() {
                 unsafe { pcb.write_unaligned(n) };
@@ -959,7 +1473,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DdeUnaccessData(hData)
         18 => {
             let h = a.l();
-            data_of(h).is_some() as u32
+            (data_of(h).is_some() || local_of(h).is_some()) as u32
         }
         // DdeFreeDataHandle(hData)
         19 => free_data(a.l()) as u32,
@@ -975,12 +1489,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         21 => {
             let (_id, s, _cp) = (a.l(), a.l(), a.w());
             let Some(name) = crate::far_str(s).filter(|n| !n.is_empty()) else { return 0 };
-            hsz(add_global_atom(name))
+            let a = add_global_atom(name);
+            monitor_hsz(MH_CREATE, a);
+            hsz(a)
         }
         // DdeFreeStringHandle(idInst, hsz)
         22 => {
             let (_id, h) = (a.l(), a.l());
             if h != 0 {
+                monitor_hsz(MH_DELETE, h as u16);
                 delete_global_atom(h as u16);
             }
             1
@@ -997,7 +1514,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DdeKeepStringHandle(idInst, hsz)
         24 => {
             let (_id, h) = (a.l(), a.l());
-            (add_atom_ref(h as u16) != 0) as u32
+            let ok = add_atom_ref(h as u16) != 0;
+            if ok {
+                monitor_hsz(MH_KEEP, h as u16);
+            }
+            ok as u32
         }
         // DdeEnableCallback(idInst, hConv, wCmd)
         26 => {
@@ -1021,12 +1542,14 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if cmd & DNS_REGISTER != 0 && h1 != 0 {
                 if !i.services.iter().any(|&s| same_atom(s, h1)) {
                     i.services.push(add_atom_ref(h1));
+                    announce(id, h1, true);
                 }
             }
             if cmd & DNS_UNREGISTER != 0 {
                 let gone: Vec<u16> = i.services.iter().copied().filter(|&s| h1 == 0 || same_atom(s, h1)).collect();
                 i.services.retain(|s| !gone.contains(s));
                 for s in gone {
+                    announce(id, s, false);
                     delete_global_atom(s);
                 }
             }
@@ -1062,12 +1585,21 @@ fn disconnect(hc: u32) -> bool {
         return false;
     }
     c.connected = false;
+    end_links(c);
     let (w, partner, client) = (c.wnd, c.partner, c.client);
     post(partner, WM_DDE_TERMINATE, w, 0);
     if !d().convs.iter().any(|x| x.wnd == w && x.connected) && (client || wnd(w).is_some()) {
         user::destroy_window(w);
     }
     true
+}
+
+/// A client conversation ends: its links and itself, for the monitors.
+fn end_links(c: &Conv) {
+    for a in &c.advises {
+        monitor_link(c, a.item, a.fmt, a.defer, false);
+    }
+    monitor_conv(c, false);
 }
 
 /// DdePostAdvise: the data of each advise loop on the topic and item.
