@@ -52,6 +52,7 @@
 //!
 //! [`Doc`]: crate::Doc
 
+use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
@@ -90,25 +91,29 @@ enum Ref {
 
 #[derive(Debug, Clone)]
 enum Tok {
-    /// A word; `glued`: never followed by a space (bullets, numbers).
-    Word(Vec<u8>, bool),
-    /// White space in the source.
-    Ws,
+    /// A word (its number in `Parser::word_list`) and flags: GLUED never
+    /// followed by a space (bullets, numbers), SPACED white space after
+    /// it in the source.
+    Word(u32, u8),
     /// A paragraph end or line break (autospacing back on).
     Block(u8),
-    /// An escape; `brk`: it ends a run of words (margins).
-    Esc(Vec<u8>, bool),
-    /// A link with its link data (empty: none); a footnote link
-    /// (`reftype=fn`) if set.
-    Link(Ref, usize, Vec<u8>, bool),
+    /// An escape (its offset in `Parser::escapes`); `brk`: it ends a
+    /// run of words (margins).
+    Esc(u32, bool),
+    /// A link (target, source line, link data (empty: none), to a
+    /// footnote (`reftype=fn`)).
+    Link(Box<(Ref, usize, Vec<u8>, bool)>),
     /// A required blank (`&rbl.`): one space (0xFE) with autospacing
     /// off.
     Space,
     /// A link area of the last bitmap (`:artlink.`): its rectangle (x,
     /// y from the bitmap's bottom left, cx, cy; None: all of it) and
     /// link data; to a footnote if set.
-    Area(Ref, usize, Option<[u16; 4]>, Vec<u8>, bool),
+    Area(Box<(Ref, usize, Option<[u16; 4]>, Vec<u8>, bool)>),
 }
+
+const GLUED: u8 = 1;
+const SPACED: u8 = 2;
 
 fn esc(ty: u8, data: &[u8]) -> Vec<u8> {
     let mut v = vec![0xff, data.len() as u8 + 2, ty];
@@ -125,6 +130,8 @@ struct Panel {
     id: Option<Vec<u8>>,
     title: Vec<u8>,
     toks: Vec<Tok>,
+    /// The last word with nothing but escapes after it.
+    last_word: Option<usize>,
 }
 
 enum List {
@@ -156,6 +163,17 @@ struct Parser<'l> {
     artlink: bool,
     /// The `res=` of the headings so far.
     res_seen: BTreeSet<u16>,
+    /// The words of the text (and panel names) and their numbers.
+    words: BTreeMap<Vec<u8>, u32>,
+    word_list: Vec<Vec<u8>>,
+    /// The escapes of the text, back to back.
+    escapes: Vec<u8>,
+}
+
+/// The escape at `at` of `escapes` (`FF len type data`).
+fn escape_at(escapes: &[u8], at: u32) -> &[u8] {
+    let at = at as usize;
+    &escapes[at..at + 1 + escapes[at + 1] as usize]
 }
 
 /// `:color.` names in colour index order (index 0: the window's own).
@@ -365,12 +383,51 @@ impl Parser<'_> {
     }
 
     fn push(&mut self, t: Tok) -> Result<(), CompileError> {
-        self.panel()?.toks.push(t);
+        let p = self.panel()?;
+        match t {
+            Tok::Word(..) => p.last_word = Some(p.toks.len()),
+            Tok::Space | Tok::Block(_) => p.last_word = None,
+            _ => {}
+        }
+        p.toks.push(t);
         Ok(())
     }
 
+    /// White space: marks the word before.
+    fn ws(&mut self) -> Result<(), CompileError> {
+        let p = self.panel()?;
+        if let Some(i) = p.last_word.take() {
+            if let Tok::Word(_, f) = &mut p.toks[i] {
+                *f |= SPACED;
+            }
+        }
+        Ok(())
+    }
+
+    fn push_esc(&mut self, e: Vec<u8>, brk: bool) -> Result<(), CompileError> {
+        let at = self.escapes.len() as u32;
+        self.escapes.extend_from_slice(&e);
+        self.push(Tok::Esc(at, brk))
+    }
+
+    /// The number of word `w` (added to the words when new).
+    fn intern(&mut self, w: &[u8]) -> u32 {
+        if let Some(&n) = self.words.get(w) {
+            return n;
+        }
+        let n = self.word_list.len() as u32;
+        self.word_list.push(w.to_vec());
+        self.words.insert(w.to_vec(), n);
+        n
+    }
+
+    fn word(&mut self, w: &[u8], glued: bool) -> Result<(), CompileError> {
+        let n = self.intern(w);
+        self.push(Tok::Word(n, if glued { GLUED } else { 0 }))
+    }
+
     fn margin_esc(&mut self, n: u8) -> Result<(), CompileError> {
-        self.push(Tok::Esc(esc(0x02, &[n]), true))
+        self.push_esc(esc(0x02, &[n]), true)
     }
 
     fn text(&mut self, s: &[u8]) -> Result<(), CompileError> {
@@ -378,16 +435,16 @@ impl Parser<'_> {
         while p < s.len() {
             let c = s[p];
             if c == b' ' || c == b'\t' {
-                self.push(Tok::Ws)?;
+                self.ws()?;
                 p += 1;
             } else if is_word_char(c) {
                 let start = p;
                 while p < s.len() && is_word_char(s[p]) {
                     p += 1;
                 }
-                self.push(Tok::Word(s[start..p].to_vec(), false))?;
+                self.word(&s[start..p].to_vec(), false)?;
             } else {
-                self.push(Tok::Word(vec![c], false))?;
+                self.word(&vec![c], false)?;
                 p += 1;
             }
         }
@@ -431,14 +488,19 @@ impl Parser<'_> {
                     }
                 }
                 let ext = window_data(line, &a, [b"x", b"y", b"width", b"height"], true)?;
+                let id = get(b"id").map(|v| v.to_ascii_lowercase());
+                if let Some(id) = &id {
+                    self.intern(id);
+                }
                 self.panels.push(Panel {
                     level: name[1] - b'0',
                     hidden: a.iter().any(|(n, _)| n == b"hide"),
                     ext,
                     res,
-                    id: get(b"id").map(|v| v.to_ascii_lowercase()),
+                    id,
                     title: rest.to_vec(),
                     toks: Vec::new(),
+                    last_word: None,
                 });
                 return Ok(true);
             }
@@ -453,12 +515,12 @@ impl Parser<'_> {
             b"p" => self.para()?,
             b"note" => {
                 self.para()?;
-                self.push(Tok::Esc(esc(0x04, &[2]), false))?;
-                self.push(Tok::Word(b"Note".to_vec(), false))?;
-                self.push(Tok::Word(b":".to_vec(), false))?;
-                self.push(Tok::Esc(esc(0x04, &[0]), false))?;
-                self.push(Tok::Ws)?;
-                self.push(Tok::Esc(esc(0x1c, &[]), false))?;
+                self.push_esc(esc(0x04, &[2]), false)?;
+                self.word(&b"Note".to_vec(), false)?;
+                self.word(&b":".to_vec(), false)?;
+                self.push_esc(esc(0x04, &[0]), false)?;
+                self.ws()?;
+                self.push_esc(esc(0x1c, &[]), false)?;
                 self.note = Some(self.margin);
             }
             b"ul" | b"ol" | b"sl" => {
@@ -486,10 +548,10 @@ impl Parser<'_> {
                     self.push(Tok::Block(BREAK))?;
                 }
                 match kind {
-                    b'u' => self.push(Tok::Word(vec![0x07], true))?,
+                    b'u' => self.word(&vec![0x07], true)?,
                     b'o' => {
-                        self.push(Tok::Word(format!("{num}").into_bytes(), true))?;
-                        self.push(Tok::Word(b".".to_vec(), true))?;
+                        self.word(&format!("{num}").into_bytes(), true)?;
+                        self.word(&b".".to_vec(), true)?;
                     }
                     _ => {}
                 }
@@ -532,7 +594,7 @@ impl Parser<'_> {
                     return err(line, ":dd. outside :dl.");
                 };
                 self.margin = base + tsize;
-                self.push(Tok::Esc(esc(0x12, &[base + tsize]), true))?;
+                self.push_esc(esc(0x12, &[base + tsize]), true)?;
             }
             b"edl" => {
                 let Some(List::Defs { base, .. }) = self.lists.pop() else {
@@ -545,10 +607,10 @@ impl Parser<'_> {
             }
             b"hp1" | b"hp2" | b"hp3" | b"hp4" | b"hp5" | b"hp6" | b"hp7" => {
                 let style = [1, 2, 3, 2, 4, 5, 6][(name[2] - b'1') as usize];
-                self.push(Tok::Esc(esc(0x04, &[style]), false))?;
+                self.push_esc(esc(0x04, &[style]), false)?;
             }
             b"ehp1" | b"ehp2" | b"ehp3" | b"ehp4" | b"ehp5" | b"ehp6" | b"ehp7" => {
-                self.push(Tok::Esc(esc(0x04, &[0]), false))?;
+                self.push_esc(esc(0x04, &[0]), false)?;
             }
             b"link" => {
                 let footnote = match get(b"reftype").map(|v| v.to_ascii_lowercase()).as_deref() {
@@ -585,24 +647,26 @@ impl Parser<'_> {
                     d.extend_from_slice(&data.map(|d| d.1).unwrap_or_default());
                 }
                 if self.artlink {
-                    self.push(Tok::Area(r, line, rect, d, footnote))?;
+                    self.push(Tok::Area(Box::new((r, line, rect, d, footnote))))?;
                 } else {
-                    self.push(Tok::Link(r, line, d, footnote))?;
+                    self.push(Tok::Link(Box::new((r, line, d, footnote))))?;
                 }
             }
-            b"elink" => self.push(Tok::Esc(esc(0x08, &[]), false))?,
+            b"elink" => self.push_esc(esc(0x08, &[]), false)?,
             b"artlink" => {
                 // The bitmap before becomes one with link areas: `FF len
                 // 0F 00 flags offset`.
-                let Some(Tok::Esc(e, _)) = self.panel()?.toks.iter_mut().rev().find(|t| !matches!(t, Tok::Ws)) else {
+                let Some(&Tok::Esc(at, brk)) = self.panel()?.toks.last() else {
                     return err(line, ":artlink. not after :artwork.");
                 };
+                let e = escape_at(&self.escapes, at);
                 if e.get(2) != Some(&0x0e) {
                     return err(line, ":artlink. not after :artwork.");
                 }
                 let mut d = vec![0x00];
                 d.extend_from_slice(&e[3..]);
-                *e = esc(0x0f, &d);
+                self.panel()?.toks.pop();
+                self.push_esc(esc(0x0f, &d), brk)?;
                 self.artlink = true;
             }
             b"eartlink" => self.artlink = false,
@@ -617,7 +681,7 @@ impl Parser<'_> {
                 if name != b"rm" {
                     self.margin = m;
                 }
-                self.push(Tok::Esc(esc(ty, &[m]), true))?;
+                self.push_esc(esc(ty, &[m]), true)?;
             }
             b"color" => {
                 for (k, ty) in [(&b"fc"[..], 0x13u8), (b"bc", 0x14)] {
@@ -626,7 +690,7 @@ impl Parser<'_> {
                         let Some(i) = COLOURS.iter().position(|n| *n == c.as_slice()) else {
                             return err(line, format!("unknown colour {}", crate::latin1(&c)));
                         };
-                        self.push(Tok::Esc(esc(ty, &[i as u8]), false))?;
+                        self.push_esc(esc(ty, &[i as u8]), false)?;
                     }
                 }
             }
@@ -652,7 +716,7 @@ impl Parser<'_> {
                     put16(&mut d, flags);
                     d.extend_from_slice(&w);
                 }
-                self.push(Tok::Esc(esc(0x21, &d), true))?;
+                self.push_esc(esc(0x21, &d), true)?;
             }
             b"artwork" => {
                 // `FF 07 0E flags offset`: the image record's offset from
@@ -692,12 +756,12 @@ impl Parser<'_> {
                 }
                 let mut d = vec![flags];
                 d.extend_from_slice(&offset.to_le_bytes());
-                self.push(Tok::Esc(esc(0x0e, &d), !runin))?;
+                self.push_esc(esc(0x0e, &d), !runin)?;
             }
             b"ddf" => {
                 let Some(r) = get(b"res") else { return err(line, ":ddf. needs res=") };
                 let r = number(line, &r)?;
-                self.push(Tok::Esc(esc(0x20, &r.to_le_bytes()), true))?;
+                self.push_esc(esc(0x20, &r.to_le_bytes()), true)?;
             }
             b"font" => {
                 let face = get(b"facename").unwrap_or_default();
@@ -721,7 +785,7 @@ impl Parser<'_> {
                     };
                     i as u8 + 1
                 };
-                self.push(Tok::Esc(esc(0x19, &[n]), false))?;
+                self.push_esc(esc(0x19, &[n]), false)?;
             }
             _ => return err(line, format!("unknown tag :{}.", crate::latin1(name))),
         }
@@ -791,7 +855,7 @@ impl Parser<'_> {
         }
         self.text(&text)?;
         if !self.panels.is_empty() {
-            self.push(Tok::Ws)?;
+            self.ws()?;
         }
         Ok(())
     }
@@ -802,7 +866,6 @@ impl Parser<'_> {
 struct CellBuf {
     text: Vec<u8>,
     local: Vec<u16>,
-    map: BTreeMap<u16, u8>,
 }
 
 /// Case-insensitive dictionary order (then byte order, so equal words
@@ -861,33 +924,104 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
 /// As [`compile`], with `load` reading the files `:artwork.` names
 /// (bitmaps and metafiles).
 pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u8>>) -> Result<Vec<u8>, CompileError> {
-    let mut ps = Parser {
-        load,
-        images: Vec::new(),
-        art: Vec::new(),
-        line: 0,
-        title: Vec::new(),
-        panels: Vec::new(),
-        index: Vec::new(),
-        lists: Vec::new(),
-        margin: 1,
-        note: None,
-        fonts: Vec::new(),
-        artlink: false,
-        res_seen: BTreeSet::new(),
-    };
-    for (i, l) in src.split(|&c| c == b'\n').enumerate() {
-        ps.line = i + 1;
+    let mut c = Compiler::new(help, load);
+    c.feed(src)?;
+    c.finish()
+}
+
+/// A compiler fed its source a piece at a time (lines may be split
+/// between pieces), so that a big generated source need not be held
+/// whole: [`compile_with`] in steps.
+pub struct Compiler<'l> {
+    ps: Parser<'l>,
+    help: bool,
+    /// The start of a line whose end has not come yet.
+    partial: Vec<u8>,
+    /// The end of file character (0x1A) came.
+    done: bool,
+}
+
+impl<'l> Compiler<'l> {
+    /// A compiler for a help library (`help`) or a book; `load` reads
+    /// the files `:artwork.` names.
+    pub fn new(help: bool, load: &'l dyn Fn(&[u8]) -> Option<Vec<u8>>) -> Self {
+        Compiler { ps: Parser::new(load), help, partial: Vec::new(), done: false }
+    }
+
+    fn one(&mut self, l: &[u8]) -> Result<(), CompileError> {
+        if self.done {
+            return Ok(());
+        }
+        self.ps.line += 1;
         let l = l.strip_suffix(b"\r").unwrap_or(l);
         if l.first() == Some(&0x1a) {
-            break;
+            self.done = true;
+            return Ok(());
         }
-        ps.line(l)?;
+        self.ps.line(l)
     }
+
+    /// Compile the lines of `src`.
+    pub fn feed(&mut self, src: &[u8]) -> Result<(), CompileError> {
+        let mut rest = src;
+        while let Some(n) = rest.iter().position(|&c| c == b'\n') {
+            if self.partial.is_empty() {
+                self.one(&rest[..n])?;
+            } else {
+                let mut l = core::mem::take(&mut self.partial);
+                l.extend_from_slice(&rest[..n]);
+                self.one(&l)?;
+            }
+            rest = &rest[n + 1..];
+        }
+        self.partial.extend_from_slice(rest);
+        Ok(())
+    }
+
+    /// The number of the last line fed (1-based).
+    pub fn line(&self) -> usize {
+        self.ps.line
+    }
+
+    /// The compiled file.
+    pub fn finish(mut self) -> Result<Vec<u8>, CompileError> {
+        if !self.partial.is_empty() {
+            let l = core::mem::take(&mut self.partial);
+            self.one(&l)?;
+        }
+        build(self.ps, self.help)
+    }
+}
+
+impl<'l> Parser<'l> {
+    fn new(load: &'l dyn Fn(&[u8]) -> Option<Vec<u8>>) -> Self {
+        Parser {
+            load,
+            images: Vec::new(),
+            art: Vec::new(),
+            line: 0,
+            title: Vec::new(),
+            panels: Vec::new(),
+            index: Vec::new(),
+            lists: Vec::new(),
+            margin: 1,
+            note: None,
+            fonts: Vec::new(),
+            artlink: false,
+            res_seen: BTreeSet::new(),
+            words: BTreeMap::new(),
+            word_list: Vec::new(),
+            escapes: Vec::new(),
+        }
+    }
+}
+
+/// The file from the parsed source.
+fn build(mut ps: Parser<'_>, help: bool) -> Result<Vec<u8>, CompileError> {
     if !ps.lists.is_empty() {
         return err(ps.line, "a list is not ended");
     }
-    let panels = ps.panels;
+    let mut panels = ps.panels;
     let images = core::mem::take(&mut ps.images);
     if panels.is_empty() {
         return err(ps.line, "no panels");
@@ -895,10 +1029,16 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
 
     // Link targets.
     let by_res: BTreeMap<u16, usize> = panels.iter().enumerate().filter_map(|(i, p)| p.res.map(|r| (r, i))).collect();
+    let mut by_id: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
+    for (i, p) in panels.iter().enumerate() {
+        if let Some(id) = &p.id {
+            by_id.entry(id.clone()).or_insert(i);
+        }
+    }
     let find = |r: &Ref, line: usize| -> Result<u16, CompileError> {
         let i = match r {
             Ref::Res(n) => by_res.get(n).copied(),
-            Ref::Id(id) => panels.iter().position(|p| p.id.as_ref() == Some(id)),
+            Ref::Id(id) => by_id.get(id).copied(),
         };
         match i {
             Some(i) => Ok(i as u16),
@@ -906,79 +1046,82 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
         }
     };
 
-    // The dictionary: every word of the text.
-    let mut words = BTreeSet::new();
-    for p in &panels {
-        for t in &p.toks {
-            if let Tok::Word(w, _) = t {
-                if w.len() > 254 {
-                    return err(0, "word too long");
-                }
-                words.insert(dict_key(w));
-            }
-        }
+    // The dictionary: every word of the text and the panel names, in
+    // dictionary order; `word_no`: the dictionary number of each word.
+    let word_list = core::mem::take(&mut ps.word_list);
+    let escapes = core::mem::take(&mut ps.escapes);
+    ps.words = BTreeMap::new();
+    if let Some(w) = word_list.iter().find(|w| w.len() > 254) {
+        return err(0, format!("word too long: {}", crate::latin1(&w[..40])));
     }
-    // Panel names (`id=`) are dictionary words too.
-    for p in &panels {
-        if let Some(id) = &p.id {
-            if id.len() > 254 {
-                return err(0, "panel name too long");
-            }
-            words.insert(dict_key(id));
-        }
+    let mut order: Vec<u32> = (0..word_list.len() as u32).collect();
+    order.sort_by(|&a, &b| dict_key(&word_list[a as usize]).cmp(&dict_key(&word_list[b as usize])));
+    if order.len() > 0xffff {
+        return err(0, format!("too many words ({})", order.len()));
     }
-    let dict: Vec<Vec<u8>> = words.into_iter().map(|(_, w)| w).collect();
-    if dict.len() > 0xffff {
-        return err(0, "too many words");
+    let mut word_no = vec![0u16; word_list.len()];
+    for (i, &w) in order.iter().enumerate() {
+        word_no[w as usize] = i as u16;
     }
-    let word_no: BTreeMap<&[u8], u16> = dict.iter().enumerate().map(|(i, w)| (w.as_slice(), i as u16)).collect();
+    let dict: Vec<&[u8]> = order.iter().map(|&w| word_list[w as usize].as_slice()).collect();
+    let id_no = |id: &[u8]| -> u16 { dict.binary_search_by(|w| dict_key(w).cmp(&dict_key(id))).map(|i| i as u16).unwrap_or(0) };
 
     // Cells: each panel's text, split when a cell's local dictionary
     // is full. `panel_cells[i]`: the cells of panel i.
     let mut cells: Vec<CellBuf> = Vec::new();
     let mut panel_cells: Vec<Vec<u16>> = Vec::new();
-    let mut search: Vec<BTreeSet<u16>> = vec![BTreeSet::new(); dict.len()];
-    for (pi, p) in panels.iter().enumerate() {
+    let mut search: Vec<Vec<u16>> = vec![Vec::new(); dict.len()];
+    // The local word numbers of the cell being filled.
+    let mut map: BTreeMap<u16, u8> = BTreeMap::new();
+    for (pi, p) in panels.iter_mut().enumerate() {
+        // The tokens go as their cells are made.
+        let toks = core::mem::take(&mut p.toks);
+        let p = &*p;
         let mut mine = vec![cells.len() as u16];
         cells.push(CellBuf::default());
+        map.clear();
         let mut spacing = true;
-        for (ti, t) in p.toks.iter().enumerate() {
+        for (ti, t) in toks.iter().enumerate() {
             match t {
-                Tok::Word(w, glued) => {
-                    let n = word_no[w.as_slice()];
-                    search[n as usize].insert(pi as u16);
+                &Tok::Word(w, flags) => {
+                    let n = word_no[w as usize];
+                    let s = &mut search[n as usize];
+                    if s.last() != Some(&(pi as u16)) {
+                        s.push(pi as u16);
+                    }
                     let cur = cells.last_mut().unwrap();
-                    if (!cur.map.contains_key(&n) && cur.local.len() == LOCAL_WORDS) || cur.text.len() > CELL_TEXT {
+                    if (!map.contains_key(&n) && cur.local.len() == LOCAL_WORDS) || cur.text.len() > CELL_TEXT {
                         mine.push(cells.len() as u16);
                         cells.push(CellBuf::default());
+                        map.clear();
                         spacing = true;
                     }
                     let cur = cells.last_mut().unwrap();
-                    let local = match cur.map.get(&n) {
+                    let local = match map.get(&n) {
                         Some(&l) => l,
                         None => {
                             let l = cur.local.len() as u8;
                             cur.local.push(n);
-                            cur.map.insert(n, l);
+                            map.insert(n, l);
                             l
                         }
                     };
                     // A space follows unless the next word comes straight after.
-                    let next = p.toks[ti + 1..].iter().find(|t| !matches!(t, Tok::Esc(_, false) | Tok::Link(..)));
-                    let space = !glued && !matches!(next, Some(Tok::Word(..) | Tok::Space));
+                    let next = toks[ti + 1..].iter().find(|t| !matches!(t, Tok::Esc(_, false) | Tok::Link(..)));
+                    let space = flags & GLUED == 0 && (flags & SPACED != 0 || !matches!(next, Some(Tok::Word(..) | Tok::Space)));
                     if space != spacing {
                         cur.text.push(SPACING);
                         spacing = space;
                     }
                     cur.text.push(local);
                 }
-                Tok::Ws => {}
                 Tok::Block(b) => {
                     cells.last_mut().unwrap().text.push(*b);
                     spacing = true;
                 }
-                Tok::Esc(e, _) => cells.last_mut().unwrap().text.extend_from_slice(e),
-                Tok::Link(r, line, data, footnote) => {
+                &Tok::Esc(at, _) => cells.last_mut().unwrap().text.extend_from_slice(escape_at(&escapes, at)),
+                Tok::Link(l) => {
+                    let (r, line, data, footnote) = &**l;
                     let toc = find(r, *line)?;
                     let e = if *footnote {
                         esc(0x07, &toc.to_le_bytes())
@@ -999,7 +1142,8 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
                     }
                     cur.text.push(0xfe);
                 }
-                Tok::Area(r, line, rect, data, footnote) => {
+                Tok::Area(a) => {
+                    let (r, line, rect, data, footnote) = &**a;
                     // `FF len 0F sub toc [rect] [data]`: 01 rect and data,
                     // 02 rect, 04 data, 05 neither; footnotes 03 with a
                     // rect, 06 without.
@@ -1037,7 +1181,12 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
     }
 
     // ---- The file ----
-    let mut f = vec![0u8; 0x9b];
+    // Room for all of it: the header and tables, the dictionary, the
+    // cells and the images.
+    let dict_bytes: usize = dict.iter().map(|w| w.len() + 1).sum();
+    let cell_bytes: usize = cells.iter().map(|c| 8 + c.text.len() + 2 * c.local.len() + 4).sum();
+    let mut f = Vec::with_capacity(0x1000 + panels.len() * 300 + ps.index.len() * 64 + dict_bytes * 3 + cell_bytes + images.len());
+    f.resize(0x9b, 0);
     f[..3].copy_from_slice(b"HSP");
     f[3] = if help { crate::KIND_HELP } else { crate::KIND_BOOK };
     set16(&mut f, 0x04, 0x9b);
@@ -1177,7 +1326,7 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
     }
 
     // Panel names: their word numbers, sorted, then their panels.
-    let mut names: Vec<(u16, u16)> = panels.iter().enumerate().filter_map(|(i, p)| p.id.as_ref().map(|id| (word_no[id.as_slice()], i as u16))).collect();
+    let mut names: Vec<(u16, u16)> = panels.iter().enumerate().filter_map(|(i, p)| p.id.as_ref().map(|id| (id_no(id), i as u16))).collect();
     names.sort();
     set16(&mut f, 0x1c, names.len() as u16);
     let x = f.len() as u32;

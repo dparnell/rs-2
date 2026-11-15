@@ -191,6 +191,16 @@ fn rle_forms() {
     let mut out = [0u8; 32];
     let n = bitmap::rle(&src, &mut out);
     assert_eq!(&out[..n], [7, 7, 7, 1, 2, 0xff, 0xff, 0xff, 9, 8, 9, 8, 9, 8]);
+    // What the compiler packs reads back.
+    let mut data: Vec<u8> = (0..300u32).map(|i| (i * 7 % 13) as u8).collect();
+    data.extend_from_slice(&[5; 300]);
+    data.extend_from_slice(&[1, 2, 2, 3, 3, 3, 4]);
+    let mut packed = Vec::new();
+    bitmap::rle_pack(&data, &mut packed);
+    assert!(packed.len() < data.len());
+    let mut out = std::vec![0u8; data.len()];
+    assert_eq!(bitmap::rle(&packed, &mut out), data.len());
+    assert_eq!(out, data);
 }
 
 #[test]
