@@ -69,6 +69,11 @@ API calls, exceptions and kernel threads take the locks of the data they
 touch, as described under "Locking" below (there is no big kernel lock).
 Run queues are shared; a thread is
 never resumed on one CPU while another is still switching away from it.
+Idle threads are never on the run queues (`sched::wake` only marks one
+ready): each CPU resumes its own when it has nothing else, so an idle
+thread must never wait for anything. Start-up code that reads files or
+takes locks after the other CPUs are up runs on a kernel thread
+(`boot::start` on "boot").
 Unmapping or write-protecting pages flushes the TLBs of the other CPUs
 that have the address space loaded (IPI shootdown, see "Locking").
 Thread-local memory
@@ -506,6 +511,10 @@ kernel runs `CHKDSK d: /F /AUTOCHECK` on each volume that is dirty and listed
 in CONFIG.SYS: `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`
 or `DISKCACHE=...,AC:C`. The IFS line does not decide the file system: any
 listed drive is checked. A dirty drive not listed gets a line on the console.
+"Dirty" is as found when the volume was mounted (`fs::unchecked`; a remount
+after CHKDSK /F looks again): the flag on the disk also goes up as soon as
+this boot writes to a clean volume, which kernel threads (bootlog) may do
+before the check.
 The CONFIG.SYS rs2 ships has `/AUTOCHECK:*`; updating an installation keeps
 the user's CONFIG.SYS, which then needs the line added by hand.
 IBM's CHKDSK.SYS runs before the volumes are in use; rs2's CHKDSK is an

@@ -133,8 +133,14 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     bench::start(cmdline);
     klog::start_bootlog();
     crash::start_test();
-    boot::start(cmdline);
-    klog::BOOTED.store(true, core::sync::atomic::Ordering::Release);
+    // CONFIG.SYS and the first programs on a kernel thread of their own:
+    // they read files and take locks, and an idle thread must never wait
+    // for anything (it would run only when its CPU has nothing else to
+    // do; see sched::wake). Loading the init program needs a deep stack:
+    // the kernel thread's 128 KB (KSTACK_SIZE) is what the shell restarts
+    // and CALL= chains, started from Process::finish, always had.
+    let cmdline: &'static str = cmdline;
+    task::kthread::spawn("boot", move || boot::start(cmdline));
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();
 }
@@ -257,7 +263,9 @@ pub mod boot {
         // done. The drives the IFS lines do not list only get a warning.
         let listed = crate::config::autocheck(&cfg);
         let mut checks = Vec::new();
-        for d in (0..26).filter(|&d| crate::fs::drive(d).is_some_and(|f| f.needs_check())) {
+        // As found when mounted: the flag on the disk is up by now if
+        // something (bootlog) has written to a clean volume.
+        for d in (0..26).filter(|&d| crate::fs::unchecked(d) && crate::fs::drive(d).is_some()) {
             let letter = (b'A' + d) as char;
             if listed.contains(&d) {
                 checks.push((find_program("CHKDSK.EXE"), alloc::format!("{letter}: /F /AUTOCHECK")));

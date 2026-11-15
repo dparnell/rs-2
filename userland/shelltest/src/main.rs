@@ -639,6 +639,29 @@ fn container(hab: u32, client: u32) -> u32 {
     let mut rr = [0i32; 4];
     let qr: [u32; 4] = [16, recs[1], 0, 0x0800 | 0x1000];
     check("CM_QUERYRECORDRECT", send(cnr, CM_QUERYRECORDRECT, rr.as_mut_ptr() as u32, qr.as_ptr() as u32) != 0 && rr[2] > rr[0] && rr[3] > rr[1]);
+    // Icon view text breaks at its line ends only, never at blanks (IBM's
+    // IcnCalcTextSize): a long title is one wide line, so the Workplace
+    // Shell spaces icons by their titles' widths.
+    let text_rect = |r: u32| {
+        let mut t = [0i32; 4];
+        // CMA_TEXT
+        let q: [u32; 4] = [16, r, 0, 0x1000];
+        send(cnr, CM_QUERYRECORDRECT, t.as_mut_ptr() as u32, q.as_ptr() as u32);
+        t
+    };
+    let retitle = |t: &[u8]| {
+        wr(recs[1], R_PSZICON, t.as_ptr() as u32);
+        // CM_INVALIDATERECORD, CMA_TEXTCHANGED
+        send(cnr, 0x033b, &recs[1] as *const u32 as u32, mp(1, 0x4));
+        text_rect(recs[1])
+    };
+    let one = text_rect(recs[1]);
+    let long = retitle(b"A long title that is never wrapped\0");
+    let two = retitle(b"Two\r\nlines\0");
+    retitle(NAMES[1]);
+    let h = |t: [i32; 4]| t[3] - t[1];
+    check("icon view: a long title is one line, never wrapped", h(one) > 0 && h(long) == h(one) && long[2] - long[0] > 150);
+    check("icon view: a title breaks at its line ends", h(two) == 2 * h(one));
     // Keyboard: the cursor moves, selection follows (extended
     // selection), the owner hears CN_EMPHASIS; Enter is CN_ENTER.
     unsafe { WinSetFocus(1, cnr) };

@@ -120,10 +120,17 @@ pub struct Placed {
     pub button: Rect,
 }
 
-/// Width of icon view text before it wraps.
+/// The narrowest place an icon view item takes.
 pub fn icon_text_width(m: &Metrics) -> i32 {
     // At least SV_CXICONTEXTWIDTH (75), whatever the font.
     (m.cw * 10).max(75).max(m.icon + 8)
+}
+
+/// The width an icon and its title take in the icon view, as the
+/// Workplace Shell spaces them (PMWP's IconTextWidth): the widest title
+/// line plus 10, at least twice the icon.
+pub fn title_width(t: &[u8], m: &Metrics) -> i32 {
+    (text_w(&lines(t, 0), m) + 10).max(2 * m.icon)
 }
 
 /// Lines of a text: split at line ends, each wrapped at blanks to at most
@@ -159,38 +166,14 @@ fn text_w(l: &[Vec<u8>], m: &Metrics) -> i32 {
     l.iter().map(|x| m.text_width(x)).max().unwrap_or(0)
 }
 
-/// Lines of a text: split at line ends, each wrapped at blanks to at most
-/// `width` pels as `m` measures them.
-pub fn lines_in(t: &[u8], width: i32, m: &Metrics) -> Vec<Vec<u8>> {
-    let mut out = Vec::new();
-    for raw in t.split(|&c| c == b'\n') {
-        let mut rest = raw.strip_suffix(b"\r").unwrap_or(raw);
-        while rest.len() > 1 && m.text_width(rest) > width {
-            // The longest start that fits (at least one character).
-            let mut fit = 1;
-            while fit < rest.len() && m.text_width(&rest[..fit + 1]) <= width {
-                fit += 1;
-            }
-            let cut = rest[..=fit.min(rest.len() - 1)].iter().rposition(|&c| c == b' ').filter(|&i| i > 0 && i <= fit).unwrap_or(fit);
-            out.push(rest[..cut].to_vec());
-            rest = &rest[cut..];
-            while rest.first() == Some(&b' ') {
-                rest = &rest[1..];
-            }
-        }
-        if !rest.is_empty() || out.is_empty() {
-            out.push(rest.to_vec());
-        }
-    }
-    out
-}
-
 /// The icon view item for `it` at its position.
 pub fn icon_item(index: usize, it: &Item, m: &Metrics) -> Placed {
     let (x, y) = it.pos;
     let n = m.icon;
     let icon = if n > 0 { Rect::new(x, y, x + n, y + n) } else { Rect::new(x, y, x, y) };
-    let ls = lines_in(&it.text, icon_text_width(m), m);
+    // Icon view text breaks only at its line ends, never at blanks (as
+    // PMCTLS's IcnCalcTextSize): a long title is one wide line.
+    let ls = lines(&it.text, 0);
     let tw = text_w(&ls, m) + 4;
     let th = ls.len() as i32 * m.ch;
     let cx = x + n / 2;
@@ -366,8 +349,8 @@ pub fn neighbour(placed: &[Placed], from: usize, d: Dir) -> Option<usize> {
 /// Positions for arranging `items` in the icon view (CM_ARRANGE): rows
 /// from the top-left of the area, left to right.
 pub fn arrange(items: &[Item], m: &Metrics) -> Vec<(i32, i32)> {
-    let cell_w = icon_text_width(m) + 8;
-    let max_lines = items.iter().map(|it| lines_in(&it.text, icon_text_width(m), m).len()).max().unwrap_or(1).min(3) as i32;
+    let cell_w = items.iter().map(|it| title_width(&it.text, m)).max().unwrap_or(0).max(icon_text_width(m)) + 8;
+    let max_lines = items.iter().map(|it| lines(&it.text, 0).len()).max().unwrap_or(1) as i32;
     let cell_h = m.icon + 4 + max_lines * m.ch + 8;
     let per_row = ((m.area_w - 4) / cell_w).max(1) as usize;
     (0..items.len())
@@ -491,10 +474,14 @@ mod tests {
         assert!(p[0].text.top <= 100 && p[0].text.bottom < 100);
         assert_eq!((p[0].text.left + p[0].text.right) / 2, 26);
         assert_eq!(b, p[0].rect);
-        // Long text wraps.
+        // Text breaks at its line ends only, never at blanks.
         let (p, _) = layout(View::Icon, &[item("A rather long name for an icon", (0, 0))], &m(), &[]);
-        assert!(p[0].lines.len() > 1);
-        assert!(p[0].text.width() <= icon_text_width(&m()) + 4);
+        assert_eq!(p[0].lines.len(), 1);
+        assert_eq!(p[0].text.width(), 30 * 8 + 4);
+        assert_eq!(title_width(b"A rather long name for an icon", &m()), 30 * 8 + 10);
+        assert_eq!(title_width(b"ab", &m()), 64);
+        let (p, _) = layout(View::Icon, &[item("Two\r\nlines here", (0, 0))], &m(), &[]);
+        assert_eq!(p[0].lines, vec![b"Two".to_vec(), b"lines here".to_vec()]);
     }
 
     #[test]

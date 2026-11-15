@@ -985,7 +985,8 @@ tests: `tests/owatcom2/f77/BUILD.CMD` with tests/owatcom/f77's sources in
 `C:\F77T`.
 
 The Current-build has bugs of its own, found on rs2 and traced in its
-sources; they are not rs2's (each also shows on other hosts or follows
+sources (all Open Watcom bugs found on rs2, 1.9's too, are collected in
+docs/OPENWATCOM-BUGS.md); they are not rs2's (each also shows on other hosts or follows
 from the code whatever the system does):
 
 - Every `wfc`/`wfc386` compilation ends with `*ERR* CP-09` ("dynamic
@@ -1046,14 +1047,14 @@ from the code whatever the system does):
 | F77: `wfl386`, `wfl` | fails | Open Watcom's bug above (also fails on any OS/2). |
 | `wd` (text-mode debugger) | partial | On a `-hw` program (Watcom debug format): loads it through STD.D32 and DosDebug, stops in `main`, steps (F10), its menus and windows (assembly, registers, modules); the source window stays empty and the locals list too (the debugger has closed the file its reader reads, above). On `-d2` (DWARF) and `-hc` programs the debugger faults in its reader (above). A debugger that dies leaves the session's keyboard in binary mode (rs2's CMD then reads one key per line; IBM's CMD resets the mode only in PAUSE and its Ctrl+C handler, so it was left as it is). |
 | `wdw` (PM debugger) | partial | As `wd`: its window, menus, tool bar and child windows (Source, Locals, Watches, Modules); no source lines. |
-| `ide` | works | Starts with its menu bar and tool bar (also from its object in the installer's folder). Its projects, make and debug paths were not exercised for 2.0 (see 1.9). |
+| `ide` | works | Starts with its menu bar and tool bar (also from its object in the installer's folder). A new project (File, New Project, `test.wpj`), an OS/2 32-bit executable target with `hello.c`, Make (F4: `wmake -f test.mk`, `wcc386 ... -d2`, `wlink ... d all sys os2v2`, "Execution complete"), Run (Ctrl+R: the program's output), changed switches (C Compiler Switches, Debugging format `-hw`; the remake prompt) and Local Debug (Ctrl+D: wdw on the target, the program runs to its end in it). Debugging needs the linker's Debugging information set to `d watcom` as well: the IDE's `d all` writes DWARF, and wdw then faults in DWARF.D32 (Open Watcom's DWARF bug above); with `d watcom` wdw shows the module but no source lines (the closed-file bug). |
 | `wbrw` (source browser) | works | Starts with its menus ("no option file, no database"). |
 | `wsample`, `wprof` | partial | `wsample busy.exe` writes BUSY.SMP; `wprof busy.smp` faults (Open Watcom's closed-file bug above). |
 | DOS and Windows programs built on rs2 | works | F77: FMATHD, FILEIOD (16-bit DOS) and FMATHX (DOS/4GW) pass all checks in a DOS session (`DOSRUN.BAT`); FMATHW in its "Standard IO" window and the ELLIPSE sample on WIN16. C: as with 1.9 (TOOLS.CMD). |
 | Help books (`BINP\HELP\*.INF`) in VIEW, `wipfc` | works | The C/C++ User's Guide opens with its contents; a book compiled by wipfc on rs2 too. |
 | BINW Windows tools on WIN16 | works | `viw` (the file in its MDI child, tool bar, status line), `wimgedit` (tool and colour palettes), `wre`, `wzoom` (magnifying), `wheapwlk` start as with 1.9. `wde` and `wddespy` were not tried (another session works on their 1.9 versions). |
 | Remote debugging over named pipes | fails | Open Watcom's link name bug above: `wd -tr=nmp` asks NMPBIND, gets its answer, then retries opening `TCN` for ever. |
-| Remote debugging over TCP/IP | partial | `tcpserv` listens, `wd -tr=tcp;127.0.0.1` connects and TCPSERV starts HELLO.EXE under DosDebug; the debugger then waits in a socket receive and its screen stays black (not followed further; Open Watcom 1.9's TCP link works on rs2). |
+| Remote debugging over TCP/IP | works | `detach tcpserv`, then `wd -tr=tcp;127.0.0.1 hello.exe` from the same prompt: the debugger connects, TCPSERV starts HELLO.EXE under DosDebug, the debugger stops in `main`, steps (F10) and runs it to its end ("The task has completed running"); with a `-hw` program there are no source lines (Open Watcom's closed-file bug above). Two rs2 bugs were in the way (below). |
 
 Fixed for it:
 
@@ -1074,8 +1075,26 @@ Fixed for it:
   (their `.ICONPOS` record is written then, not only after an Arrange or
   a drag): the installers' new folders, and the icons of a new desktop,
   came up in another order after the next start (`WPSTEST SHELL ICONPOS
-  C:\DESKTOP DRIVES`). Long titles (four lines) still reach into the
-  next row on the desktop's grid.
+  C:\DESKTOP DRIVES`).
+- Icon view titles as IBM's: the container breaks a title only at its
+  line ends, never at blanks (PMCTLS's IcnCalcTextSize), and the
+  Workplace Shell spaces icons by their titles (PMWP's
+  ShlCalcIconPosition steps by IconTextWidth: the widest title line
+  plus 10, at least twice the icon): a folder view's grid cell is as
+  wide as its widest title needs and as tall as its most lines, and a
+  new icon goes to the first place where it and its title meet no other.
+  "Open Watcom 2.0 C/C++ Tools Help" was wrapped into four lines that
+  reached into the next row on the desktop (SHELLTST). rs2 keeps a grid
+  (its Arrange directions need one) where IBM flows icons of different
+  widths along a row.
+- Detached processes (`DETACH`, EXEC_BACKGROUND, and what they start)
+  start their sessions in the background (`DosStartSession` returns
+  ERROR_SMG_START_IN_BACKGROUND, 457) and have no keyboard (`KbdCharIn`,
+  `KbdPeek`, `KbdStringIn` fail with ERROR_KBD_DETACHED, 464), as on
+  OS/2: a detached TCPSERV brought the debuggee's empty session in front
+  of the debugger (the "hang") and took the command line typed at the
+  prompt it was detached from (APITEST; rs2's PM server, a PM program
+  started in the background, is not affected).
 
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 

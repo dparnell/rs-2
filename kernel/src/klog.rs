@@ -50,10 +50,6 @@ pub fn tail(out: &mut [u8]) -> usize {
     since(0, out)
 }
 
-/// Set once `boot::start` has returned (CONFIG.SYS read, the shell
-/// started).
-pub static BOOTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
 /// `bootlog`: copy the log to `\RS2\BOOT.LOG` on the boot volume every
 /// few seconds while it grows (the first copy once the disks are up).
 pub fn start_bootlog() {
@@ -64,18 +60,20 @@ pub fn start_bootlog() {
         let mut written = usize::MAX;
         let mut buf = alloc::vec![0u8; SIZE];
         let mut warned = false;
-        // Not while boot::start runs: it does its file I/O on CPU 0's idle
-        // thread, and disk I/O from here contending with it corrupted the
-        // idle thread's stack (a kernel trap in schedule() right after
-        // "config.sys:", 2026-11-15; docs/SURFACE-PRO-4.md, phase 0).
-        while !BOOTED.load(Ordering::Acquire) {
-            crate::task::sched::sleep_ms(200);
-        }
+        let mut waiting = false;
         loop {
             let head = position();
             if head != written {
                 match boot_volume() {
-                    Some(fs) => {
+                    // Not to a volume that was not shut down cleanly until
+                    // CHKDSK /F (AUTOCHECK) has been over it.
+                    Some((d, _)) if crate::fs::unchecked(d) => {
+                        if !waiting {
+                            waiting = true;
+                            crate::println!("bootlog: {}: was not shut down cleanly; no BOOT.LOG until CHKDSK has checked it", (b'A' + d) as char);
+                        }
+                    }
+                    Some((_, fs)) => {
                         let n = tail(&mut buf);
                         if save(&*fs, "\\RS2\\BOOT.LOG", &buf[..n]).is_ok() {
                             written = head;
@@ -93,12 +91,12 @@ pub fn start_bootlog() {
     });
 }
 
-/// The volume the machine booted from, if it is a writable disk: the drive
-/// holding `\RS2\KERNEL` that is not the loader's RAM image (C.IMG), a
-/// CD or a network drive.
-pub fn boot_volume() -> Option<alloc::sync::Arc<dyn crate::fs::FileSystem>> {
+/// The volume the machine booted from, if it is a writable disk (drive
+/// number and file system): the drive holding `\RS2\KERNEL` that is not
+/// the loader's RAM image (C.IMG), a CD or a network drive.
+pub fn boot_volume() -> Option<(u8, alloc::sync::Arc<dyn crate::fs::FileSystem>)> {
     let ram_c = crate::fs::has_boot_image(crate::boot_info());
-    (2u8..26).filter(|&d| !(d == 2 && ram_c)).filter_map(crate::fs::drive).find(|fs| matches!(fs.name(), "FAT" | "HPFS" | "JFS") && fs.stat("\\RS2\\KERNEL").is_ok())
+    (2u8..26).filter(|&d| !(d == 2 && ram_c)).filter_map(|d| Some((d, crate::fs::drive(d)?))).find(|(_, fs)| matches!(fs.name(), "FAT" | "HPFS" | "JFS") && fs.stat("\\RS2\\KERNEL").is_ok())
 }
 
 fn save(fs: &dyn crate::fs::FileSystem, path: &str, data: &[u8]) -> Result<(), u32> {

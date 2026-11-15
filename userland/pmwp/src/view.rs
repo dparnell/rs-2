@@ -695,17 +695,53 @@ pub fn save_positions(w: usize) {
     util::ea_write(&path, b".ICONPOS", Some((util::EAT_BINARY, &b)));
 }
 
+/// The grid cell of a view. Titles break only at their line ends (as
+/// PMCTLS draws them), and the Workplace Shell steps from one icon to
+/// the next by IconTextWidth (PMWP's ShlCalcIconPosition): the widest
+/// title line plus 10, at least twice the icon. So the cell is as wide
+/// as the widest title needs and as tall as the most title lines: a
+/// long title never reaches into the next icon's place.
 pub fn cell(w: usize) -> (i32, i32) {
-    if wins()[w].desktop { (96, 86) } else { (88, 70) }
+    let (bw, bh) = if wins()[w].desktop { (96, 86) } else { (88, 70) };
+    if !wins()[w].desktop && wins()[w].view != OPEN_CONTENTS {
+        return (bw, bh);
+    }
+    let (mut tw, mut th) = (0, 0);
+    for r in wins()[w].recs.iter() {
+        let (iw, h) = extent(w, r.rec);
+        tw = tw.max(iw);
+        th = th.max(h);
+    }
+    (bw.max(tw + 8), bh.max(32 + 4 + th + 8))
 }
 
-/// The grid place `i`: rows from the top left (the desktop: columns),
-/// with room for the titles centred under the icons.
-fn slot(w: usize, i: i32) -> (i32, i32) {
+/// An icon view record's IconTextWidth (its widest title line plus 10,
+/// at least twice the icon) and its title's height.
+fn extent(w: usize, rec: u32) -> (i32, i32) {
+    // QUERYRECORDRECT: cb, pRecord, fRightSplitWindow, fsExtent.
+    let q: [u32; 4] = [16, rec, 0, CMA_TEXT];
+    let mut t = RectL::default();
+    if send(wins()[w].child, CM_QUERYRECORDRECT, &mut t as *mut RectL as u32, q.as_ptr() as u32) == 0 {
+        return (64, 16);
+    }
+    // The text rectangle is 4 wider than its widest line.
+    ((t.r - t.l - 4 + 10).max(64), t.t - t.b)
+}
+
+/// The place an icon at `p` (its lower left corner) takes with its title
+/// below it, for its extent `e`: left, bottom, right, top.
+fn footprint(p: (i32, i32), e: (i32, i32)) -> (i32, i32, i32, i32) {
+    let cx = p.0 + 16;
+    (cx - e.0 / 2, p.1 - 4 - e.1, cx + e.0 / 2, p.1 + 32)
+}
+
+/// The grid place `i` for cells of `cell`: rows from the top left (the
+/// desktop: columns), with room for the titles centred under the icons.
+fn slot(w: usize, i: i32, cell: (i32, i32)) -> (i32, i32) {
     let mut r = RectL::default();
     unsafe { WinQueryWindowRect(wins()[w].child, &mut r) };
     let (aw, ah) = (r.r.max(100), (r.t - 2).max(100));
-    let (cw, ch) = cell(w);
+    let (cw, ch) = cell;
     if wins()[w].desktop {
         let per_col = ((ah - 16) / ch).max(1);
         let (col, row) = (i / per_col, i % per_col);
@@ -722,7 +758,10 @@ fn place_icons(w: usize, recs: &[u32]) {
     let kept = positions(wins()[w].obj);
     let dy = kept.iter().find(|p| p.0 == b"@").map_or(0, |p| cnr_height(w) - p.2);
     let (cw, ch) = cell(w);
-    let mut used: Vec<(i32, i32)> = wins()[w].recs.iter().filter(|r| !recs.contains(&r.rec)).map(|r| (rd(r.rec, R_X) as i32, rd(r.rec, R_Y) as i32)).collect();
+    let icon_view = wins()[w].desktop || wins()[w].view == OPEN_CONTENTS;
+    let ext = |r: u32| if icon_view { extent(w, r) } else { (cw - 8, ch - 44) };
+    // The places taken: icons and their titles.
+    let mut used: Vec<(i32, i32, i32, i32)> = wins()[w].recs.iter().filter(|r| !recs.contains(&r.rec)).map(|r| footprint((rd(r.rec, R_X) as i32, rd(r.rec, R_Y) as i32), ext(r.rec))).collect();
     let mut unplaced = Vec::new();
     for &r in recs {
         let o = rd(r, R_KEY) as usize;
@@ -731,24 +770,28 @@ fn place_icons(w: usize, recs: &[u32]) {
             Some(&(_, x, y)) => {
                 wr(r, R_X, x as u32);
                 wr(r, R_Y, (y + dy) as u32);
-                used.push((x, y + dy));
+                used.push(footprint((x, y + dy), ext(r)));
             }
             None => unplaced.push(r),
         }
     }
     let placed_new = !unplaced.is_empty();
     for r in unplaced {
-        let mut p = slot(w, 0);
+        // The first grid place where the icon and its title meet nothing
+        // (an icon kept from a narrower grid can be next to it).
+        let e = ext(r);
+        let mut p = slot(w, 0, (cw, ch));
         for i in 0..2000 {
-            let s = slot(w, i);
-            if !used.iter().any(|u| (u.0 - s.0).abs() < cw / 2 && (u.1 - s.1).abs() < ch / 2) {
+            let s = slot(w, i, (cw, ch));
+            let f = footprint(s, e);
+            if !used.iter().any(|u| f.0 < u.2 && u.0 < f.2 && f.1 < u.3 && u.1 < f.3) {
                 p = s;
                 break;
             }
         }
         wr(r, R_X, p.0 as u32);
         wr(r, R_Y, p.1 as u32);
-        used.push(p);
+        used.push(footprint(p, e));
     }
     send(wins()[w].child, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
     // Icons given a place now keep it (the folder's .ICONPOS), as the
@@ -765,8 +808,9 @@ pub fn arrange(w: usize) {
     if wins()[w].view != OPEN_CONTENTS {
         return;
     }
+    let c = cell(w);
     for i in 0..wins()[w].recs.len() {
-        let p = slot(w, i as i32);
+        let p = slot(w, i as i32, c);
         let r = wins()[w].recs[i].rec;
         wr(r, R_X, p.0 as u32);
         wr(r, R_Y, p.1 as u32);
@@ -994,25 +1038,19 @@ fn draw_item(w: usize, oi: u32) -> u32 {
             WinDrawText(hps, name.len() as i32, name.as_ptr(), &mut lr, fg as i32, bg as i32, 0x0400);
             return 1;
         }
-        // Lines as the container breaks them (at blanks, and at line
-        // ends), centred, from the top.
+        // Lines as the container breaks them (at line ends only),
+        // centred, from the top.
         const LINE: i32 = 16;
         let mut top = rect.t;
         for part in name.split(|&c| c == b'\n') {
-            let mut rest: &[u8] = part;
-            while !rest.is_empty() && top > rect.b {
-                let mut lr = RectL { l: rect.l, r: rect.r, t: top, b: top - LINE };
-                // DT_CENTER | DT_WORDBREAK: the characters that fit.
-                let n = WinDrawText(hps, rest.len() as i32, rest.as_ptr(), &mut lr, fg as i32, bg as i32, 0x0100 | 0x4000);
-                if n <= 0 {
-                    break;
-                }
-                rest = &rest[(n as usize).min(rest.len())..];
-                while rest.first() == Some(&b' ') {
-                    rest = &rest[1..];
-                }
-                top -= LINE;
+            let part = part.strip_suffix(b"\r").unwrap_or(part);
+            if top <= rect.b {
+                break;
             }
+            let mut lr = RectL { l: rect.l, r: rect.r, t: top, b: top - LINE };
+            // DT_CENTER
+            WinDrawText(hps, part.len() as i32, part.as_ptr(), &mut lr, fg as i32, bg as i32, 0x0100);
+            top -= LINE;
         }
     }
     1

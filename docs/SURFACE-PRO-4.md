@@ -37,7 +37,10 @@ The SP4 has no serial port. Done (2026-11-15):
   with
   `cargo xtask iso --dist -o work/rs2-live.iso --cmdline bootlog`. Nothing
   is written from a crashed kernel, so the file can miss the last
-  seconds; the QR code below has them.
+  seconds; the QR code below has them. Nor to a boot volume that was not
+  shut down cleanly until AUTOCHECK's CHKDSK /F has been over it (a line
+  on the log says so); FAT on a USB stick is written through and never
+  gets the dirty flag.
 - **The crash screen** (`kernel/src/crash.rs`): a kernel panic or kernel
   trap fills the framebuffer with what happened in large text (message,
   registers, backtrace), the end of the log, and a QR code holding a crash
@@ -60,16 +63,22 @@ The SP4 has no serial port. Done (2026-11-15):
   ISO as a USB stick on such a machine:
   `cargo xtask run --bare --boot-hdd --usb-disk work/rs2-live.iso`.
 
-Found on the way, not fixed: `boot::start` (CONFIG.SYS, starting the
-shell) runs on CPU 0's idle thread. While it runs, disk I/O from another
-thread (the first bootlog writes, which create BOOT.LOG and update its
-directory entry) corrupted the idle thread's saved registers: a kernel
-page fault in `schedule()` right after `config.sys:`, reproducible on
-fresh images on both USB and AHCI disks. Not a stray CPU write through
-the stack's address (a QEMU watchpoint saw none) and not a frame handed
-out twice. bootlog now waits until `boot::start` has returned, but any
-other kernel thread doing I/O during boot (USB devices arriving on real
-hardware) can still meet it.
+Found on the way, fixed: `boot::start` (CONFIG.SYS, starting the shell)
+ran on CPU 0's idle thread. When it blocked (a disk I/O lock the first
+bootlog writes held while creating BOOT.LOG), `sched::wake` put the idle
+thread on the shared run queue and CPU 1 took it, while CPU 0, with
+nothing else to run, also resumed its idle thread (`c.idle()` in
+`schedule()`, which does not look at `on_cpu`) from the registers saved
+earlier: two CPUs on one stack, a kernel trap in `schedule()` right after
+`config.sys:`, every time on fresh images (USB and AHCI). Not a stray
+write (the QEMU watchpoint saw only the second CPU's legitimate pushes).
+Fixed (2026-11-15): idle threads are never queued (waking one only marks
+it ready) and `boot::start` runs on its own kernel thread ("boot"; its
+128 KB stack is what shell restarts have always loaded programs on).
+Checked with the repro and the bootlog gate removed (USB and AHCI, fresh
+images, BOOT.LOG written during `boot::start`). The `klog::BOOTED` gate that
+kept bootlog waiting until `boot::start` returned is gone: BOOT.LOG gets
+its first copy as soon as the boot volume is up.
 
 Still to do: UDP syslog once a network adapter works (phase 2); saving a
 crash report across a warm reboot (a RAM region the loader writes to

@@ -104,6 +104,9 @@ pub struct Process {
     pub critsec: SpinLock<(u32, u32)>,
     /// Started with EXEC_ASYNC: nobody will collect the result.
     pub detached: core::sync::atomic::AtomicBool,
+    /// A detached process (EXEC_BACKGROUND, `DETACH`), or one it started:
+    /// it has no session of its own in front.
+    pub background: core::sync::atomic::AtomicBool,
     /// Modules loaded with DosLoadModule (with use counts).
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
     /// Logical video buffer (VioGetBuf), 0 if none.
@@ -335,6 +338,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         exitlist_next: core::sync::atomic::AtomicBool::new(false),
         terms_started: core::sync::atomic::AtomicBool::new(false),
         detached: core::sync::atomic::AtomicBool::new(p.detached),
+        background: core::sync::atomic::AtomicBool::new(false),
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
         lvb: SpinLock::new(0),

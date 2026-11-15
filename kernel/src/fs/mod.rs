@@ -161,6 +161,29 @@ pub trait FsFile: Send + Sync {
 
 static DRIVES: SpinLock<[Option<Arc<dyn FileSystem>>; 26]> = SpinLock::new([const { None }; 26]);
 
+/// Drives (bit 0 = A:) whose volume was not shut down cleanly when it was
+/// mounted, until CHKDSK /F has been over it (its remount). Looked at
+/// when mounting, as the dirty flag on the disk also goes up as soon as
+/// this boot writes to a clean volume.
+static UNCHECKED: AtomicU32 = AtomicU32::new(0);
+
+/// Record whether drive `d`'s newly mounted volume needs a check.
+fn note_unchecked(d: u8, fs: &dyn FileSystem) {
+    // A diskette drive's medium comes and goes (and reading it may pop
+    // up a hard error): not checked at boot.
+    if !fs.removable() && fs.needs_check() {
+        UNCHECKED.fetch_or(1 << d, Ordering::SeqCst);
+    } else {
+        UNCHECKED.fetch_and(!(1 << d), Ordering::SeqCst);
+    }
+}
+
+/// Drive `d` was not shut down cleanly and CHKDSK /F has not checked it
+/// since: nothing should write to it that need not.
+pub fn unchecked(d: u8) -> bool {
+    d < 26 && UNCHECKED.load(Ordering::SeqCst) & 1 << d != 0
+}
+
 /// Mount whatever file system a volume holds: FAT, then HPFS, then JFS (and the
 /// other installable file systems as they come). `dev` is wrapped for
 /// hard-error pop-ups here. The name of the file system found, or None.
@@ -197,6 +220,7 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
     if let Some(dev) = fs.device() {
         crate::api::harderr::note_drive(Arc::as_ptr(&dev) as *const () as usize, drive);
     }
+    note_unchecked(drive, &*fs);
     // The file system it replaces goes after the lock: dropping it may
     // write its cache out (a sleeping lock and disk I/O).
     let old = DRIVES.lock()[drive as usize].replace(namecache::wrap(fs));
@@ -341,6 +365,7 @@ pub fn remount(d: u8) -> Result<(), u32> {
         let _ = c.sync_invalidate();
     }
     let fs = probe_volume(dev);
+    note_unchecked(d, &*fs);
     crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
     let old = DRIVES.lock()[d as usize].replace(namecache::wrap(fs));
     drop(old);

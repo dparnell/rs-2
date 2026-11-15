@@ -198,6 +198,18 @@ fn windowed() -> bool {
 /// ERROR_VIO_EXTENDED_SG: not in a VIO window.
 const ERROR_VIO_EXTENDED_SG: u16 = 494;
 
+/// KbdPeek's return code (for `APITEST detsess`: a detached process gets
+/// ERROR_KBD_DETACHED, 464).
+pub fn kbd_peek_rc() -> u16 {
+    let mut mem = null_mut();
+    if unsafe { DosAllocMem(&mut mem, 0x1000, PAG_READ | PAG_WRITE | PAG_COMMIT) } != 0 {
+        return 0xffff;
+    }
+    let b = Buf(mem);
+    let k = b.p(0x20);
+    call(KBDPEEK, &[k[0], k[1], 0])
+}
+
 pub fn run() {
     let mut mem = null_mut();
     if unsafe { DosAllocMem(&mut mem, 0x10000, PAG_READ | PAG_WRITE | PAG_COMMIT) } != 0 {
