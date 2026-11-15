@@ -354,7 +354,9 @@ the IEEE 802.11 test vectors and `hostapd` captures.
 
 ### Status (2026-11-16): round 1, firmware and scan
 
-Written, not yet run on the chip (QEMU has none):
+Works on the Surface Pro 4 (2026-11-16, live stick of commit ae8f0384):
+the firmware loads and `WIFI SCAN` lists the nearby networks. What it
+consists of:
 
 - `crates/wlan` (host tests: `cargo test -p wlan`): 802.11 elements and
   `Bss` (SSID, channel, RSSI, RSN/WPA security), `WIFI.CFG` profiles,
