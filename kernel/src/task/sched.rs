@@ -208,10 +208,23 @@ pub fn reprioritize(t: &Arc<Thread>) {
 }
 
 /// Make a thread runnable.
+///
+/// An idle thread is never put on the shared run queues: it belongs to
+/// one CPU, which resumes it (`c.idle()` in [`schedule`]) whenever it has
+/// nothing else to run, without looking at `on_cpu`. Queued, another CPU
+/// could take it while its own CPU also resumed it from its saved
+/// registers: two CPUs on one stack. That happened while `boot::start`
+/// still ran on CPU 0's idle thread and blocked on disk I/O (2026-11-15,
+/// docs/SURFACE-PRO-4.md). Waking one only marks it ready, so a
+/// [`block`] still to come returns at once.
 pub fn wake(t: &Arc<Thread>) {
     let i = {
         let mut s = SCHED.lock();
         if matches!(t.state(), State::Ready | State::Running | State::Dead | State::New) {
+            return;
+        }
+        if t.is_idle() {
+            t.set_state(State::Ready);
             return;
         }
         t.set_state(State::Ready);
@@ -480,7 +493,10 @@ pub fn schedule() {
             s.ready[i].push_front(t);
         }
         let next = match next {
-            Some(t) => t,
+            Some(t) => {
+                debug_assert!(!t.is_idle(), "idle thread on the run queue");
+                t
+            }
             // Nothing else: keep running a thread that can still run, else
             // idle.
             None if me.state() == State::Running && !me.is_idle() => me.clone(),

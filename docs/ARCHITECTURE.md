@@ -69,6 +69,11 @@ API calls, exceptions and kernel threads take the locks of the data they
 touch, as described under "Locking" below (there is no big kernel lock).
 Run queues are shared; a thread is
 never resumed on one CPU while another is still switching away from it.
+Idle threads are never on the run queues (`sched::wake` only marks one
+ready): each CPU resumes its own when it has nothing else, so an idle
+thread must never wait for anything. Start-up code that reads files or
+takes locks after the other CPUs are up runs on a kernel thread
+(`boot::start` on "boot").
 Unmapping or write-protecting pages flushes the TLBs of the other CPUs
 that have the address space loaded (IPI shootdown, see "Locking").
 Thread-local memory

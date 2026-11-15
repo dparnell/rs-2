@@ -64,10 +64,12 @@ pub fn start_bootlog() {
         let mut written = usize::MAX;
         let mut buf = alloc::vec![0u8; SIZE];
         let mut warned = false;
-        // Not while boot::start runs: it does its file I/O on CPU 0's idle
-        // thread, and disk I/O from here contending with it corrupted the
-        // idle thread's stack (a kernel trap in schedule() right after
-        // "config.sys:", 2026-11-15; docs/SURFACE-PRO-4.md, phase 0).
+        // Not while boot::start runs. This gate was the first workaround
+        // for a race that is fixed now (boot::start blocked on CPU 0's idle
+        // thread, sched::wake queued the idle thread and a second CPU ran
+        // it too; docs/SURFACE-PRO-4.md, phase 0): boot::start runs on its
+        // own kernel thread and idle threads are never queued. Dropping
+        // the gate would get BOOT.LOG written earlier.
         while !BOOTED.load(Ordering::Acquire) {
             crate::task::sched::sleep_ms(200);
         }

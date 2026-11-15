@@ -133,8 +133,17 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     bench::start(cmdline);
     klog::start_bootlog();
     crash::start_test();
-    boot::start(cmdline);
-    klog::BOOTED.store(true, core::sync::atomic::Ordering::Release);
+    // CONFIG.SYS and the first programs on a kernel thread of their own:
+    // they read files and take locks, and an idle thread must never wait
+    // for anything (it would run only when its CPU has nothing else to
+    // do; see sched::wake). Loading the init program needs a deep stack:
+    // the kernel thread's 128 KB (KSTACK_SIZE) is what the shell restarts
+    // and CALL= chains, started from Process::finish, always had.
+    let cmdline: &'static str = cmdline;
+    task::kthread::spawn("boot", move || {
+        boot::start(cmdline);
+        klog::BOOTED.store(true, core::sync::atomic::Ordering::Release);
+    });
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();
 }
