@@ -80,6 +80,15 @@ The SP4 has no serial port. Done (2026-11-15):
   services" with no squares seen, so square 0 was added before it and
   the squares grew on large screens)
   (`bootdiag.rs`; a QEMU boot with `bootdiag` prints the current list).
+- **The panel's own mode** (2026-11-16: no squares at all, not even
+  the one before ExitBootServices, with "framebuffer 1024x768 stride 1024
+  format 1 at 0x90000000"): the loader used to switch every machine to
+  1024x768. The Surface's GOP offers that mode, but only as a buffer its
+  Blt scales onto the 2736x1824 panel, so the firmware's text showed and
+  nothing written straight into the "framebuffer" (squares, the kernel's
+  screen) ever did. On real hardware (no CPUID hypervisor bit) the loader
+  now keeps the mode the firmware booted in unless `video=` asks for
+  another; virtual machines still get 1024x768.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

@@ -323,6 +323,11 @@ fn find_rsdp() -> u64 {
 /// Set the GOP mode `want` (from `video=` on the command line) if the
 /// firmware offers it, else 1024x768, the classic OS/2 desktop
 /// resolution, if offered; otherwise keep the current mode.
+/// Running in a virtual machine (CPUID's "hypervisor present" bit).
+fn hypervisor() -> bool {
+    unsafe { core::arch::x86_64::__cpuid(1).ecx & (1 << 31) != 0 }
+}
+
 fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
     let mut gop: *mut c_void = ptr::null_mut();
     let mut fb = Framebuffer { base: 0, size: 0, width: 0, height: 0, stride: 0, format: 0 };
@@ -342,7 +347,17 @@ fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
                 }
             })
         };
-        if let Some(m) = want.and_then(|(w, h)| find(w, h)).or_else(|| find(1024, 768)) {
+        // Without `video=`, real hardware keeps the mode the firmware
+        // booted in (the panel's own): a Surface Pro 4 offers 1024x768,
+        // but as a buffer its Blt scales onto the 2736x1824 panel, so the
+        // firmware's text shows and nothing written straight into the
+        // "framebuffer" ever does. A virtual machine's modes are all
+        // real; 1024x768 there, as before.
+        let default = if hypervisor() { find(1024, 768) } else { None };
+        let current = &*mode.info;
+        if want.is_none() && default.is_none() && current.pixel_format < 2 {
+            // Keep it.
+        } else if let Some(m) = want.and_then(|(w, h)| find(w, h)).or(default) {
             ((*gop).set_mode)(gop, m);
         }
         let mode = &*(*gop).mode;
