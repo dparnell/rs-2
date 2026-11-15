@@ -1,6 +1,7 @@
 //! WinHelp topics to IPF source, compiled with `ipf::compile`.
 
 use crate::help::{hash, Font, Help};
+use crate::hfs::Hfs;
 use crate::pict::{self, Picture};
 use crate::topic::{decode, Ev, Hot, Para, Pic, TL_DISPLAY, TL_DISPLAY30, TL_TABLE, TL_TOPICHDR};
 use crate::{cp, Converted, Error, Options};
@@ -542,7 +543,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                 }
                 // Columns at least a few characters apart.
                 for i in 1..margins.len() {
-                    if margins[i] < margins[i - 1] + 4 {
+                    if margins[i] < margins[i - 1].saturating_add(4) {
                         margins[i] = margins[i - 1].saturating_add(4);
                     }
                 }
@@ -676,7 +677,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
         let info = {
             let mut p = self.pics.borrow_mut();
             if !p.decoded.contains_key(&name) {
-                let d = load_pic(self.c.h, &p, &name).map(|pic| (pic.cx, pic.cy, pic.hotspots));
+                let d = load_pic(&self.c.h.hfs, &p, &name).map(|pic| (pic.cx, pic.cy, pic.hotspots));
                 p.decoded.insert(name.clone(), d);
             }
             p.decoded[&name].clone()
@@ -731,14 +732,14 @@ fn chars(units: i32) -> u8 {
     (1 + (units.max(0) + UNITS_PER_CHAR / 2) / UNITS_PER_CHAR).min(200) as u8
 }
 
-fn load_pic(h: &Help<'_>, p: &Pics, name: &[u8]) -> Option<Picture> {
+fn load_pic(hfs: &Hfs<'_>, p: &Pics, name: &[u8]) -> Option<Picture> {
     let data: &[u8] = if let Some(n) = name.strip_prefix(b"E") {
         let i: usize = core::str::from_utf8(n).ok()?.parse().ok()?;
         p.embedded.get(i)?.as_slice()
     } else {
         let mut pipe = b"|".to_vec();
         pipe.extend_from_slice(name);
-        h.hfs.file(name).or_else(|| h.hfs.file(&pipe))?
+        hfs.file(name).or_else(|| hfs.file(&pipe))?
     };
     pict::decode(data)
 }
@@ -758,7 +759,7 @@ fn line_text(s: &[u8], max: usize) -> Vec<u8> {
 }
 
 pub fn convert(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
-    let h = Help::parse(data)?;
+    let mut h = Help::parse(data)?;
     let mut warnings: Vec<String> = Vec::new();
     let n = h.list.len();
     if n == 0 {
@@ -830,14 +831,31 @@ pub fn convert(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
         }
     }
 
-    // The source.
+    // The source, compiled a topic at a time.
     let pics = RefCell::new(Pics { embedded: Vec::new(), decoded: BTreeMap::new() });
-    let mut src: Vec<u8> = Vec::with_capacity(data.len() * 3);
+    let hfs = &h.hfs;
+    let load = |name: &[u8]| -> Option<Vec<u8>> {
+        let p = pics.borrow();
+        load_pic(hfs, &p, name).map(|p| p.bmp)
+    };
+    let mut comp = ipf::compile::Compiler::new(true, &load);
+    let mut kept: Vec<u8> = Vec::new();
+    let mut src: Vec<u8> = Vec::new();
+    let mut feed = |src: &mut Vec<u8>| -> Result<(), ipf::compile::CompileError> {
+        if opts.keep_source {
+            kept.extend_from_slice(src);
+        }
+        let r = comp.feed(src);
+        src.clear();
+        r
+    };
+    let failed = |e: ipf::compile::CompileError, kept: Vec<u8>| Error::Compile { line: e.line, msg: e.msg, source: kept };
     src.extend_from_slice(b":userdoc.\n:title.");
     let title = line_text(&h.title, 47);
     src.extend_from_slice(&title);
     src.push(b'\n');
     let order = tree.iter().copied().chain((0..count).filter(|i| !placed.contains(i)).map(|i| (i, 0)));
+    let mut result = Ok(());
     for (i, level) in order {
         let mut w = Writer::new(&ctx, &pics);
         ctx.records(i, &mut |kind, d1, d2| {
@@ -860,24 +878,29 @@ pub fn convert(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
             src.extend_from_slice(&line_text(&keywords[k].0, 120));
             src.push(b'\n');
         }
-        // The panel starts in the document font.
         src.extend_from_slice(b":p.");
         src.extend_from_slice(&w.out);
         src.push(b'\n');
+        result = feed(&mut src);
+        if result.is_err() {
+            break;
+        }
     }
-    src.extend_from_slice(b":euserdoc.\n");
-
-    let load = |name: &[u8]| -> Option<Vec<u8>> {
-        let p = pics.borrow();
-        load_pic(&h, &p, name).map(|p| p.bmp)
-    };
-    let ipf = match ipf::compile::compile_with(&src, true, &load) {
+    if result.is_ok() {
+        src.extend_from_slice(b":euserdoc.\n");
+        result = feed(&mut src);
+    }
+    let Ctx { contexts, map, .. } = ctx;
+    // The topics' text is not needed any more (the pictures are in the
+    // file's data).
+    h.topics.buf = Vec::new();
+    let ipf = match result.and_then(|_| comp.finish()) {
         Ok(f) => f,
-        Err(e) => return Err(Error::Compile { line: e.line, msg: e.msg, source: if opts.keep_source { src } else { Vec::new() } }),
+        Err(e) => return Err(failed(e, kept)),
     };
 
     keywords.sort_by(|a, b| a.0.to_ascii_uppercase().cmp(&b.0.to_ascii_uppercase()));
-    let contexts = ctx.contexts.iter().filter(|c| c.1 < count).map(|&(hv, t)| (hv, t as u16 + 1)).collect();
-    let map = ctx.map.iter().filter(|c| c.1 < count).map(|&(id, t)| (id, t as u16 + 1)).collect();
-    Ok(Converted { ipf, title: h.title.clone(), contents_res: contents as u16 + 1, contexts, map, keywords, warnings, source: if opts.keep_source { src } else { Vec::new() } })
+    let contexts = contexts.iter().filter(|c| c.1 < count).map(|&(hv, t)| (hv, t as u16 + 1)).collect();
+    let map = map.iter().filter(|c| c.1 < count).map(|&(id, t)| (id, t as u16 + 1)).collect();
+    Ok(Converted { ipf, title: h.title.clone(), contents_res: contents as u16 + 1, contexts, map, keywords, warnings, source: kept })
 }

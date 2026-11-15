@@ -81,6 +81,27 @@ fn unpack(data: &[u8], method: u8, size: usize) -> Option<Vec<u8>> {
 /// colours important, data size, hotspot size, u32 data offset, u32
 /// hotspot offset (from the picture), and for type 6 the palette.
 /// Returns the picture and its bits per pixel.
+/// A metafile picture: u8 8, u8 packing, compressed mapping mode, u16
+/// width and height, compressed sizes (unpacked, packed, hotspots), u32
+/// offsets of the data and the hotspots. Returns the mapping mode, the
+/// size and the metafile's records.
+pub fn metafile(p: &[u8]) -> Option<(u16, u16, u16, Vec<u8>)> {
+    if *p.first()? != 8 {
+        return None;
+    }
+    let method = *p.get(1)?;
+    let mut c = Cur::at(p, 2);
+    let mode = c.cword()?;
+    let cx = c.u16()?;
+    let cy = c.u16()?;
+    let size = c.cdword()? as usize;
+    let csize = c.cdword()? as usize;
+    c.cdword()?;
+    let coff = c.u32()? as usize;
+    let data = p.get(coff..coff.checked_add(csize)?.min(p.len()))?;
+    Some((mode, cx, cy, unpack(data, method, size)?))
+}
+
 fn picture(p: &[u8]) -> Option<(Picture, u16)> {
     let ty = *p.first()?;
     let method = *p.get(1)?;
