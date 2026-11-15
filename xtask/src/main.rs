@@ -589,6 +589,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
         files.extend(image::manifest(&root(), &text));
         files.extend(userland);
         files.extend(win16_tests());
+        files.extend(firmware());
         if !o.dist {
             files.extend(dos_tests());
         }
@@ -763,6 +764,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("talk", "OS2\\TALK.EXE"),
         ("talkd", "OS2\\TALKD.EXE"),
         ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
+        ("wifi", "OS2\\WIFI.EXE"),
         ("net", "OS2\\NET.EXE"),
         ("lantest", "RS2\\LANTEST.EXE"),
         ("netapi32", "OS2\\DLL\\NETAPI32.DLL"),
@@ -1227,6 +1229,48 @@ fn dos_tests() -> image::FileList {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_ascii_uppercase();
             v.push((e.path(), format!("DOS\\{name}")));
+        }
+    }
+    v
+}
+
+/// Firmware for the WiFi chips rs2 drives, from linux-firmware (not in
+/// the repository: fetched into work/firmware on first use). Missing
+/// files only mean that chip cannot start.
+const FIRMWARE: &[(&str, &str, &str)] = &[(
+    "pcie8897_uapsta.bin",
+    "mrvl/pcie8897_uapsta.bin",
+    "RS2\\FIRMWARE\\PCIE8897.BIN",
+)];
+
+fn firmware() -> image::FileList {
+    let dir = root().join("work/firmware");
+    let _ = std::fs::create_dir_all(&dir);
+    let mut v = Vec::new();
+    for (name, upstream, dest) in FIRMWARE {
+        let path = dir.join(name);
+        // A real image starts with a download command (01 00 00 00), not
+        // an HTML error page.
+        let valid = |p: &Path| std::fs::read(p).is_ok_and(|b| b.len() > 65536 && b[..4] == [1, 0, 0, 0]);
+        if !valid(&path) {
+            for base in [
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/",
+                "https://gitlab.com/kernel-firmware/linux-firmware/-/raw/main/",
+            ] {
+                eprintln!("fetching {upstream} from linux-firmware");
+                let tmp = dir.join(format!("{name}.part"));
+                let ok = Command::new("curl").args(["-sSfL", "--retry", "2", "-o"]).arg(&tmp).arg(format!("{base}{upstream}")).status().is_ok_and(|s| s.success());
+                if ok && valid(&tmp) {
+                    let _ = std::fs::rename(&tmp, &path);
+                    break;
+                }
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+        if valid(&path) {
+            v.push((path, dest.to_string()));
+        } else {
+            eprintln!("warning: no {upstream} (WiFi on that chip will not start)");
         }
     }
     v

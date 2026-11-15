@@ -12,6 +12,7 @@ pub mod hotplug;
 pub mod hub;
 pub mod ide;
 pub mod mpt;
+pub mod mwifiex;
 pub mod nvme;
 pub mod part;
 pub mod pci;
@@ -208,6 +209,9 @@ pub fn init() {
         }
         if vmxnet3::is_vmxnet3(d) {
             vmxnet3::probe(d);
+        }
+        if mwifiex::is_mwifiex(d) {
+            mwifiex::probe(d);
         }
         if pcnet::is_pcnet(d) {
             pcnet::probe(d);

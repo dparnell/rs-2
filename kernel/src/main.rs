@@ -245,6 +245,7 @@ pub mod boot {
             crate::fs::set_libpath(lp);
         }
         start_network(cmdline, cfg.network.as_deref());
+        crate::net::wlan::start();
         crate::bootdiag::stage("network");
         let mut env = default_env();
         for e in &cfg.env {

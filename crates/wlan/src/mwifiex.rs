@@ -345,7 +345,7 @@ pub fn parse_ext_scan_report(body: &[u8]) -> Option<(Vec<Bss>, bool)> {
     let mut out = Vec::new();
     let mut cur: Option<&[u8]> = None;
     let mut info: Option<&[u8]> = None;
-    let mut flush = |cur: Option<&[u8]>, info: Option<&[u8]>, out: &mut Vec<Bss>| {
+    let flush = |cur: Option<&[u8]>, info: Option<&[u8]>, out: &mut Vec<Bss>| {
         if let Some(d) = cur {
             let (rssi, chan) = match info {
                 Some(i) if i.len() >= 7 => ((le16(i, 0) as i16).clamp(-128, 127) as i8, i[6]),

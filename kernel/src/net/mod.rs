@@ -23,6 +23,7 @@
 //! waits on the stack as a whole.
 
 pub mod socket;
+pub mod wlan;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
