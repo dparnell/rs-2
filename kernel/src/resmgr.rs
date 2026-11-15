@@ -52,6 +52,7 @@ pub const RMTYPE_DRIVER: u32 = 4;
 /// Adapter base types (the PCI class codes' numbering).
 pub const AS_BASE_RESERVED: u16 = 0;
 pub const AS_BASE_MSD: u16 = 1;
+pub const AS_BASE_NETWORK: u16 = 2;
 pub const AS_BASE_DISPLAY: u16 = 3;
 pub const AS_BASE_MMEDIA: u16 = 4;
 pub const AS_BASE_MEMORY: u16 = 5;
@@ -794,6 +795,7 @@ fn usb_text(d: &xhci::UsbInfo) -> (&'static str, String, u16, u16) {
     match &d.kind {
         xhci::UsbKind::Hub { ports, usb3 } => ("USBHUB", alloc::format!("USB {} hub, {ports} ports", if *usb3 { 3 } else { 2 }), AS_BASE_RESERVED, 0),
         xhci::UsbKind::Storage => ("USBMSD", s("USB mass storage device"), AS_BASE_MSD, 0x80),
+        xhci::UsbKind::Net => ("USBNET", s("USB Ethernet adapter"), AS_BASE_NETWORK, 1),
         xhci::UsbKind::Hid(k) => match k.as_slice() {
             [Hid::Keyboard] => ("USBKBD", s("USB keyboard"), AS_BASE_INPUT, 1),
             [Hid::Mouse] => ("USBMOUSE", s("USB mouse"), AS_BASE_INPUT, 3),

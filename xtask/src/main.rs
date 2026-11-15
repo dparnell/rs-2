@@ -70,11 +70,13 @@
 //!
 //! `--net` adds a network adapter on QEMU's user-mode network (guest
 //! 10.0.2.15, gateway/host 10.0.2.2, DNS 10.0.2.3): an Intel 82540EM
-//! (`e1000`) unless a model follows (`--net vmxnet3|e1000|82545em|e1000e|pcnet|virtio`:
+//! (`e1000`) unless a model follows (`--net vmxnet3|e1000|82545em|e1000e|pcnet|virtio|usb`:
 //! VMware's paravirtual NIC, the 82540EM, the 82545EM of VMware's
 //! "e1000", the 82574L of its "e1000e", the AMD PCnet of its "vlance",
-//! virtio-net) or `--net-model`
-//! names any QEMU device; `--virtio-net` is short for `--net virtio`. Host port 5555 is forwarded to
+//! virtio-net, QEMU's USB Ethernet adapter `usb-net` on the xHCI
+//! controller: CDC ECM) or `--net-model`
+//! names any QEMU device; `--virtio-net` is short for `--net virtio`,
+//! `--usb-net` for `--net usb`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule; `--guestfwd tcp:10.0.2.100:79-tcp:127.0.0.1:7979` sends the guest's
 //! connections to that address to a host port (servers on ports a user
@@ -370,6 +372,7 @@ fn parse(args: &[String]) -> Opts {
                 }
             }
             "--virtio-net" => o.net = Some("virtio-net-pci".into()),
+            "--usb-net" => o.net = Some("usb-net".into()),
             "--net-model" => {
                 i += 1;
                 o.net = Some(nic_model(&args[i]).map_or_else(|| args[i].clone(), String::from));
@@ -1312,7 +1315,8 @@ fn ovmf() -> (PathBuf, PathBuf) {
 
 /// The xHCI controller, hubs and USB devices.
 fn usb_devices(o: &Opts, c: &mut Command) {
-    if !o.usb_kbd && !o.usb_mouse && !o.usb_tablet && o.usb_disks.is_empty() && o.usb_hubs == 0 {
+    let usb_net = o.net.as_deref() == Some("usb-net");
+    if !o.usb_kbd && !o.usb_mouse && !o.usb_tablet && o.usb_disks.is_empty() && o.usb_hubs == 0 && !usb_net {
         return;
     }
     c.args(["-device", "qemu-xhci,id=xhci"]);
@@ -1411,6 +1415,7 @@ fn nic_model(m: &str) -> Option<&'static str> {
         "vmxnet3" => "vmxnet3",
         "pcnet" | "vlance" => "pcnet",
         "virtio" | "virtio-net" | "virtio-net-pci" => "virtio-net-pci",
+        "usb" | "usb-net" => "usb-net",
         _ => return None,
     })
 }
@@ -1444,7 +1449,9 @@ fn net_devices(o: &Opts, c: &mut Command) {
     }
     c.arg("-netdev").arg(netdev);
     let legacy = if o.virtio_legacy && model.starts_with("virtio") { ",disable-modern=on,disable-legacy=off" } else { "" };
-    c.arg("-device").arg(format!("{model},netdev=n0{legacy}"));
+    // QEMU's USB adapter goes on the xHCI controller (usb_devices).
+    let bus = if model == "usb-net" { ",bus=xhci.0" } else { "" };
+    c.arg("-device").arg(format!("{model},netdev=n0{legacy}{bus}"));
 }
 
 /// A QEMU socket in work/, or in the temporary directory (named after
