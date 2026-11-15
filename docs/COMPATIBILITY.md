@@ -728,7 +728,7 @@ image. The whole run takes about 3 minutes in QEMU.
 | `viw` (BINW, the Windows editor) | works | On WIN16: its menus, tool bar, MDI child with the file, status line. |
 | `wimgedit` (Image Editor) | works | File > New > Icon (32x32, 16 colours; its Icon Target list showed partly over its OK button until WIN16's list boxes kept to whole items), drawing with the pencil, File > Save As (`C:\OWT\T1.ICO`, "Icon saved"), close, File > Open of the saved icon. CTL3DV2.DLL is looked for and not there, as on a Windows without it. |
 | `wre` (Resource Editor) | works | File > Open of a Windows program (`BINW\WZOOM.EXE`): its dialogs, icon groups, menus and string tables listed. Editing a dialog starts the Dialog Editor (below). |
-| `wde` (Dialog Editor) | fails | Starts, alone or from `wre` (its DDE conversation with `wre` works: two WIN16 bugs found on the way were fixed, a heap overrun in pattern brushes and the size of DDE data given to another process). Creating or opening a dialog then ends in an Application Error in FMEDIT.DLL (`Location` called with no object, 0001:4415): not followed further. |
+| `wde` (Dialog Editor) | partial | Starts, alone or from `wre` (its DDE conversation with `wre` works). File > New makes a dialog in its form editor (FMEDIT.DLL), with the info bar (caption, name, size) and the dialog's resize handles; Dialog > Test Mode shows it as a live dialog. FMEDIT calls the Dialog Editor's object routines through MakeProcInstance pointers; they ran with FMEDIT's DS, the base object found no edit font and was not made, and `Location` was called with no object (0001:4415): Windows programs' exported procedures now load their own DS (docs/WIN16.md, "Loading"). Its Tools menu is owner-drawn (icons drawn now; the items' text is still missing but for Sticky Tools). Not working yet: placing a control with the mouse (the click after choosing a tool makes nothing), and its toolbox opens partly off the screen at the top left. |
 | `wzoom` | works | File > Begin Zoom, the zoom rectangle follows the pointer, a click shows the magnified screen; the menus. |
 | `wspy` (Spy) | partial | Starts; Spy > All Windows installs its system-wide WH_CALLWNDPROC/WH_GETMESSAGE hooks (WSPYHK.DLL), but they see only Spy's own process: on rs2 each Windows task is a process, and a hook DLL that calls back into Spy's code (as WSPYHK does: its hooks only pass each message to a procedure of Spy's, set with SetFilterProc) cannot run in another task. It could be done as DDEML's monitors are: the other tasks posting their hooked messages to the hooking task, whose hook procedure then runs there (Spy only records them). |
 | `wddespy` (DDE Spy) | works | A DDEML monitor (APPCLASS_MONITOR) on WIN16's monitors (docs/WIN16.md, "DDE and DDEML"): with rs2's DDECLI16 (a client in WM_DDE_* messages) talking to DDESRV16 (a DDEML server), two other tasks (`tests/owatcom/DDESPY.CMD`), its window lists the messages sent and posted (initiate, request, poke, execute, advise, ack, data, terminate), the server's callbacks with their results (XTYP_CONNECT, XTYP_EXECUTE ...), the string handles made and deleted, XTYP_REGISTER and XTYP_UNREGISTER, the conversation and its advise loop made and ended (with both handles), and the tracking windows (Track > Strings, Conversations, Links, Servers) follow them. It shows task handles with a high word that is not theirs (`0x1F012F`): it prints the 16-bit handle as 32 bits, also on Windows. Its `ddeml.h` declares DdeAccessData near, which on Windows would have read the wrong memory: rs2 keeps a monitor's data in its DGROUP. |
@@ -748,6 +748,13 @@ image. The whole run takes about 3 minutes in QEMU.
 
 Fixed for it:
 
+- Loader: a Windows program's exported procedures get `mov ax, DGROUP`
+  prologues as a DLL's do (one instance per process); called from a DLL
+  they ran with the DLL's DS, and the Dialog Editor's FMEDIT.DLL faulted
+  on File > New (W16TEST).
+- WIN16: DDEML monitors (APPCLASS_MONITOR) across tasks, XTYP_REGISTER and
+  XTYP_UNREGISTER to every instance (DDE Spy, W16TEST); owner-drawn menu
+  items (the Dialog Editor's Tools menu, W16TEST).
 - Kernel: `DosUnwindException` with a report record of the caller's
   (Open Watcom's 32-bit C++ `throw` passes its own) put its context
   record and the handlers' frames below that report, over the throwing
