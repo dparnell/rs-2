@@ -1,4 +1,34 @@
-//! WinHelp topics to IPF source, compiled with `ipf::compile`.
+//! WinHelp topics to IPF source, compiled a topic at a time with
+//! `ipf::compile::Compiler`.
+//!
+//! - Panels: `:h1 res=N hide.` per topic (N = file order + 1); the
+//!   contents topic `:h1.` first, the topics it jumps to `:h2.` and
+//!   theirs `:h3.` (while the table of contents stays under
+//!   `Options::max_contents`), not hidden. Untitled topics take their
+//!   first words. K keywords: `:i1.` lines.
+//! - Paragraphs: `:p.` when the space above and below adds up to 4
+//!   units or more, else `.br`; left and first-line indents `:lm.`
+//!   (12 units, about 1/12 inch, a margin character); tabs rs2's `:tab
+//!   margin=.` at the paragraph's tab stops (a hanging indent is one;
+//!   then every half inch), so a tab past its stop goes to a new line;
+//!   line breaks `.br`; runs of spaces `&rbl.`.
+//! - Tables: each column a margin (`:lm.` for the first, `:tab.` for the
+//!   others), rows a line apart; a cell's text wraps at its column's
+//!   margin, and a cell reaching past the next column's start puts that
+//!   column's text on a new line.
+//! - Fonts: Helv, Tms Rmn or Courier at the nearest size the help
+//!   manager has (at most 15 such fonts; WinHelp's map onto them),
+//!   bold/italic/underline as `:hpN.`, colours other than black and
+//!   white as `:color fc=.` (nearest of IPF's 16); Symbol and Wingdings
+//!   characters as the code page 437 ones nearest them.
+//! - Hotspots: jumps `:link reftype=hd res=.`, popups `:link
+//!   reftype=fn res=.` (the help manager's footnote window); macros
+//!   JumpId/JI, PopupId/PI, JumpContext/JC, PopupContext/PC,
+//!   JumpHash/JH, PopupHash/PH, JumpContents and Contents when they lead
+//!   into this file; others (and jumps to other files) stay plain text.
+//! - Pictures: `:artwork name='bmN'.` (embedded ones `E<n>`), decoded
+//!   by the loader into .BMP files; in the text (bmc, small bml) as
+//!   `runin`, else aligned; hotspots as `:artlink.` areas.
 
 use crate::help::{hash, Font, Help};
 use crate::hfs::Hfs;
