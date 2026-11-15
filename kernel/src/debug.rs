@@ -106,6 +106,9 @@ pub fn thread_report() -> alloc::string::String {
             if state == State::Running {
                 continue;
             }
+            if state == State::Blocked {
+                emit!("    wake_at {} sleeper {:?} timed_out {}", t.wake_at(), crate::task::sched::is_sleeper(&t), t.timed_out());
+            }
             // Return addresses between the saved stack pointer and the
             // user frame (a heuristic: any word that points into .text).
             let sp = unsafe { *t.rsp_slot() };
@@ -116,6 +119,15 @@ pub fn thread_report() -> alloc::string::String {
             emit!("    kernel:{}", stack_line(sp, top));
         }
     }
+    match crate::api::sem::mutex_report() {
+        Some(v) => {
+            for l in v {
+                emit!("{l}");
+            }
+        }
+        None => emit!("semaphore table busy"),
+    }
+    emit!("ticks {}", crate::irq::ticks());
     emit!("---- CPUs ----");
     crate::smp::dump_all();
     out

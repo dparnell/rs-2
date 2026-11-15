@@ -220,18 +220,23 @@ pub fn reprioritize(t: &Arc<Thread>) {
 pub fn wake(t: &Arc<Thread>) {
     let i = {
         let mut s = SCHED.lock();
-        if matches!(t.state(), State::Ready | State::Running | State::Dead | State::New) {
-            return;
-        }
-        if t.is_idle() {
-            t.set_state(State::Ready);
-            return;
-        }
-        t.set_state(State::Ready);
-        s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
-        enqueue(&mut s, t)
+        let Some(i) = make_ready(&mut s, t) else { return };
+        i
     };
     preempt_for(i);
+}
+
+/// [`wake`] under the scheduler lock: the run queue it went on, if any.
+fn make_ready(s: &mut Sched, t: &Arc<Thread>) -> Option<usize> {
+    if matches!(t.state(), State::Ready | State::Running | State::Dead | State::New) {
+        return None;
+    }
+    t.set_state(State::Ready);
+    if t.is_idle() {
+        return None;
+    }
+    s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
+    Some(enqueue(s, t))
 }
 
 /// Add a new thread to the run queue.
@@ -342,6 +347,12 @@ pub fn kill(t: &Arc<Thread>) {
     wake(t);
 }
 
+/// Whether `t` is on the sleeper list (None: the scheduler is busy),
+/// for thread reports.
+pub fn is_sleeper(t: &Arc<Thread>) -> Option<bool> {
+    SCHED.try_lock().map(|s| s.sleepers.iter().any(|x| Arc::ptr_eq(x, t)))
+}
+
 /// Called from the timer interrupt on every CPU.
 pub fn tick() {
     let now = irq::ticks();
@@ -358,21 +369,33 @@ pub fn tick() {
     if c.index() != 0 {
         return;
     }
-    let mut woke = Vec::new();
+    // Due sleepers are made ready under the same lock that takes them off
+    // the list: a sleeper another CPU woke meanwhile may already be in a
+    // new wait (DosRequestMutexSem without a timeout), which must not get
+    // this wake-up or a timed-out mark that belongs to the old one.
+    let mut queues = Vec::new();
     {
         let mut s = SCHED.lock();
+        let mut due = Vec::new();
         s.sleepers.retain(|t| {
             if t.wake_at() <= now {
-                woke.push(t.clone());
+                due.push(t.clone());
                 false
             } else {
                 true
             }
         });
+        for t in due {
+            if t.state() == State::Blocked && t.wake_at() <= now {
+                t.set_timed_out(true);
+                if let Some(i) = make_ready(&mut s, &t) {
+                    queues.push(i);
+                }
+            }
+        }
     }
-    for t in woke {
-        t.set_timed_out(true);
-        wake(&t);
+    for i in queues {
+        preempt_for(i);
     }
     if now % 100 == 0 && DYNAMIC.load(Ordering::Relaxed) {
         boost_starved(now);
