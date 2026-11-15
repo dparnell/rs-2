@@ -462,3 +462,44 @@ fn artwork_bitmap_and_metafile() {
     // A missing file is an error.
     assert!(crate::compile::compile_with(b":userdoc.\n:h1 res=1.A\n:artwork name='none.bmp'.\n:euserdoc.\n", true, &load).is_err());
 }
+
+/// The tags converted WinHelp files use: `.br`, margins, `:tab.`,
+/// colours, required blanks, footnote links and link areas.
+#[test]
+fn compile_margins_colours_footnotes_areas() {
+    // A 2 x 2, 1 bpp Windows bitmap.
+    let mut bmp = b"BM".to_vec();
+    let bits_at = 14 + 40 + 8;
+    bmp.extend_from_slice(&((bits_at + 8) as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0, 0, 0, 0]);
+    bmp.extend_from_slice(&(bits_at as u32).to_le_bytes());
+    bmp.extend_from_slice(&40u32.to_le_bytes());
+    bmp.extend_from_slice(&2u32.to_le_bytes());
+    bmp.extend_from_slice(&2u32.to_le_bytes());
+    bmp.extend_from_slice(&[1, 0, 1, 0]);
+    bmp.extend_from_slice(&[0; 24]);
+    bmp.extend_from_slice(&[0, 0, 0, 0, 255, 255, 255, 0]);
+    bmp.extend_from_slice(&[0x80, 0, 0, 0, 0x40, 0, 0, 0]);
+    let src = b":userdoc.\n:h1 res=1.One\n:p.:lm margin=4.Name:tab margin=12.Value&rbl.&rbl.x\n.br\n:color fc=red bc=palegray.Red:color fc=default.\n:p.See :link reftype=fn res=2.two:elink.\n:artwork name='a.bmp'.\n:artlink.\n:link reftype=hd res=2 x=0 y=0 cx=1 cy=1.\n:link reftype=fn res=2.\n:eartlink.\n:h1 res=2.Two\n:p.Second\n:euserdoc.\n";
+    let load = |n: &[u8]| (n == b"a.bmp").then(|| bmp.clone());
+    let data = crate::compile::compile_with(src, true, &load).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let items = decode(&doc, &doc.cell(0).unwrap());
+    assert!(items.contains(&Item::LeftMargin(4)));
+    assert!(items.contains(&Item::MarginIfPast(12)));
+    assert!(items.contains(&Item::Break));
+    assert!(items.contains(&Item::Foreground(2)));
+    assert!(items.contains(&Item::Background(15)));
+    assert!(items.contains(&Item::Foreground(0)));
+    assert_eq!(items.iter().filter(|i| **i == Item::Space).count(), 2);
+    assert!(items.contains(&Item::Link { target: Target::Footnote(1), data: None }));
+    assert!(items.iter().any(|i| matches!(i, Item::Bitmap { areas: true, .. })));
+    assert!(items.contains(&Item::Area(crate::text::Area { target: Target::Panel(1), rect: Some((0, 0, 1, 1)), data: None })));
+    assert!(items.contains(&Item::Area(crate::text::Area { target: Target::Footnote(1), rect: None, data: None })));
+    let page = render(&doc, 0, 60);
+    // Margins count from the left edge plus one (a version 2 file).
+    assert_eq!(page[2], "     Name    Value  x");
+    // The tab's margin stays.
+    assert_eq!(page[3], "             Red");
+    assert!(crate::compile::compile(b":h1 res=1.A\n:p.:artlink.\n", true).is_err());
+}

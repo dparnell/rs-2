@@ -12,7 +12,9 @@
 //!   `:dl.` (`tsize=`) with `:dt.`/`:dd.` and `:edl.`;
 //! - `:hp1.`-`:hp7.` / `:ehp1.`-`:ehp7.` (italic, bold, underlined and
 //!   their mixes; `:hp4.` is bold);
-//! - `:link reftype=hd res=N.` or `refid=ID.` ... `:elink.`, with a
+//! - `:link reftype=hd res=N.` or `refid=ID.` ... `:elink.` (rs2:
+//!   `reftype=fn` links to the panel as a footnote, shown in the
+//!   footnote window), with a
 //!   window of its own: `vpx=`/`vpy=` (left, center, right, top,
 //!   bottom, or a number with `%`, `c` characters, `x` pixels or `p`
 //!   points), `vpcx=`/`vpcy=`, `group=`, `auto`, `viewport`,
@@ -27,8 +29,21 @@
 //! - `:artwork name=F.` with `align=` (left, center, right), `fit` and
 //!   `runin`: a bitmap (.BMP) or metafile (.MET) that `compile_with`'s
 //!   loader reads, stored once per file as IBM's compiler stores images
-//!   (`bM` and `mF` records, see the bitmap module);
-//! - symbols such as `&colon.`, `&amp.`, `&period.`.
+//!   (`bM` and `mF` records, see the bitmap module); `:artlink.` after
+//!   it, `:link reftype=hd res=N.` (or `refid=`) lines with `x=`, `y=`,
+//!   `cx=`, `cy=` (pixels from the bitmap's bottom left; none: the
+//!   whole bitmap) and the link's window attributes, and `:eartlink.`:
+//!   its link areas;
+//! - `.br` (a line break), `:lm margin=N.` / `:rm margin=N.` (left and
+//!   right margins in characters), `:color fc=C bc=C.` (`default`,
+//!   `blue`, `red`, `pink`, `green`, `cyan`, `yellow`, `neutral`,
+//!   `darkgray`, `darkblue`, `darkred`, `darkpink`, `darkgreen`,
+//!   `darkcyan`, `black`, `palegray`);
+//! - rs2's own `:tab margin=N.`: the left margin to N characters, on
+//!   the next line when the text is already past it (escape 0x12, as
+//!   `:dd.` uses it): tab stops and hanging indents of converted text;
+//! - symbols such as `&colon.`, `&amp.`, `&period.`, and `&rbl.` (a
+//!   required blank: one space that is not collapsed).
 //!
 //! Text is in the file's code page (437); words are runs of letters and
 //! digits, every other character is a word of its own, and words written
@@ -59,6 +74,9 @@ impl core::fmt::Display for CompileError {
 /// Local dictionary words a cell may have (header byte 0x52).
 const LOCAL_WORDS: usize = 0xf5;
 
+/// Text bytes after which a cell is ended (its size is a u16).
+const CELL_TEXT: usize = 0xf000;
+
 const PARA: u8 = 0xfa;
 const SPACING: u8 = 0xfc;
 const BREAK: u8 = 0xfd;
@@ -80,8 +98,16 @@ enum Tok {
     Block(u8),
     /// An escape; `brk`: it ends a run of words (margins).
     Esc(Vec<u8>, bool),
-    /// A link with its link data (empty: none).
-    Link(Ref, usize, Vec<u8>),
+    /// A link with its link data (empty: none); a footnote link
+    /// (`reftype=fn`) if set.
+    Link(Ref, usize, Vec<u8>, bool),
+    /// A required blank (`&rbl.`): one space (0xFE) with autospacing
+    /// off.
+    Space,
+    /// A link area of the last bitmap (`:artlink.`): its rectangle (x,
+    /// y from the bitmap's bottom left, cx, cy; None: all of it) and
+    /// link data; to a footnote if set.
+    Area(Ref, usize, Option<[u16; 4]>, Vec<u8>, bool),
 }
 
 fn esc(ty: u8, data: &[u8]) -> Vec<u8> {
@@ -126,7 +152,16 @@ struct Parser<'l> {
     note: Option<u8>,
     /// The font table after entry 0: face, point height and width.
     fonts: Vec<(Vec<u8>, u16, u16)>,
+    /// Inside `:artlink.`.
+    artlink: bool,
+    /// The `res=` of the headings so far.
+    res_seen: BTreeSet<u16>,
 }
+
+/// `:color.` names in colour index order (index 0: the window's own).
+const COLOURS: [&[u8]; 16] = [
+    b"default", b"blue", b"red", b"pink", b"green", b"cyan", b"yellow", b"neutral", b"darkgray", b"darkblue", b"darkred", b"darkpink", b"darkgreen", b"darkcyan", b"black", b"palegray",
+];
 
 fn err<T>(line: usize, msg: impl Into<String>) -> Result<T, CompileError> {
     Err(CompileError { line, msg: msg.into() })
@@ -387,10 +422,11 @@ impl Parser<'_> {
                     return err(line, "heading inside a list");
                 }
                 self.note = None;
+                self.artlink = false;
                 self.margin = 1;
                 let res = get(b"res").map(|v| number(line, &v)).transpose()?;
                 if let Some(r) = res {
-                    if self.panels.iter().any(|p| p.res == Some(r)) {
+                    if !self.res_seen.insert(r) {
                         return err(line, format!("res={r} used twice"));
                     }
                 }
@@ -515,9 +551,11 @@ impl Parser<'_> {
                 self.push(Tok::Esc(esc(0x04, &[0]), false))?;
             }
             b"link" => {
-                if get(b"reftype").as_deref() != Some(b"hd") {
-                    return err(line, ":link. needs reftype=hd");
-                }
+                let footnote = match get(b"reftype").map(|v| v.to_ascii_lowercase()).as_deref() {
+                    Some(b"hd") => false,
+                    Some(b"fn") => true,
+                    _ => return err(line, ":link. needs reftype=hd or fn"),
+                };
                 let r = match (get(b"res"), get(b"refid")) {
                     (Some(r), _) => Ref::Res(number(line, &r)?),
                     (None, Some(id)) => Ref::Id(id.to_ascii_lowercase()),
@@ -525,6 +563,17 @@ impl Parser<'_> {
                 };
                 let data = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"], false)?;
                 let mut flags = data.as_ref().map_or(0, |d| d.0);
+                let rect = if self.artlink {
+                    match (get(b"x"), get(b"y"), get(b"cx"), get(b"cy")) {
+                        (Some(x), Some(y), Some(cx), Some(cy)) => {
+                            Some([number(line, &x)?, number(line, &y)?, number(line, &cx)?, number(line, &cy)?])
+                        }
+                        (None, None, None, None) => None,
+                        _ => return err(line, "a link area needs x=, y=, cx= and cy="),
+                    }
+                } else {
+                    None
+                };
                 for (k, f) in [(&b"auto"[..], 0x40u16), (b"viewport", 0x80), (b"dependent", 0x200)] {
                     if a.iter().any(|(n, _)| n == k) {
                         flags |= f;
@@ -535,9 +584,52 @@ impl Parser<'_> {
                     put16(&mut d, flags);
                     d.extend_from_slice(&data.map(|d| d.1).unwrap_or_default());
                 }
-                self.push(Tok::Link(r, line, d))?;
+                if self.artlink {
+                    self.push(Tok::Area(r, line, rect, d, footnote))?;
+                } else {
+                    self.push(Tok::Link(r, line, d, footnote))?;
+                }
             }
             b"elink" => self.push(Tok::Esc(esc(0x08, &[]), false))?,
+            b"artlink" => {
+                // The bitmap before becomes one with link areas: `FF len
+                // 0F 00 flags offset`.
+                let Some(Tok::Esc(e, _)) = self.panel()?.toks.iter_mut().rev().find(|t| !matches!(t, Tok::Ws)) else {
+                    return err(line, ":artlink. not after :artwork.");
+                };
+                if e.get(2) != Some(&0x0e) {
+                    return err(line, ":artlink. not after :artwork.");
+                }
+                let mut d = vec![0x00];
+                d.extend_from_slice(&e[3..]);
+                *e = esc(0x0f, &d);
+                self.artlink = true;
+            }
+            b"eartlink" => self.artlink = false,
+            b"lm" | b"rm" | b"tab" => {
+                let Some(m) = get(b"margin") else { return err(line, format!(":{}. needs margin=", crate::latin1(name))) };
+                let m = number(line, &m)?.min(250) as u8;
+                let ty = match name {
+                    b"lm" => 0x02,
+                    b"rm" => 0x03,
+                    _ => 0x12,
+                };
+                if name != b"rm" {
+                    self.margin = m;
+                }
+                self.push(Tok::Esc(esc(ty, &[m]), true))?;
+            }
+            b"color" => {
+                for (k, ty) in [(&b"fc"[..], 0x13u8), (b"bc", 0x14)] {
+                    if let Some(c) = get(k) {
+                        let c = c.to_ascii_lowercase();
+                        let Some(i) = COLOURS.iter().position(|n| *n == c.as_slice()) else {
+                            return err(line, format!("unknown colour {}", crate::latin1(&c)));
+                        };
+                        self.push(Tok::Esc(esc(ty, &[i as u8]), false))?;
+                    }
+                }
+            }
             b"acviewport" => {
                 // `?? n u16 objid` (n: the bytes of the strings), the
                 // object name, DLL and object info, the link data.
@@ -640,8 +732,12 @@ impl Parser<'_> {
         if l.starts_with(b".*") {
             return Ok(());
         }
+        if l.trim_ascii_end().eq_ignore_ascii_case(b".br") {
+            self.end_note()?;
+            return self.push(Tok::Block(BREAK));
+        }
         if l.starts_with(b".") {
-            return err(self.line, "control words are not supported");
+            return err(self.line, "control words are not supported (but .br)");
         }
         let mut text = Vec::new();
         let mut p = 0;
@@ -675,6 +771,10 @@ impl Parser<'_> {
                     return Ok(());
                 }
                 p = e + 1;
+            } else if c == b'&' && l[p + 1..].starts_with(b"rbl.") {
+                self.text(&core::mem::take(&mut text))?;
+                self.push(Tok::Space)?;
+                p += 5;
             } else if c == b'&' {
                 let e = l[p + 1..].iter().position(|&c| c == b'.').map(|e| p + 1 + e);
                 match e.and_then(|e| symbol(&l[p + 1..e]).map(|s| (e, s))) {
@@ -773,6 +873,8 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
         margin: 1,
         note: None,
         fonts: Vec::new(),
+        artlink: false,
+        res_seen: BTreeSet::new(),
     };
     for (i, l) in src.split(|&c| c == b'\n').enumerate() {
         ps.line = i + 1;
@@ -792,9 +894,10 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
     }
 
     // Link targets.
+    let by_res: BTreeMap<u16, usize> = panels.iter().enumerate().filter_map(|(i, p)| p.res.map(|r| (r, i))).collect();
     let find = |r: &Ref, line: usize| -> Result<u16, CompileError> {
         let i = match r {
-            Ref::Res(n) => panels.iter().position(|p| p.res == Some(*n)),
+            Ref::Res(n) => by_res.get(n).copied(),
             Ref::Id(id) => panels.iter().position(|p| p.id.as_ref() == Some(id)),
         };
         match i {
@@ -845,7 +948,7 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
                     let n = word_no[w.as_slice()];
                     search[n as usize].insert(pi as u16);
                     let cur = cells.last_mut().unwrap();
-                    if !cur.map.contains_key(&n) && cur.local.len() == LOCAL_WORDS {
+                    if (!cur.map.contains_key(&n) && cur.local.len() == LOCAL_WORDS) || cur.text.len() > CELL_TEXT {
                         mine.push(cells.len() as u16);
                         cells.push(CellBuf::default());
                         spacing = true;
@@ -862,7 +965,7 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
                     };
                     // A space follows unless the next word comes straight after.
                     let next = p.toks[ti + 1..].iter().find(|t| !matches!(t, Tok::Esc(_, false) | Tok::Link(..)));
-                    let space = !glued && !matches!(next, Some(Tok::Word(..)));
+                    let space = !glued && !matches!(next, Some(Tok::Word(..) | Tok::Space));
                     if space != spacing {
                         cur.text.push(SPACING);
                         spacing = space;
@@ -875,9 +978,11 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
                     spacing = true;
                 }
                 Tok::Esc(e, _) => cells.last_mut().unwrap().text.extend_from_slice(e),
-                Tok::Link(r, line, data) => {
+                Tok::Link(r, line, data, footnote) => {
                     let toc = find(r, *line)?;
-                    let e = if data.is_empty() {
+                    let e = if *footnote {
+                        esc(0x07, &toc.to_le_bytes())
+                    } else if data.is_empty() {
                         esc(0x06, &toc.to_le_bytes())
                     } else {
                         let mut d = toc.to_le_bytes().to_vec();
@@ -886,7 +991,44 @@ pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u
                     };
                     cells.last_mut().unwrap().text.extend_from_slice(&e);
                 }
+                Tok::Space => {
+                    let cur = cells.last_mut().unwrap();
+                    if spacing {
+                        cur.text.push(SPACING);
+                        spacing = false;
+                    }
+                    cur.text.push(0xfe);
+                }
+                Tok::Area(r, line, rect, data, footnote) => {
+                    // `FF len 0F sub toc [rect] [data]`: 01 rect and data,
+                    // 02 rect, 04 data, 05 neither; footnotes 03 with a
+                    // rect, 06 without.
+                    let toc = find(r, *line)?;
+                    let sub = match (rect.is_some(), data.is_empty(), *footnote) {
+                        (true, _, true) => 0x03,
+                        (false, _, true) => 0x06,
+                        (true, false, _) => 0x01,
+                        (true, true, _) => 0x02,
+                        (false, false, _) => 0x04,
+                        (false, true, _) => 0x05,
+                    };
+                    let mut d = vec![sub];
+                    d.extend_from_slice(&toc.to_le_bytes());
+                    for v in rect.iter().flatten() {
+                        d.extend_from_slice(&v.to_le_bytes());
+                    }
+                    if !*footnote {
+                        d.extend_from_slice(data);
+                    }
+                    cells.last_mut().unwrap().text.extend_from_slice(&esc(0x0f, &d));
+                }
             }
+        }
+        // A TOC entry is at most 255 bytes: its cells (two each) and
+        // title share them.
+        let ext = p.ext.as_ref().map_or(0, |e| 2 + e.1.len());
+        if 3 + ext + mine.len() * 2 > 255 {
+            return err(0, format!("panel {} too large ({} cells)", crate::latin1(&p.title), mine.len()));
         }
         panel_cells.push(mine);
     }
