@@ -24,6 +24,7 @@
 //! Power saving stays off (the firmware is known to crash with it on, and
 //! the Surface then needs a D3cold cycle of the slot to recover).
 
+use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -36,7 +37,7 @@ use wlan::mwifiex as mw;
 use super::pci;
 use super::virtio::queue::Dma;
 use crate::mm::mmio;
-use crate::net::wlan::{ScanRequest, WlanCaps, WlanDriver, WlanError};
+use crate::net::wlan::{ScanRequest, WlanCaps, WlanDriver, WlanError, WlanEvent};
 use crate::sync::{Mutex, SpinLock};
 
 pub const FIRMWARE: &str = "C:\\RS2\\FIRMWARE\\PCIE8897.BIN";
@@ -72,6 +73,7 @@ const RD_DATA_PTR: usize = 0xc08c;
 const REVISION: usize = 0xc58;
 const BAR2_SIZE: u64 = 0x10000;
 
+const CPU_INTR_DNLD_RDY: u32 = 1 << 0;
 const CPU_INTR_DOOR_BELL: u32 = 1 << 1;
 const CPU_INTR_EVENT_DONE: u32 = 1 << 5;
 const HOST_INTR_DNLD_DONE: u32 = 1 << 0;
@@ -91,12 +93,15 @@ const PFU_DESC: usize = 20;
 const EVT_DESC: usize = 12;
 const TX_MASK: u32 = 0x03ff_0000;
 const TX_WRAP_MASK: u32 = 0x07ff_0000;
+const TX_ROLLOVER: u32 = 1 << 26;
 const RX_MASK: u32 = 0x3ff;
 const RX_ROLLOVER: u32 = 1 << 10;
 const EVT_MASK: u32 = 0xf;
 const EVT_ROLLOVER: u32 = 1 << 7;
 const FLAG_SOP: u16 = 1 << 0;
 const FLAG_EOP: u16 = 1 << 1;
+const FLAG_FIRST_DESC: u16 = 1 << 0;
+const FLAG_LAST_DESC: u16 = 1 << 1;
 
 const RX_BUF: usize = 4096;
 const EVT_BUF: usize = 2048;
@@ -135,11 +140,9 @@ fn get16(d: &Dma, off: usize) -> u16 {
     u16::from_le_bytes([b[0], b[1]])
 }
 
+/// The command and event side (used under [`Card::inner`]).
 struct Rings {
-    txbd: Dma,
-    rxbd: Dma,
     evtbd: Dma,
-    rxbuf: Dma,
     evtbuf: Dma,
     cmd: Dma,
     rsp: Dma,
@@ -147,24 +150,91 @@ struct Rings {
 
 impl Rings {
     fn new() -> Option<Rings> {
-        let r = Rings {
-            txbd: Dma::new(TXRX_BD * PFU_DESC)?,
-            rxbd: Dma::new(TXRX_BD * PFU_DESC)?,
-            evtbd: Dma::new(EVT_BD * EVT_DESC)?,
-            rxbuf: Dma::new(TXRX_BD * RX_BUF)?,
-            evtbuf: Dma::new(EVT_BD * EVT_BUF)?,
-            cmd: Dma::new(CMD_BUF)?,
-            rsp: Dma::new(CMD_BUF)?,
-        };
-        r.txbd.write(0, &[0; TXRX_BD * PFU_DESC]);
-        for i in 0..TXRX_BD {
-            r.arm_rx(i);
-        }
+        let r = Rings { evtbd: Dma::new(EVT_BD * EVT_DESC)?, evtbuf: Dma::new(EVT_BD * EVT_BUF)?, cmd: Dma::new(CMD_BUF)?, rsp: Dma::new(CMD_BUF)? };
         for i in 0..EVT_BD {
             r.arm_evt(i);
         }
         fence(Ordering::SeqCst);
         Some(r)
+    }
+
+    fn arm_evt(&self, i: usize) {
+        let d = i * EVT_DESC;
+        put64(&self.evtbd, d, self.evtbuf.addr(i * EVT_BUF));
+        put16(&self.evtbd, d + 8, EVT_BUF as u16);
+        put16(&self.evtbd, d + 10, 0);
+    }
+}
+
+/// The data side: the transmit and receive rings, their buffers and the
+/// ring pointers (both live in one register pair, so they share a lock).
+/// Under a spin lock of its own: the network thread transmits while a
+/// command (a scan) may hold [`Card::inner`] for seconds.
+struct Data {
+    txbd: Dma,
+    txbuf: Dma,
+    rxbd: Dma,
+    rxbuf: Dma,
+    tx_wr: u32,
+    tx_rd: u32,
+    rx_rd: u32,
+}
+
+/// One transmit buffer: interface header, TxPD, frame.
+const TX_BUF: usize = 2048;
+
+impl Data {
+    fn new() -> Option<Data> {
+        let d = Data {
+            txbd: Dma::new(TXRX_BD * PFU_DESC)?,
+            txbuf: Dma::new(TXRX_BD * TX_BUF)?,
+            rxbd: Dma::new(TXRX_BD * PFU_DESC)?,
+            rxbuf: Dma::new(TXRX_BD * RX_BUF)?,
+            tx_wr: 0,
+            tx_rd: 0,
+            rx_rd: RX_ROLLOVER,
+        };
+        d.txbd.write(0, &[0; TXRX_BD * PFU_DESC]);
+        for i in 0..TXRX_BD {
+            d.arm_rx(i);
+        }
+        fence(Ordering::SeqCst);
+        Some(d)
+    }
+
+    /// The host's half of the shared pointer register.
+    fn wr_ptrs(&self) -> u32 {
+        self.rx_rd | (self.tx_wr & TX_WRAP_MASK)
+    }
+
+    fn tx_full(&self) -> bool {
+        (self.tx_wr & TX_MASK) == (self.tx_rd & TX_MASK) && (self.tx_wr & TX_ROLLOVER) != (self.tx_rd & TX_ROLLOVER)
+    }
+
+    /// Take back the buffers the firmware has sent (its read pointer is in
+    /// the high half of RD_DATA_PTR).
+    fn reclaim(&mut self, r: &Regs) {
+        let rd = r.r(RD_DATA_PTR);
+        if rd == u32::MAX {
+            return;
+        }
+        for _ in 0..TXRX_BD {
+            if (self.tx_rd & TX_MASK) == (rd & TX_MASK) && (self.tx_rd & TX_ROLLOVER) == (rd & TX_ROLLOVER) {
+                break;
+            }
+            let i = ((self.tx_rd & TX_MASK) >> 16) as usize;
+            if i < TXRX_BD {
+                self.txbd.write(i * PFU_DESC, &[0; PFU_DESC]);
+            }
+            self.tx_rd += 1 << 16;
+            if (self.tx_rd & TX_MASK) >> 16 == TXRX_BD as u32 {
+                self.tx_rd = (self.tx_rd & TX_ROLLOVER) ^ TX_ROLLOVER;
+            }
+        }
+    }
+
+    fn tx_empty(&self) -> bool {
+        (self.tx_wr & TX_MASK) == (self.tx_rd & TX_MASK) && (self.tx_wr & TX_ROLLOVER) == (self.tx_rd & TX_ROLLOVER)
     }
 
     fn arm_rx(&self, i: usize) {
@@ -176,21 +246,12 @@ impl Rings {
         put64(&self.rxbd, d + 8, self.rxbuf.addr(i * RX_BUF));
         self.rxbd.write(d + 16, &[0; 4]);
     }
-
-    fn arm_evt(&self, i: usize) {
-        let d = i * EVT_DESC;
-        put64(&self.evtbd, d, self.evtbuf.addr(i * EVT_BUF));
-        put16(&self.evtbd, d + 8, EVT_BUF as u16);
-        put16(&self.evtbd, d + 10, 0);
-    }
 }
 
 struct Inner {
     rings: Option<Rings>,
     up: bool,
     seq: u8,
-    tx_wr: u32,
-    rx_rd: u32,
     evt_rd: u32,
     /// Events received and not yet handled: (cause, body).
     events: Vec<(u32, Vec<u8>)>,
@@ -210,6 +271,23 @@ pub struct Card {
     events: AtomicU64,
     /// A scan has run (the first one logs each step).
     scanned: core::sync::atomic::AtomicBool,
+    data: SpinLock<Option<Data>>,
+    /// Received frames (Ethernet II) not yet taken by [`WlanDriver::poll`].
+    rxq: SpinLock<VecDeque<Vec<u8>>>,
+    /// KEY_MATERIAL layout (the firmware's key API major version).
+    key_api: AtomicU32,
+    /// The network joined (for DEAUTHENTICATE).
+    bssid: SpinLock<Option<[u8; 6]>>,
+    tx_frames: AtomicU64,
+    tx_dropped: AtomicU64,
+}
+
+/// MSI interrupts taken (the handler only wakes the wlan thread).
+static IRQS: AtomicU64 = AtomicU64::new(0);
+
+fn interrupt(_ctx: usize) {
+    IRQS.fetch_add(1, Ordering::Relaxed);
+    crate::net::wlan::kick();
 }
 
 fn delay_ms(ms: u64) {
@@ -275,14 +353,26 @@ pub fn probe(d: &pci::Device) {
         name,
         dev: *d,
         regs,
-        inner: Mutex::new(Inner { rings: None, up: false, seq: 0, tx_wr: 0, rx_rd: RX_ROLLOVER, evt_rd: EVT_ROLLOVER, events: Vec::new(), ext_scan: false }),
+        inner: Mutex::new(Inner { rings: None, up: false, seq: 0, evt_rd: EVT_ROLLOVER, events: Vec::new(), ext_scan: false }),
         mac: SpinLock::new([0; 6]),
         fw_version: SpinLock::new(String::new()),
         revision: AtomicU32::new(0),
         rx_frames: AtomicU64::new(0),
         events: AtomicU64::new(0),
         scanned: core::sync::atomic::AtomicBool::new(false),
+        data: SpinLock::new(None),
+        rxq: SpinLock::new(VecDeque::new()),
+        key_api: AtomicU32::new(0),
+        bssid: SpinLock::new(None),
+        tx_frames: AtomicU64::new(0),
+        tx_dropped: AtomicU64::new(0),
     };
+    // The interrupt only wakes the wlan thread, which reads the status;
+    // without MSI that thread polls.
+    match crate::msi::setup(d, false, interrupt, 0) {
+        Some((v, kind)) => crate::println!("{}: {kind} vector {v:#x}", card.name),
+        None => crate::println!("{}: no MSI; polled", card.name),
+    }
     crate::net::wlan::register(Arc::new(card));
 }
 
@@ -371,7 +461,7 @@ impl Card {
         }
         r.w(HOST_INT_STATUS, !ireg);
         if ireg & HOST_INTR_UPLD_RDY != 0 {
-            self.drain_rx(g);
+            self.drain_rx();
         }
         if ireg & HOST_INTR_EVENT_RDY != 0 {
             self.drain_events(g);
@@ -379,31 +469,49 @@ impl Card {
         ireg
     }
 
-    fn drain_rx(&self, g: &mut Inner) {
-        let Some(rings) = &g.rings else { return };
+    /// Take the received packets into [`Card::rxq`] as Ethernet frames.
+    fn drain_rx(&self) {
         let r = &self.regs;
-        for _ in 0..TXRX_BD * 2 {
-            let wr = r.r(RD_DATA_PTR);
-            let rd = g.rx_rd;
-            if (wr & RX_MASK) == (rd & RX_MASK) && (wr & RX_ROLLOVER) != (rd & RX_ROLLOVER) {
-                break;
+        let mut got = Vec::new();
+        {
+            let mut dg = self.data.lock();
+            let Some(d) = dg.as_mut() else { return };
+            for _ in 0..TXRX_BD * 2 {
+                let wr = r.r(RD_DATA_PTR);
+                let rd = d.rx_rd;
+                if wr == u32::MAX || ((wr & RX_MASK) == (rd & RX_MASK) && (wr & RX_ROLLOVER) != (rd & RX_ROLLOVER)) {
+                    break;
+                }
+                let i = (rd & RX_MASK) as usize;
+                if i >= TXRX_BD {
+                    break;
+                }
+                fence(Ordering::SeqCst);
+                let len = (get16(&d.rxbuf, i * RX_BUF) as usize).clamp(mw::INTF_HDR, RX_BUF);
+                let typ = get16(&d.rxbuf, i * RX_BUF + 2);
+                if typ == mw::TYPE_DATA {
+                    if let Some(f) = mw::rx_frame(d.rxbuf.bytes(i * RX_BUF + mw::INTF_HDR, len - mw::INTF_HDR)) {
+                        got.push(f);
+                    }
+                }
+                self.rx_frames.fetch_add(1, Ordering::Relaxed);
+                d.arm_rx(i);
+                fence(Ordering::SeqCst);
+                let mut rd = rd + 1;
+                if (rd & RX_MASK) as usize == TXRX_BD {
+                    rd = (rd & RX_ROLLOVER) ^ RX_ROLLOVER;
+                }
+                d.rx_rd = rd;
+                r.w(WR_DATA_PTR, d.wr_ptrs());
             }
-            let i = (rd & RX_MASK) as usize;
-            if i >= TXRX_BD {
-                break;
+        }
+        if !got.is_empty() {
+            let mut q = self.rxq.lock();
+            for f in got {
+                if q.len() < 256 {
+                    q.push_back(f);
+                }
             }
-            // Data frames are dropped until there is a network interface
-            // (the association round).
-            let _len = get16(&rings.rxbuf, i * RX_BUF);
-            self.rx_frames.fetch_add(1, Ordering::Relaxed);
-            rings.arm_rx(i);
-            fence(Ordering::SeqCst);
-            let mut rd = rd + 1;
-            if (rd & RX_MASK) as usize == TXRX_BD {
-                rd = (rd & RX_ROLLOVER) ^ RX_ROLLOVER;
-            }
-            g.rx_rd = rd;
-            r.w(WR_DATA_PTR, rd | (g.tx_wr & TX_WRAP_MASK));
         }
     }
 
@@ -515,6 +623,10 @@ impl Card {
         if g.rings.is_none() {
             g.rings = Some(Rings::new().ok_or(WlanError::Failed("out of memory".into()))?);
         }
+        if self.data.lock().is_none() {
+            let d = Data::new().ok_or(WlanError::Failed("out of memory".into()))?;
+            *self.data.lock() = Some(d);
+        }
         if self.fw_ready(1) {
             crate::println!("{}: firmware already running", self.name);
         } else {
@@ -537,12 +649,17 @@ impl Card {
         r.w(HOST_INT_MASK, HOST_INTR_MASK);
         let details = {
             let rings = g.rings.as_ref().unwrap();
-            mw::pcie_desc_details((rings.txbd.base, TXRX_BD as u32), (rings.rxbd.base, TXRX_BD as u32), (rings.evtbd.base, EVT_BD as u32), 0)
+            let dg = self.data.lock();
+            let d = dg.as_ref().unwrap();
+            mw::pcie_desc_details((d.txbd.base, TXRX_BD as u32), (d.rxbd.base, TXRX_BD as u32), (rings.evtbd.base, EVT_BD as u32), 0)
         };
         self.command(g, mw::CMD_PCIE_DESC_DETAILS, &details, 2000)?;
         self.command(g, mw::CMD_FUNC_INIT, &[], 5000)?;
-        let spec = self.command(g, mw::CMD_GET_HW_SPEC, &[0; mw::HW_SPEC_LEN], 2000)?;
-        let spec = mw::HwSpec::parse(&spec).ok_or(WlanError::Failed("short GET_HW_SPEC response".into()))?;
+        let spec_body = self.command(g, mw::CMD_GET_HW_SPEC, &[0; mw::HW_SPEC_LEN], 2000)?;
+        let spec = mw::HwSpec::parse(&spec_body).ok_or(WlanError::Failed("short GET_HW_SPEC response".into()))?;
+        let (kmaj, kmin) = mw::key_api_version(&spec_body);
+        self.key_api.store(kmaj as u32, Ordering::Relaxed);
+        crate::println!("{}: key API {kmaj}.{kmin}", self.name);
         *self.mac.lock() = spec.mac;
         *self.fw_version.lock() = spec.fw_version();
         let mut txb = Vec::new();
@@ -555,7 +672,9 @@ impl Card {
         let mac_ctl = mw::MAC_RX_ON | mw::MAC_TX_ON | mw::MAC_ETHERNETII;
         self.command(g, mw::CMD_MAC_CONTROL, &mac_ctl.to_le_bytes(), 2000)?;
         // Let the firmware deliver received frames.
-        r.w(WR_DATA_PTR, g.rx_rd | (g.tx_wr & TX_WRAP_MASK));
+        if let Some(d) = self.data.lock().as_ref() {
+            r.w(WR_DATA_PTR, d.wr_ptrs());
+        }
         g.up = true;
         Ok(alloc::format!(
             "revision {rev_name}, firmware {}, MAC {}, region {:#x}, {} antenna(s), capabilities {:#x}",
@@ -594,7 +713,7 @@ impl Card {
                         done |= !more;
                     }
                 } else {
-                    self.note_event(cause);
+                    g.events.push((cause, body));
                 }
             }
             if done {
@@ -609,9 +728,6 @@ impl Card {
         }
     }
 
-    fn note_event(&self, cause: u32) {
-        crate::println!("{}: event {cause:#x}", self.name);
-    }
 }
 
 impl WlanDriver for Card {
@@ -664,7 +780,140 @@ impl WlanDriver for Card {
             ("revision".into(), alloc::format!("{:#x}", self.revision.load(Ordering::Relaxed))),
             ("events".into(), alloc::format!("{}", self.events.load(Ordering::Relaxed))),
             ("rx_frames".into(), alloc::format!("{}", self.rx_frames.load(Ordering::Relaxed))),
+            ("tx_frames".into(), alloc::format!("{}", self.tx_frames.load(Ordering::Relaxed))),
+            ("tx_dropped".into(), alloc::format!("{}", self.tx_dropped.load(Ordering::Relaxed))),
+            ("interrupts".into(), alloc::format!("{}", IRQS.load(Ordering::Relaxed))),
+            ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
         ]
+    }
+
+    fn connect(&self, bss: &Bss, rsn_ie: Option<&[u8]>) -> Result<u16, WlanError> {
+        let mut g = self.inner.lock();
+        if !g.up {
+            return Err(WlanError::NotReady);
+        }
+        let body = self.command(&mut g, mw::CMD_802_11_ASSOCIATE, &mw::associate_body(bss, rsn_ie), 15000)?;
+        let (cap, status, aid) = mw::associate_result(&body).ok_or(WlanError::Failed("short association response".into()))?;
+        if status != 0 {
+            let why = match cap {
+                1 => "authentication failed",
+                2 => "no answer to authentication",
+                3 => "association timed out",
+                4 => "association refused",
+                5 => "station failure",
+                _ => "refused by the access point",
+            };
+            return Err(WlanError::Failed(alloc::format!("{why} (status {status}, {cap:#x})")));
+        }
+        *self.bssid.lock() = Some(bss.bssid);
+        Ok(aid)
+    }
+
+    fn disconnect(&self) {
+        let Some(b) = self.bssid.lock().take() else { return };
+        let mut g = self.inner.lock();
+        if let Err(e) = self.command(&mut g, mw::CMD_802_11_DEAUTHENTICATE, &mw::deauth_body(b, 3), 3000) {
+            crate::println!("{}: deauthenticate: {e}", self.name);
+        }
+    }
+
+    fn set_key(&self, key: &mw::Key) -> Result<(), WlanError> {
+        let mut g = self.inner.lock();
+        let body = mw::key_material_body(key, self.key_api.load(Ordering::Relaxed) as u8);
+        self.command(&mut g, mw::CMD_802_11_KEY_MATERIAL, &body, 3000).map(|_| ())
+    }
+
+    fn send(&self, frame: &[u8]) -> bool {
+        let total = mw::INTF_HDR + mw::TXPD_LEN + frame.len();
+        if frame.len() < 14 || total > TX_BUF {
+            return false;
+        }
+        let r = &self.regs;
+        let mut dg = self.data.lock();
+        let Some(d) = dg.as_mut() else { return false };
+        if d.tx_full() {
+            d.reclaim(r);
+        }
+        if d.tx_full() {
+            self.tx_dropped.fetch_add(1, Ordering::Relaxed);
+            // Tell the firmware again that there is something to send.
+            r.w(CPU_INT_EVENT, CPU_INTR_DNLD_RDY);
+            return false;
+        }
+        let i = ((d.tx_wr & TX_MASK) >> 16) as usize;
+        let at = i * TX_BUF;
+        put16(&d.txbuf, at, total as u16);
+        put16(&d.txbuf, at + 2, mw::TYPE_DATA);
+        d.txbuf.write(at + mw::INTF_HDR, &mw::txpd(frame.len()));
+        d.txbuf.write(at + mw::INTF_HDR + mw::TXPD_LEN, frame);
+        let desc = i * PFU_DESC;
+        put16(&d.txbd, desc, FLAG_FIRST_DESC | FLAG_LAST_DESC);
+        put16(&d.txbd, desc + 2, 0);
+        put16(&d.txbd, desc + 4, total as u16);
+        put16(&d.txbd, desc + 6, total as u16);
+        put64(&d.txbd, desc + 8, d.txbuf.addr(at));
+        d.txbd.write(desc + 16, &[0; 4]);
+        fence(Ordering::SeqCst);
+        d.tx_wr += 1 << 16;
+        if (d.tx_wr & TX_MASK) >> 16 == TXRX_BD as u32 {
+            d.tx_wr = (d.tx_wr & TX_ROLLOVER) ^ TX_ROLLOVER;
+        }
+        r.w(WR_DATA_PTR, d.tx_wr | (d.rx_rd & 0x7ff));
+        // Linux: the 88W8897 firmware may crash after a write pointer
+        // update with ASPM on unless the bus is kept busy with a read.
+        let _ = r.r(0);
+        r.w(CPU_INT_EVENT, CPU_INTR_DNLD_RDY);
+        self.tx_frames.fetch_add(1, Ordering::Relaxed);
+        true
+    }
+
+    fn flush_tx(&self, ms: u64) {
+        let t0 = crate::irq::uptime_ms();
+        loop {
+            {
+                let mut dg = self.data.lock();
+                let Some(d) = dg.as_mut() else { return };
+                d.reclaim(&self.regs);
+                if d.tx_empty() {
+                    return;
+                }
+            }
+            if crate::irq::uptime_ms() - t0 > ms {
+                return;
+            }
+            crate::task::sched::sleep_ms(1);
+        }
+    }
+
+    fn poll(&self, f: &mut dyn FnMut(WlanEvent)) {
+        let events = {
+            let mut g = self.inner.lock();
+            if !g.up {
+                return;
+            }
+            self.service(&mut g);
+            core::mem::take(&mut g.events)
+        };
+        if let Some(d) = self.data.lock().as_mut() {
+            d.reclaim(&self.regs);
+        }
+        for (cause, body) in events {
+            let reason = if body.len() >= 2 { u16::from_le_bytes([body[0], body[1]]) } else { 0 };
+            let ev = match cause {
+                mw::EVENT_LINK_LOST => WlanEvent::Disconnected { why: "link lost", reason },
+                mw::EVENT_DEAUTHENTICATED => WlanEvent::Disconnected { why: "deauthenticated", reason },
+                mw::EVENT_DISASSOCIATED => WlanEvent::Disconnected { why: "disassociated", reason },
+                c => WlanEvent::Other(c),
+            };
+            if matches!(ev, WlanEvent::Disconnected { .. }) {
+                *self.bssid.lock() = None;
+            }
+            f(ev);
+        }
+        loop {
+            let Some(fr) = self.rxq.lock().pop_front() else { break };
+            f(WlanEvent::Frame(fr));
+        }
     }
 }
 
@@ -692,9 +941,6 @@ impl Card {
                 Err(e) => crate::println!("{}: scan of channels {}-{}: {e}", self.name, chans[i].channel, chans[j - 1].channel),
             }
             i = j;
-        }
-        for (cause, _) in core::mem::take(&mut g.events) {
-            self.note_event(cause);
         }
         Ok(found)
     }

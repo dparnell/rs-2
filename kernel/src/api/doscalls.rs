@@ -302,6 +302,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 620) => super::wlan::query,
         (8, 621) => super::wlan::scan,
         (8, 622) => super::wlan::reload,
+        (8, 623) => super::wlan::connect,
+        (8, 624) => super::wlan::disconnect,
         (8, 201) => super::sockets::create,
         (8, 202) => super::sockets::bind,
         (8, 203) => super::sockets::listen,

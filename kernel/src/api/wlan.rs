@@ -1,4 +1,4 @@
-//! RS2API 620-622: the WiFi adapters (`net::wlan`) for WIFI.EXE. Calls
+//! RS2API 620-624: the WiFi adapters (`net::wlan`) for WIFI.EXE. Calls
 //! return 0 or an OS/2 error; text comes back as in `api::lan`.
 //!
 //! | Ord | Entry |
@@ -6,6 +6,8 @@
 //! | 620 | Rs2WlanQuery(PCHAR buf, ULONG cb, PULONG pcb): `key=value` lines (`net::wlan::status_text`) |
 //! | 621 | Rs2WlanScan(ULONG adapter, ULONG flags, PCHAR buf, ULONG cb, PULONG pcb): scan (flags bit 0: return the last results without scanning); one network per line: SSID, RSSI, channel, security, BSSID, known, tab-separated |
 //! | 622 | Rs2WlanReload(): read `\MPTN\ETC\WIFI.CFG` again |
+//! | 623 | Rs2WlanConnect(ULONG adapter, PSZ ssid, PSZ passphrase or NULL): join that network (in the background; Rs2WlanQuery's `state=` follows it) |
+//! | 624 | Rs2WlanDisconnect(ULONG adapter): leave the network, join none until asked |
 //!
 //! A text larger than `cb` gives ERROR_BUFFER_OVERFLOW with the size
 //! needed in `*pcb` (a scan's results are kept: ask again with flags 1).
@@ -60,4 +62,39 @@ pub fn scan(c: &mut Ctx) -> u32 {
 pub fn reload(_c: &mut Ctx) -> u32 {
     wlan::load_config();
     0
+}
+
+pub fn connect(c: &mut Ctx) -> u32 {
+    let i = c.arg(0) as usize;
+    if i >= wlan::count() {
+        return DEV_NOT_EXIST;
+    }
+    let Some(ssid) = c.read_str(c.arg(1), 33) else { return err::INVALID_ADDRESS };
+    let pass = match c.arg(2) {
+        0 => None,
+        at => match c.read_str(at, 64) {
+            Some(p) if p.is_empty() => None,
+            Some(p) => Some(p),
+            None => return err::INVALID_ADDRESS,
+        },
+    };
+    let ssid: alloc::vec::Vec<u8> = ssid.chars().map(|ch| ch as u32 as u8).collect();
+    if ssid.is_empty() || ssid.len() > 32 || pass.as_ref().is_some_and(|p| !(8..=63).contains(&p.len())) {
+        return err::INVALID_PARAMETER;
+    }
+    match wlan::connect(i, &ssid, pass.as_deref()) {
+        Ok(()) => 0,
+        Err(_) => NOT_READY,
+    }
+}
+
+pub fn disconnect(c: &mut Ctx) -> u32 {
+    let i = c.arg(0) as usize;
+    if i >= wlan::count() {
+        return DEV_NOT_EXIST;
+    }
+    match wlan::disconnect(i) {
+        Ok(()) => 0,
+        Err(_) => NOT_READY,
+    }
 }
