@@ -1070,6 +1070,12 @@ Fixed for it:
   the DLL keeps its thread data in instance data; the second program to
   use the DLL faulted in `__CHK`), and an LX DLL rewritten meanwhile is
   read from its new file (APITEST).
+- WPS: a folder view keeps the places it gives icons that have none
+  (their `.ICONPOS` record is written then, not only after an Arrange or
+  a drag): the installers' new folders, and the icons of a new desktop,
+  came up in another order after the next start (`WPSTEST SHELL ICONPOS
+  C:\DESKTOP DRIVES`). Long titles (four lines) still reach into the
+  next row on the desktop's grid.
 
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 
