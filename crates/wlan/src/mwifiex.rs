@@ -372,6 +372,201 @@ pub fn parse_ext_scan_report(body: &[u8]) -> Option<(Vec<Bss>, bool)> {
     Some((out, more))
 }
 
+pub const TLV_KEY_MATERIAL: u16 = 0x0100;
+pub const TLV_AUTH_TYPE: u16 = 0x011f;
+pub const TLV_KEY_PARAM_V2: u16 = 0x019c;
+pub const TLV_API_REV: u16 = 0x01c7;
+
+pub const ACT_GET: u16 = 0;
+pub const ACT_SET: u16 = 1;
+pub const ACT_REMOVE: u16 = 4;
+
+/// The key API version (major, minor) from the TLVs after the fixed
+/// GET_HW_SPEC body: 2 means KEY_MATERIAL in the "v2" layout. (0, 0) when
+/// the firmware does not say (the old layout).
+pub fn key_api_version(hw_spec: &[u8]) -> (u8, u8) {
+    if hw_spec.len() <= HW_SPEC_LEN {
+        return (0, 0);
+    }
+    for (t, v) in tlvs(&hw_spec[HW_SPEC_LEN..]) {
+        // api_id 1: the key API.
+        if t == TLV_API_REV && v.len() >= 4 && le16(v, 0) == 1 {
+            return (v[2], v[3]);
+        }
+    }
+    (0, 0)
+}
+
+/// Capability bits the host must not ask for (`CAPINFO_MASK` in Linux).
+const CAP_NOT_ASKED: u16 = 1 << 15 | 1 << 14 | 1 << 12 | 1 << 11 | 1 << 9;
+pub const LISTEN_INTERVAL: u16 = 10;
+
+/// The rates of a network's (extended) supported rates elements that the
+/// chip has too, with the network's basic-rate bits.
+fn common_rates(bss: &Bss) -> Vec<u8> {
+    let ours: &[u8] = if bss.channel > 14 { &RATES_A } else { &RATES_BG };
+    let mut v = Vec::new();
+    for (id, body) in crate::ie::elements(&bss.ies) {
+        if id == crate::ie::EID_SUPP_RATES || id == crate::ie::EID_EXT_RATES {
+            for &r in body {
+                if ours.iter().any(|&o| o & 0x7f == r & 0x7f) && !v.iter().any(|&x: &u8| x & 0x7f == r & 0x7f) {
+                    v.push(r);
+                }
+            }
+        }
+    }
+    if v.is_empty() {
+        v.extend_from_slice(ours);
+    }
+    v
+}
+
+/// The body of 802_11_ASSOCIATE for `bss` (from a scan just before: the
+/// firmware joins what it found). `rsn_ie` is the RSN element (id, length,
+/// body) the station offers, for WPA2 networks. Open System
+/// authentication; no 802.11n/ac elements yet (the link runs at legacy
+/// rates).
+pub fn associate_body(bss: &Bss, rsn_ie: Option<&[u8]>) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend(bss.bssid);
+    v.extend((bss.capability & !CAP_NOT_ASKED).to_le_bytes());
+    v.extend(LISTEN_INTERVAL.to_le_bytes());
+    v.extend(bss.beacon_interval.to_le_bytes());
+    v.push(0); // DTIM period: the firmware's
+    push_tlv(&mut v, crate::ie::EID_SSID as u16, &bss.ssid);
+    push_tlv(&mut v, crate::ie::EID_DS_PARAMS as u16, &[bss.channel]);
+    // CF parameter set (none).
+    push_tlv(&mut v, 4, &[0; 6]);
+    push_tlv(&mut v, TLV_SUPP_RATES, &common_rates(bss));
+    push_tlv(&mut v, TLV_AUTH_TYPE, &0u16.to_le_bytes());
+    // The channel and band the network is on.
+    let band = if bss.channel > 14 { 1 } else { 0 };
+    push_tlv(&mut v, TLV_CHANLIST, &[band, bss.channel, 0, 0, 0, 0, 0]);
+    if let Some(ie) = rsn_ie.filter(|ie| ie.len() >= 2) {
+        push_tlv(&mut v, ie[0] as u16, &ie[2..]);
+    }
+    v
+}
+
+/// The 802_11_ASSOCIATE response: (capability, status code, association
+/// ID). Status 0 is success; the firmware puts its own reason in the
+/// capability field when the status is not 0 (1: authentication failed,
+/// 2: the AP did not answer the authentication, 3: association timeout,
+/// 4: association refused, 5: station failure).
+pub fn associate_result(body: &[u8]) -> Option<(u16, u16, u16)> {
+    (body.len() >= 6).then(|| (le16(body, 0), le16(body, 2), le16(body, 4) & 0x3fff))
+}
+
+/// 802_11_DEAUTHENTICATE: leave `bssid` with `reason` (3: leaving).
+pub fn deauth_body(bssid: [u8; 6], reason: u16) -> Vec<u8> {
+    let mut v = bssid.to_vec();
+    v.extend(reason.to_le_bytes());
+    v
+}
+
+/// A key to install in the firmware.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Key {
+    /// Pairwise (the AP's address) or group (broadcast).
+    pub pairwise: bool,
+    pub peer: [u8; 6],
+    pub index: u8,
+    /// 16 bytes CCMP, 32 bytes TKIP.
+    pub key: Vec<u8>,
+    /// The receive sequence counter to start from (group keys).
+    pub rsc: u64,
+    /// The first group key since association (the firmware marks keys
+    /// "default" until it has one).
+    pub first: bool,
+}
+
+const KEY_MCAST: u16 = 1 << 0;
+const KEY_UNICAST: u16 = 1 << 1;
+const KEY_ENABLED: u16 = 1 << 2;
+const KEY_DEFAULT: u16 = 1 << 3;
+const KEY_TX: u16 = 1 << 4;
+const KEY_RX: u16 = 1 << 5;
+const KEY_TYPE_TKIP: u8 = 1;
+const KEY_TYPE_AES: u8 = 2;
+
+/// KEY_MATERIAL (set) for `k`, in the layout of key API `major` (2: the
+/// v2 TLV with address, index and receive counter; else the old one).
+pub fn key_material_body(k: &Key, major: u8) -> Vec<u8> {
+    let tkip = k.key.len() == 32;
+    let mut v = ACT_SET.to_le_bytes().to_vec();
+    if major == 2 {
+        let mut info = KEY_ENABLED;
+        info |= if k.pairwise { KEY_UNICAST | KEY_TX | KEY_RX } else { KEY_MCAST | KEY_RX };
+        if k.first {
+            info |= KEY_DEFAULT;
+        }
+        let mut t = k.peer.to_vec();
+        t.push(k.index & 0xf);
+        t.push(if tkip { KEY_TYPE_TKIP } else { KEY_TYPE_AES });
+        t.extend(info.to_le_bytes());
+        t.extend(k.rsc.to_le_bytes());
+        t.extend((k.key.len() as u16).to_le_bytes());
+        let mut key = [0u8; 32];
+        key[..k.key.len().min(32)].copy_from_slice(&k.key[..k.key.len().min(32)]);
+        t.extend(key);
+        push_tlv(&mut v, TLV_KEY_PARAM_V2, &t);
+    } else {
+        let info = KEY_ENABLED | if k.pairwise { KEY_UNICAST } else { KEY_MCAST };
+        let mut t = (if tkip { KEY_TYPE_TKIP } else { KEY_TYPE_AES } as u16).to_le_bytes().to_vec();
+        t.extend(info.to_le_bytes());
+        t.extend((k.key.len() as u16).to_le_bytes());
+        t.extend(&k.key);
+        push_tlv(&mut v, TLV_KEY_MATERIAL, &t);
+    }
+    v
+}
+
+/// The TxPD the firmware wants before each transmitted 802.3 frame (BSS
+/// 0, station): length and offset of the frame, default priority and
+/// rate control.
+pub const TXPD_LEN: usize = 20;
+
+pub fn txpd(frame_len: usize) -> [u8; TXPD_LEN] {
+    let mut t = [0u8; TXPD_LEN];
+    t[2..4].copy_from_slice(&(frame_len as u16).to_le_bytes());
+    t[4..6].copy_from_slice(&(TXPD_LEN as u16).to_le_bytes());
+    t
+}
+
+/// RxPD packet types.
+pub const PKT_TYPE_DATA: u16 = 0;
+pub const PKT_TYPE_MGMT: u16 = 0xe5;
+
+/// A received data packet (after the interface header: RxPD, then an
+/// 802.3 frame with an LLC/SNAP header) as an Ethernet II frame.
+/// None: not a data frame, or malformed.
+pub fn rx_frame(b: &[u8]) -> Option<Vec<u8>> {
+    if b.len() < 12 {
+        return None;
+    }
+    let len = le16(b, 2) as usize;
+    let off = le16(b, 4) as usize;
+    let kind = le16(b, 6);
+    if kind != PKT_TYPE_DATA || off < 12 || off + 14 > b.len() {
+        return None;
+    }
+    let p = &b[off..(off + len).min(b.len())];
+    if p.len() < 14 {
+        return None;
+    }
+    // RFC 1042 (AA AA 03 00 00 00) or bridge tunnel (AA AA 03 00 00 F8)
+    // SNAP: Ethernet II with the SNAP's type.
+    let snap = p.len() >= 22 && p[14..17] == [0xaa, 0xaa, 0x03] && (p[17..20] == [0, 0, 0] || p[17..20] == [0, 0, 0xf8]);
+    let mut f = Vec::with_capacity(p.len());
+    f.extend(&p[..12]);
+    if snap {
+        f.extend(&p[20..]);
+    } else {
+        f.extend(&p[12..]);
+    }
+    Some(f)
+}
+
 pub fn command_name(cmd: u16) -> &'static str {
     match cmd {
         CMD_GET_HW_SPEC => "GET_HW_SPEC",
@@ -503,6 +698,75 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!((v[0].rssi, v[0].channel), (-40, 1));
         assert_eq!((v[1].rssi, v[1].channel, v[1].band()), (-71, 149, "5GHz"));
+    }
+
+    #[test]
+    fn associate_command() {
+        let mut ies = vec![0, 4, b'H', b'o', b'm', b'e', 1, 4, 0x82, 0x84, 0x8b, 0x96, 50, 2, 0x0c, 0x6c, 3, 1, 6];
+        ies.extend([48, 2, 1, 0]);
+        let b = Bss::new([2, 0, 0, 0, 0, 9], -50, 100, 0x0411 | 1 << 15, &ies, 6);
+        let rsn = [48u8, 3, 1, 0, 7];
+        let v = associate_body(&b, Some(&rsn));
+        assert_eq!(&v[..6], &[2, 0, 0, 0, 0, 9]);
+        assert_eq!(&v[6..13], &[0x11, 0x04, 10, 0, 100, 0, 0]);
+        let t: Vec<_> = tlvs(&v[13..]).collect();
+        assert_eq!(t[0], (0, &b"Home"[..]));
+        assert_eq!(t[1], (3, &[6][..]));
+        assert_eq!(t[2], (4, &[0u8; 6][..]));
+        assert_eq!(t[3], (TLV_SUPP_RATES, &[0x82, 0x84, 0x8b, 0x96, 0x0c, 0x6c][..]));
+        assert_eq!(t[4], (TLV_AUTH_TYPE, &[0, 0][..]));
+        assert_eq!(t[5], (TLV_CHANLIST, &[0, 6, 0, 0, 0, 0, 0][..]));
+        assert_eq!(t[6], (48, &[1, 0, 7][..]));
+        assert_eq!(associate_result(&[0x11, 0, 0, 0, 1, 0xc0]), Some((0x11, 0, 1)));
+    }
+
+    #[test]
+    fn key_material() {
+        let k = Key { pairwise: true, peer: [1, 2, 3, 4, 5, 6], index: 0, key: vec![0xab; 16], rsc: 0, first: true };
+        let v = key_material_body(&k, 2);
+        assert_eq!(&v[..2], &[1, 0]);
+        let (t, b) = tlvs(&v[2..]).next().unwrap();
+        assert_eq!((t, b.len()), (TLV_KEY_PARAM_V2, 52));
+        assert_eq!(&b[..10], &[1, 2, 3, 4, 5, 6, 0, KEY_TYPE_AES, 0x3e, 0]);
+        assert_eq!(&b[18..20], &[16, 0]);
+        assert_eq!(b[20], 0xab);
+        let g = Key { pairwise: false, peer: [0xff; 6], index: 1, key: vec![7; 16], rsc: 5, first: false };
+        let b = key_material_body(&g, 2);
+        assert_eq!(&b[4 + 2 + 6..4 + 2 + 12], &[1, KEY_TYPE_AES, 0x25, 0, 5, 0]);
+        let v1 = key_material_body(&g, 1);
+        let (t, b) = tlvs(&v1[2..]).next().unwrap();
+        assert_eq!(t, TLV_KEY_MATERIAL);
+        assert_eq!(&b[..6], &[KEY_TYPE_AES, 0, 0x05, 0, 16, 0]);
+        assert_eq!(b.len(), 22);
+    }
+
+    #[test]
+    fn hw_spec_key_api() {
+        let mut b = vec![0u8; HW_SPEC_LEN];
+        push_tlv(&mut b, TLV_API_REV, &[2, 0, 9, 9]);
+        push_tlv(&mut b, TLV_API_REV, &[1, 0, 2, 1]);
+        assert_eq!(key_api_version(&b), (2, 1));
+        assert_eq!(key_api_version(&b[..HW_SPEC_LEN]), (0, 0));
+    }
+
+    #[test]
+    fn data_frames() {
+        assert_eq!(txpd(60), [0, 0, 60, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // RxPD (offset 20), 802.3 header, SNAP, ARP payload.
+        let mut b = vec![0u8; 20];
+        let mut p = vec![0xff; 6];
+        p.extend([2, 0, 0, 0, 0, 1]);
+        p.extend([0, 10]);
+        p.extend([0xaa, 0xaa, 3, 0, 0, 0, 0x08, 0x06]);
+        p.extend([1, 2]);
+        b[2..4].copy_from_slice(&(p.len() as u16).to_le_bytes());
+        b[4] = 20;
+        b.extend(&p);
+        let f = rx_frame(&b).unwrap();
+        assert_eq!(f.len(), 16);
+        assert_eq!(&f[12..], &[0x08, 0x06, 1, 2]);
+        b[6] = 0xe5;
+        assert_eq!(rx_frame(&b), None);
     }
 
     #[test]
