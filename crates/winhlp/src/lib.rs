@@ -162,11 +162,15 @@ pub struct Options<'a> {
     pub max_contents: usize,
     /// Keep the IPF source in [`Converted::source`].
     pub keep_source: bool,
+    /// Cut words after this many letters and digits (0: never), so that
+    /// fewer different words fill the IPF dictionary (at most 65535);
+    /// [`convert()`] does this by itself when the dictionary overflows.
+    pub split_words: usize,
 }
 
 impl Default for Options<'_> {
     fn default() -> Self {
-        Options { name: None, max_contents: 400, keep_source: false }
+        Options { name: None, max_contents: 400, keep_source: false, split_words: 0 }
     }
 }
 

@@ -47,12 +47,13 @@ impl Phrases {
         Some(Phrases { offs, text, hall: false })
     }
 
-    /// Hall compression: `|PhrIndex` (a 30 byte header: u32 magic, u32
+    /// Hall compression: `|PhrIndex` (a 28 byte header: u32 magic, u32
     /// count, u32 compressed size, u32 size of `|PhrImage` decompressed,
     /// u32 its compressed size, u32 0, u16 bit count in its low 4 bits,
     /// u16), then the phrase lengths as a bit stream (bit 0 of each u32
-    /// first): unary multiples of 2^bits, then bits low bits); `|PhrImage`
-    /// the phrases (LZ77 when its compressed size is less than its size).
+    /// first): 1 + unary multiples of 2^bits, then the low bits (at
+    /// least one); `|PhrImage` the phrases (LZ77 when its compressed
+    /// size is less than its size). No file at hand uses it: untested.
     pub fn hall(index: &[u8], image: &[u8]) -> Option<Self> {
         let n = u32_at(index, 4)? as usize;
         let size = u32_at(index, 12)? as usize;
@@ -74,7 +75,10 @@ impl Phrases {
             while bit()? {
                 len += 1 << bits;
             }
-            for k in 0..bits {
+            if bit()? {
+                len += 1;
+            }
+            for k in 1..bits {
                 if bit()? {
                     len += 1 << k;
                 }

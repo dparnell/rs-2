@@ -281,6 +281,21 @@ fn picture_hotspots() {
     assert!(areas > 100, "{areas}");
 }
 
+/// Words cut into pieces (what a dictionary overflow makes the
+/// conversion do) show as before.
+#[test]
+fn split_words() {
+    let Some(d) = media(&[BIN, "HELPEX.HLP"].concat()) else { return };
+    let whole = convert(&d).unwrap();
+    let cut = convert_with(&d, &Options { split_words: 3, ..Default::default() }).unwrap();
+    let (a, b) = (Doc::parse(&whole.ipf).unwrap(), Doc::parse(&cut.ipf).unwrap());
+    for i in 0..b.header.dict_count {
+        assert!(b.word(i).len() <= 3);
+    }
+    let r = whole.context(b"x_topic3").unwrap();
+    assert_eq!(render(&a, r), render(&b, r));
+}
+
 /// Metafiles are drawn: HELPEX.HLP's window definition diagram has its
 /// lines, text and the two colour squares.
 #[test]

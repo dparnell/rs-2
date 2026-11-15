@@ -343,7 +343,15 @@ struct Writer<'c, 'h, 'a> {
     table_ended: bool,
     pics: &'c RefCell<Pics>,
     centred_pic: bool,
+    /// Letters and digits written since the last other character.
+    run: usize,
+    /// The text reached [`TOPIC_MAX`].
+    truncated: bool,
 }
+
+/// Most IPF source a topic makes (a panel's cells must fit its TOC
+/// entry: about a megabyte of text); the rest is left out.
+const TOPIC_MAX: usize = 512 * 1024;
 
 /// The pictures the topics use, by name: `bmN` files and embedded
 /// ones (`E<n>`), decoded when the compiler loads them.
@@ -375,11 +383,14 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
             table_ended: false,
             pics,
             centred_pic: false,
+            run: 0,
+            truncated: false,
         }
     }
 
     fn put(&mut self, s: &[u8]) {
         self.out.extend_from_slice(s);
+        self.run = 0;
     }
 
     fn line(&mut self) {
@@ -492,6 +503,16 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                 if self.plain.len() < 80 {
                     self.plain.push(b);
                 }
+                // Long words cut into pieces (glued again by the
+                // compiler) when the dictionary would overflow.
+                if b.is_ascii_alphanumeric() || b >= 0x80 {
+                    if self.c.opts.split_words > 0 && self.run >= self.c.opts.split_words {
+                        self.put(format!(":color fc={}.", COLOUR_NAMES[self.colour as usize]).as_bytes());
+                    }
+                    self.run += 1;
+                } else {
+                    self.run = 0;
+                }
                 match b {
                     b':' => self.put(b"&colon."),
                     b'&' => self.put(b"&amp."),
@@ -532,6 +553,15 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
     }
 
     fn event(&mut self, e: Ev<'_>) {
+        if self.truncated {
+            return;
+        }
+        if self.out.len() > TOPIC_MAX {
+            self.truncated = true;
+            self.end_link();
+            self.put(b"\n:p.(The rest of this topic is left out.)");
+            return;
+        }
         match e {
             Ev::Table(cols) => {
                 self.end_link();
@@ -775,17 +805,36 @@ fn line_text(s: &[u8], max: usize) -> Vec<u8> {
     t[..t.len().min(max)].to_vec()
 }
 
+/// Convert; when the IPF dictionary overflows (more than 65535
+/// different words), again with long words cut into pieces.
 pub fn convert(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
+    let mut r = convert_once(data, opts);
+    for split in [8, 4, 2] {
+        match &r {
+            Err(Error::Compile { msg, .. }) if msg.starts_with("too many words") && (opts.split_words == 0 || opts.split_words > split) => {
+                let o = Options { split_words: split, ..opts.clone() };
+                r = convert_once(data, &o).map(|mut c| {
+                    c.warnings.push(format!("more than 65535 different words: words cut after {split} letters"));
+                    c
+                });
+            }
+            _ => break,
+        }
+    }
+    r
+}
+
+fn convert_once(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
     let mut h = Help::parse(data)?;
     let mut warnings: Vec<String> = Vec::new();
     let n = h.list.len();
     if n == 0 {
         return Err(Error::Invalid("no topics"));
     }
-    // res = topic index + 1, so at most 65534 topics.
-    let count = n.min(0xfffe);
+    // The compiler takes at most 32767 panels.
+    let count = n.min(0x7fff);
     if count < n {
-        warnings.push(format!("{} topics past the 65534th left out", n - count));
+        warnings.push(format!("{} topics past the 32767th left out", n - count));
     }
     let mut contexts: Vec<(u32, usize)> = h.contexts().into_iter().filter_map(|(hv, o)| Some((hv, h.topic_at(o)?))).collect();
     contexts.sort_unstable();
@@ -879,6 +928,9 @@ pub fn convert(data: &[u8], opts: &Options<'_>) -> Result<Converted, Error> {
             let _ = decode(kind, d1, d2, &mut |e| w.event(e));
         });
         w.end_link();
+        if w.truncated {
+            warnings.push(format!("topic {} cut at {} KB of IPF source", i + 1, TOPIC_MAX / 1024));
+        }
         let mut t = line_text(&h.list[i].title, 120);
         if t.is_empty() {
             t = line_text(&w.plain, 60);
