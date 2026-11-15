@@ -233,7 +233,11 @@ fn send_common(c: &mut Ctx, to: Option<Endpoint>, out: u32) -> u32 {
             None => return EFAULT,
         }
     };
-    match so::send(pid(c), s, &data, flags, to) {
+    let r = so::send(pid(c), s, &data, flags, to);
+    if c.trace {
+        crate::trace!("    send socket {s} {len} bytes flags {flags:#x} -> {r:?}");
+    }
+    match r {
         Ok(n) => {
             c.write_u32(out, n as u32);
             0
@@ -259,7 +263,14 @@ pub fn send_to(c: &mut Ctx) -> u32 {
 
 fn recv_common(c: &mut Ctx, from_at: u32, out: u32) -> u32 {
     let (s, buf, len, flags) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
-    match so::recv(pid(c), s, len.min(MAX_IO) as usize, flags) {
+    let r = so::recv(pid(c), s, len.min(MAX_IO) as usize, flags);
+    if c.trace {
+        match &r {
+            Ok((d, _)) => crate::trace!("    recv socket {s} {len} flags {flags:#x} -> {} bytes {:02x?}", d.len(), &d[..d.len().min(8)]),
+            Err(e) => crate::trace!("    recv socket {s} {len} flags {flags:#x} -> error {e}"),
+        }
+    }
+    match r {
         Ok((data, from)) => {
             if !data.is_empty() && !c.write(buf, &data) {
                 return EFAULT;

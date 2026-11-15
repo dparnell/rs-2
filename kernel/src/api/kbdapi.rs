@@ -17,6 +17,15 @@ const ERROR_KBD_INVALID_LENGTH: u32 = 376;
 const ERROR_KBD_INVALID_ECHO_MASK: u32 = 377;
 const ERROR_KBD_INVALID_INPUT_MASK: u32 = 378;
 const ERROR_KBD_INVALID_CODEPAGE: u32 = 448;
+const ERROR_KBD_DETACHED: u32 = 464;
+
+/// A detached process (DETACH, EXEC_BACKGROUND) has no keyboard: its
+/// keyboard reads fail with ERROR_KBD_DETACHED, as on OS/2. Open Watcom's
+/// TCPSERV polls for its 'q' key and, detached, took the line typed at the
+/// prompt it was started from.
+fn detached(c: &Ctx) -> bool {
+    c.process.background.load(core::sync::atomic::Ordering::Relaxed) && c.process.exe.app_type & 7 != 3
+}
 
 fn sid() -> u32 {
     crate::session::io_session()
@@ -43,6 +52,9 @@ pub fn kbd_char_in(c: &mut Ctx) -> u32 {
     if wait > 1 {
         return ERROR_KBD_INVALID_IOWAIT;
     }
+    if detached(c) {
+        return ERROR_KBD_DETACHED;
+    }
     if let Err(e) = conkbd::may_read(sid(), h) {
         return e;
     }
@@ -54,6 +66,9 @@ pub fn kbd_char_in(c: &mut Ctx) -> u32 {
 /// KbdPeek(pkbci, hkbd): fbStatus 0 when no key is waiting.
 pub fn kbd_peek(c: &mut Ctx) -> u32 {
     let (p, h) = (c.ptr(0), c.arg(1) as u16);
+    if detached(c) {
+        return ERROR_KBD_DETACHED;
+    }
     if let Err(e) = conkbd::may_read(sid(), h) {
         return e;
     }
@@ -69,6 +84,9 @@ pub fn kbd_string_in(c: &mut Ctx) -> u32 {
     let (p, pin, wait, h) = (c.ptr(0), c.ptr(1), c.arg(2), c.arg(3) as u16);
     if wait > 1 {
         return ERROR_KBD_INVALID_IOWAIT;
+    }
+    if detached(c) {
+        return ERROR_KBD_DETACHED;
     }
     let Some(cb) = c.read_u16(pin) else { return err::INVALID_ADDRESS };
     if cb == 0 || cb > 255 {

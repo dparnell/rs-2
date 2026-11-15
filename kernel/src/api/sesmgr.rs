@@ -117,6 +117,15 @@ fn wants_window(ty: u16, app: u32, caller: u32) -> bool {
 /// The caller's session counts as the foreground one: it is, or it is a
 /// windowed session (or PM) while PM is in front.
 fn caller_in_front(caller: u32) -> bool {
+    // A detached process (TCPSERV started by DETACH) is never in front: its
+    // DosStartSession starts the session in the background (457), as on
+    // OS/2. rs2's PM server (a PM program started in the background) is
+    // the window list's owner and counts as PM's.
+    if let Some(p) = crate::task::sched::current().process() {
+        if p.background.load(Ordering::Relaxed) && p.exe.app_type & 7 != 3 {
+            return false;
+        }
+    }
     let fg = session::foreground();
     fg == caller || (fg != 0 && fg == session::pm_session() && (caller == fg || session::is_windowed(caller)))
 }

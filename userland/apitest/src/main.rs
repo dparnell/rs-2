@@ -57,6 +57,9 @@ fn main(s: &Startup) -> u32 {
     if s.args().trim_ascii() == b"pmchild" {
         return pm_child();
     }
+    if s.args().trim_ascii() == b"detsess" {
+        return detached_session();
+    }
     if s.args().trim_ascii() == b"dllrn" {
         return dll_renamed_child();
     }
@@ -738,6 +741,75 @@ fn sessions() {
         check("stop ended session fails", DosStopSession(0, sid) == 371);
         DosCloseQueue(hq);
     }
+    // A detached process starts its sessions in the background
+    // (ERROR_SMG_START_IN_BACKGROUND): Open Watcom's TCPSERV, started by
+    // DETACH, put the debuggee's empty session in front of the debugger.
+    let mut pib = null_mut();
+    let mut tib = null_mut();
+    let mut path = [0u8; 260];
+    unsafe {
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr());
+    }
+    let n = path.iter().position(|&c| c == 0).unwrap_or(0);
+    let mut args = [0u8; 300];
+    args[..n].copy_from_slice(&path[..n]);
+    args[n + 1..n + 9].copy_from_slice(b"detsess\0");
+    let _ = unsafe { DosDelete(b"C:\\DETSESS.OUT\0".as_ptr()) };
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { DosExecPgm(null_mut(), 0, 4, args.as_ptr(), null(), &mut res, path.as_ptr()) };
+    let mut got = [0u8; 8];
+    let mut ok_read = false;
+    for _ in 0..50 {
+        unsafe { DosSleep(100) };
+        let mut h = 0;
+        let mut act = 0;
+        if unsafe { DosOpen(b"C:\\DETSESS.OUT\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x40, null_mut()) } == 0 {
+            let mut n = 0;
+            unsafe { DosRead(h, got.as_mut_ptr(), 8, &mut n) };
+            unsafe { DosClose(h) };
+            ok_read = n == 8;
+            if ok_read {
+                break;
+            }
+        }
+    }
+    let r = u32::from_le_bytes([got[0], got[1], got[2], got[3]]);
+    check(&alloc::format!("a detached process's DosStartSession starts in the background (457, got {r})"), rc == 0 && ok_read && r == 457);
+    let k = u32::from_le_bytes([got[4], got[5], got[6], got[7]]);
+    check(&alloc::format!("a detached process has no keyboard: KbdPeek gives ERROR_KBD_DETACHED (464, got {k})"), ok_read && k == 464);
+    let _ = unsafe { DosDelete(b"C:\\DETSESS.OUT\0".as_ptr()) };
+}
+
+/// `APITEST detsess` (run detached): start a session that ends at once and
+/// write DosStartSession's return code to C:\DETSESS.OUT.
+fn detached_session() -> u32 {
+    unsafe {
+        let sd = StartData {
+            length: core::mem::size_of::<StartData>() as u16,
+            related: 0,
+            fgbg: 0,
+            trace: 0,
+            title: b"apitest detached\0".as_ptr(),
+            name: b"C:\\OS2\\CMD.EXE\0".as_ptr(),
+            inputs: b"/C exit 0\0".as_ptr(),
+            termq: null(),
+            env: null(),
+            inherit: 0,
+            session_type: 0,
+        };
+        let (mut sid, mut pid) = (0, 0);
+        let rc = DosStartSession(&sd, &mut sid, &mut pid);
+        let mut h = 0;
+        let mut act = 0;
+        DosOpen(b"C:\\DETSESS.OUT\0".as_ptr(), &mut h, &mut act, 0, 0, 0x12, 0x12, null_mut());
+        let mut w = 0;
+        DosWrite(h, rc.to_le_bytes().as_ptr(), 4, &mut w);
+        let k = console::kbd_peek_rc() as u32;
+        DosWrite(h, k.to_le_bytes().as_ptr(), 4, &mut w);
+        DosClose(h);
+    }
+    0
 }
 
 /// CMD's SET BEGINLIBPATH is the process's extended LIBPATH (IBM CMD

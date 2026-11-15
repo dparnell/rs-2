@@ -129,7 +129,12 @@ fn exec(c: &mut Ctx) -> u32 {
         traced: mode == EXEC_TRACE || mode == EXEC_ASYNCRESULTDB,
     });
     let child = match r {
-        Ok(p) => p,
+        Ok(p) => {
+            if mode == EXEC_BACKGROUND || c.process.background.load(Ordering::Relaxed) {
+                p.background.store(true, Ordering::Relaxed);
+            }
+            p
+        }
         Err(e) => {
             // The module that failed: a missing DLL or the one lacking an
             // import, else the program itself.

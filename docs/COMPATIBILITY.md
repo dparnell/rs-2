@@ -1053,7 +1053,7 @@ from the code whatever the system does):
 | Help books (`BINP\HELP\*.INF`) in VIEW, `wipfc` | works | The C/C++ User's Guide opens with its contents; a book compiled by wipfc on rs2 too. |
 | BINW Windows tools on WIN16 | works | `viw` (the file in its MDI child, tool bar, status line), `wimgedit` (tool and colour palettes), `wre`, `wzoom` (magnifying), `wheapwlk` start as with 1.9. `wde` and `wddespy` were not tried (another session works on their 1.9 versions). |
 | Remote debugging over named pipes | fails | Open Watcom's link name bug above: `wd -tr=nmp` asks NMPBIND, gets its answer, then retries opening `TCN` for ever. |
-| Remote debugging over TCP/IP | partial | `tcpserv` listens, `wd -tr=tcp;127.0.0.1` connects and TCPSERV starts HELLO.EXE under DosDebug; the debugger then waits in a socket receive and its screen stays black (not followed further; Open Watcom 1.9's TCP link works on rs2). |
+| Remote debugging over TCP/IP | works | `detach tcpserv`, then `wd -tr=tcp;127.0.0.1 hello.exe` from the same prompt: the debugger connects, TCPSERV starts HELLO.EXE under DosDebug, the debugger stops in `main`, steps (F10) and runs it to its end ("The task has completed running"); with a `-hw` program there are no source lines (Open Watcom's closed-file bug above). Two rs2 bugs were in the way (below). |
 
 Fixed for it:
 
@@ -1076,6 +1076,14 @@ Fixed for it:
   came up in another order after the next start (`WPSTEST SHELL ICONPOS
   C:\DESKTOP DRIVES`). Long titles (four lines) still reach into the
   next row on the desktop's grid.
+- Detached processes (`DETACH`, EXEC_BACKGROUND, and what they start)
+  start their sessions in the background (`DosStartSession` returns
+  ERROR_SMG_START_IN_BACKGROUND, 457) and have no keyboard (`KbdCharIn`,
+  `KbdPeek`, `KbdStringIn` fail with ERROR_KBD_DETACHED, 464), as on
+  OS/2: a detached TCPSERV brought the debuggee's empty session in front
+  of the debugger (the "hang") and took the command line typed at the
+  prompt it was detached from (APITEST; rs2's PM server, a PM program
+  started in the background, is not affected).
 
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 
