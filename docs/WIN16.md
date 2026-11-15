@@ -1221,6 +1221,10 @@ What they needed (W16TEST checks each):
   went to FMEDIT's selection window, and the editor then asked a
   dragged object's parent (an action that object does not answer),
   used the uninitialized pointer and faulted.
+- **SetWindowLong(GWL_STYLE)** setting or clearing WS_VISIBLE shows or
+  hides the window (without WM_SHOWWINDOW, as on Windows): the Dialog
+  Editor shows the dialogs it reads from a .RES or .DLG so, and drew
+  nothing after File > Open.
 - **The desktop window** (GetDesktopWindow's 0 here) has the screen as
   its window and client rectangle: the Dialog Editor puts its toolbox
   where it intersects the desktop's, and placed it off the screen.

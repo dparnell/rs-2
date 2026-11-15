@@ -708,6 +708,18 @@ static void stage2_tests(HINSTANCE hInst)
         check(r.left == 0 && r.top == 0 && r.right == GetSystemMetrics(SM_CXSCREEN) && r.bottom == GetSystemMetrics(SM_CYSCREEN),
               "GetWindowRect(GetDesktopWindow()): the screen");
     }
+    {
+        /* WS_VISIBLE set with SetWindowLong shows the window (the Dialog
+         * Editor shows the dialogs it reads so). */
+        HWND top = CreateWindow("OdMenu", "W16TEST style", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 200, 150, NULL, NULL, hInst, NULL);
+        HWND kid = CreateWindow("BUTTON", "x", WS_CHILD, 5, 5, 50, 20, top, NULL, hInst, NULL);
+        BOOL before = IsWindowVisible(kid);
+        SetWindowLong(kid, GWL_STYLE, GetWindowLong(kid, GWL_STYLE) | WS_VISIBLE);
+        check(!before && IsWindowVisible(kid), "SetWindowLong(GWL_STYLE) with WS_VISIBLE shows the window");
+        SetWindowLong(kid, GWL_STYLE, GetWindowLong(kid, GWL_STYLE) & ~WS_VISIBLE);
+        check(!IsWindowVisible(kid), "and without it hides it");
+        DestroyWindow(top);
+    }
 }
 
 
