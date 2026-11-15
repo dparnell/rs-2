@@ -473,19 +473,49 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     phys_top = phys_top.max(info.framebuffer.base + info.framebuffer.size);
     let pml4 = build_page_tables(&kernel, phys_top);
 
+    // `bootdiag`: what the kernel will be handed, while the firmware can
+    // still print it, then a square for each step after (bootdiag.rs in
+    // the kernel draws the rest).
+    let diag = bootinfo::diag_on(info.cmdline());
+    if diag {
+        let fb = &info.framebuffer;
+        println!(
+            "  framebuffer {}x{} stride {} format {} at {:#x} ({:#x} bytes){}",
+            fb.width,
+            fb.height,
+            fb.stride,
+            fb.format,
+            fb.base,
+            fb.size,
+            if fb.base == 0 { ": none usable, the kernel will show nothing" } else { "" }
+        );
+        println!("  memory up to {:#x}, page tables at {:#x}, stack top {:#x}, info at {:#x}", phys_top, pml4, stack_top, info_phys);
+        println!("  bootdiag: squares at the top: blue = loader, green (every 5th yellow) = kernel stages");
+    }
     println!("  exiting boot services");
     let (mut size, mut key, mut dsize, mut ver);
+    // The map changes between the two calls only if the firmware does
+    // something meanwhile; a few tries, not forever.
+    let mut tries = 0;
     loop {
         size = map_buf.len();
         key = 0;
         dsize = 0;
         ver = 0;
         check((bs().get_memory_map)(&mut size, map_buf.as_mut_ptr(), &mut key, &mut dsize, &mut ver), "GetMemoryMap");
-        if (bs().exit_boot_services)(image, key) == SUCCESS {
+        let status = (bs().exit_boot_services)(image, key);
+        if status == SUCCESS {
             break;
+        }
+        tries += 1;
+        if tries == 16 {
+            panic!("ExitBootServices failed 16 times, last status {status:#x}");
         }
     }
     // No firmware calls from here on.
+    if diag {
+        bootinfo::diag_square(&info.framebuffer, 0, 0, 0x0060ff);
+    }
     let mut count = 0;
     for i in 0..size / dsize {
         let d = unsafe { &*(map_buf.as_ptr().add(i * dsize) as *const MemoryDescriptor) };
@@ -515,6 +545,9 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
         }
     }
     info.memory_count = count as u64;
+    if diag {
+        bootinfo::diag_square(&info.framebuffer, 0, 1, 0x0060ff);
+    }
 
     unsafe {
         core::arch::asm!(

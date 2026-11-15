@@ -11,6 +11,7 @@ mod acpi;
 mod aml;
 mod api;
 mod apic;
+mod bootdiag;
 mod arch;
 mod audio;
 mod bench;
@@ -78,40 +79,64 @@ pub fn boot_info() -> &'static BootInfo {
 }
 
 extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
+    // `bootdiag`: a square per stage on the framebuffer (bootdiag.rs).
+    bootdiag::init(info);
+    bootdiag::stage("kernel entered");
     serial::init();
     serial::write_str("rs2 kernel starting\n");
+    bootdiag::stage("serial");
     assert_eq!(info.magic, bootinfo::MAGIC, "bad boot info");
     unsafe { BOOT_INFO = info };
     screen::init(info.framebuffer);
     println!("rs2 - OS/2 Warp compatible kernel, version {}", env!("CARGO_PKG_VERSION"));
     let fb = &info.framebuffer;
     println!("framebuffer {}x{} at {:#x}", fb.width, fb.height, fb.base);
+    if !serial::present() {
+        println!("serial: no UART at COM1; the log goes to the screen and the log ring only");
+    }
+    bootdiag::stage("screen");
     arch::gdt::init();
+    bootdiag::stage("gdt");
     smp::init_bsp();
+    bootdiag::stage("smp::init_bsp");
     arch::idt::init();
     arch::init_fpu();
+    bootdiag::stage("idt, fpu");
     mm::init(info);
+    bootdiag::stage("mm");
     acpi::init(info.rsdp);
+    bootdiag::stage("acpi");
     rtc::start();
+    bootdiag::stage("rtc");
     irq::init();
+    bootdiag::stage("irq");
     task::sched::init();
     fs::init(info);
+    bootdiag::stage("sched, fs");
     vmware::init();
     if info.cmdline().split_whitespace().any(|w| w == "nocache") {
         fs::cache::DISABLED.store(true, core::sync::atomic::Ordering::Relaxed);
     }
+    bootdiag::stage("vmware");
     drivers::init();
+    bootdiag::stage("drivers");
     fs::cdaudio::simulate();
     loader::init();
     infoseg::init();
     api::perf::init();
+    bootdiag::stage("loader, infoseg, perf");
     kbd::init();
+    bootdiag::stage("kbd");
     mouse::init();
+    bootdiag::stage("mouse");
     chardev::init();
+    bootdiag::stage("chardev");
     arch::enable_interrupts();
+    bootdiag::stage("interrupts on");
     if !apic::init() {
         println!("apic: not available, using the 8259 PICs");
     }
+    bootdiag::stage("apic");
 
     let cmdline = info.cmdline();
     println!("command line: {cmdline}");
@@ -126,6 +151,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
         api::debug::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
     smp::start_aps();
+    bootdiag::stage("other CPUs");
     msi::start();
     drivers::hotplug::start();
     session::start();
@@ -133,6 +159,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     bench::start(cmdline);
     klog::start_bootlog();
     crash::start_test();
+    bootdiag::stage("kernel threads");
     // CONFIG.SYS and the first programs on a kernel thread of their own:
     // they read files and take locks, and an idle thread must never wait
     // for anything (it would run only when its CPU has nothing else to
@@ -206,7 +233,9 @@ pub mod boot {
         if let Some(n) = bootinfo::video_colors(cmdline) {
             crate::display::set_colors256(n == 256);
         }
+        crate::bootdiag::stage("boot thread");
         let cfg = crate::config::load().unwrap_or_default();
+        crate::bootdiag::stage("CONFIG.SYS read");
         crate::config::apply_memory(&cfg);
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);
@@ -216,6 +245,7 @@ pub mod boot {
             crate::fs::set_libpath(lp);
         }
         start_network(cmdline, cfg.network.as_deref());
+        crate::bootdiag::stage("network");
         let mut env = default_env();
         for e in &cfg.env {
             let key = e.split('=').next().unwrap_or("");
@@ -261,6 +291,7 @@ pub mod boot {
         }
         // Before anything else writes to them: what is on them may be half
         // done. The drives the IFS lines do not list only get a warning.
+        crate::bootdiag::stage("SYSDLLS, RUN=");
         let listed = crate::config::autocheck(&cfg);
         let mut checks = Vec::new();
         // As found when mounted: the flag on the disk is up by now if
@@ -278,7 +309,9 @@ pub mod boot {
         queue.push_back((shell_path.clone(), shell.1.clone()));
         let restart = init.is_none();
         *STATE.lock() = Some(Boot { env, queue, shell: (shell_path, shell.1), current: 0, restart, checks: checks.len(), background });
+        crate::bootdiag::stage("starting programs");
         next();
+        crate::bootdiag::stage("first program started");
     }
 
     /// Networking as `net=` on the command line, else NETWORK= in

@@ -151,3 +151,42 @@ pub fn video_colors(cmdline: &str) -> Option<u32> {
         c.parse().ok()
     }
 }
+
+/// Whether the command line has `word` (any case).
+pub fn has_word(cmdline: &str, word: &str) -> bool {
+    cmdline.split_whitespace().any(|w| w.eq_ignore_ascii_case(word))
+}
+
+/// `bootdiag` or `bootdiag=N` (stop after stage N) is on the command line.
+pub fn diag_on(cmdline: &str) -> bool {
+    cmdline.split_whitespace().any(|w| w.eq_ignore_ascii_case("bootdiag") || w.starts_with("bootdiag="))
+}
+
+/// `bootdiag` squares the loader draws (the kernel's come after them).
+pub const DIAG_LOADER_SQUARES: u32 = 2;
+
+/// `bootdiag`: draw square `n` (0 = the leftmost) of the progress row at
+/// the top of the framebuffer (right-aligned), colour `rgb` (0xRRGGBB). `map` is
+/// where physical memory is mapped (0 in the loader, identity mapped).
+/// Squares are 16 pixels with 4 between; a row holds 48, then the next row.
+pub fn diag_square(fb: &Framebuffer, map: u64, n: u32, rgb: u32) {
+    const SIZE: u32 = 16;
+    const STEP: u32 = 20;
+    const PER_ROW: u32 = 48;
+    if fb.base == 0 || fb.width < PER_ROW * STEP + 16 || fb.height < 4 * STEP + 16 {
+        return;
+    }
+    let (r, g, b) = ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+    let px = if fb.format == 0 { r | g << 8 | b << 16 } else { b | g << 8 | r << 16 };
+    let x0 = fb.width - 8 - PER_ROW * STEP + (n % PER_ROW) * STEP;
+    let y0 = 8 + (n / PER_ROW).min(3) * STEP;
+    let base = (map + fb.base) as *mut u32;
+    for y in y0..y0 + SIZE {
+        for x in x0..x0 + SIZE {
+            // A white frame, so a square shows on any background.
+            let edge = y == y0 || y == y0 + SIZE - 1 || x == x0 || x == x0 + SIZE - 1;
+            let off = y as usize * fb.stride as usize + x as usize;
+            unsafe { base.add(off).write_volatile(if edge { 0x00ff_ffff } else { px }) };
+        }
+    }
+}

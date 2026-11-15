@@ -157,6 +157,7 @@ pub fn init() {
     // USB storage comes after the built-in drives.
     let (mut usb_disks, mut usb_optical) = (Vec::new(), Vec::new());
     for d in &devs {
+        crate::bootdiag::note(format_args!("pci {:02x}:{:02x}.{} class {:02x}{:02x}{:02x} {:04x}:{:04x}", d.bus, d.dev, d.func, d.class, d.subclass, d.progif, d.vendor, d.device));
         // USB disks are shown under their USB device (xhci::probe).
         let seen = (disks.len(), optical.len());
         if (d.class, d.subclass, d.progif) == (1, 6, 1) {

@@ -35,7 +35,7 @@ The SP4 has no serial port. Done (2026-11-15):
   `\RS2\KERNEL` that is not the RAM C: or a CD: on a live USB stick, the
   stick's EFI partition) every 5 s while the log grows. Make the stick
   with
-  `cargo xtask iso --dist -o work/rs2-live.iso --cmdline bootlog`. Nothing
+  `cargo xtask iso --dist -o work/rs2-live.iso --cmdline 'bootlog bootdiag'`. Nothing
   is written from a crashed kernel, so the file can miss the last
   seconds; the QR code below has them. Nor to a boot volume that was not
   shut down cleanly until AUTOCHECK's CHKDSK /F has been over it (a line
@@ -53,6 +53,30 @@ The SP4 has no serial port. Done (2026-11-15):
   `tools/scripts/qrdecode.swift`). The screen code allocates nothing and
   takes no lock another CPU may hold. At 2736x1824 the code is drawn at
   about 6 pixels per module.
+- **`bootdiag`** (2026-11-15; the first live stick stopped with the
+  loader's text on screen, after "exiting boot services", and nothing
+  else): the loader prints the framebuffer it found (size, stride, pixel
+  format, address; "none usable" if GOP gave none the kernel can draw
+  on), the top of memory and where the page tables, stack and boot info
+  are, then gives up after 16 failed ExitBootServices instead of looping.
+  Then every stage draws the next 16-pixel square in a row at the top of
+  the framebuffer, straight into its pixels, so even a hang before the
+  kernel's screen works shows how far boot got: blue = the loader
+  (0 boot services left, 1 jumping to the kernel), green with every
+  fifth yellow = kernel stages, which also print `bootdiag: N name` once
+  the screen works (and `bootdiag: pci ...` for each PCI function before
+  its driver probes it). `bootdiag=N` stops after square N, to
+  photograph the kernel's text before the desktop covers it. The squares:
+  0-1 loader, 2 kernel entered, 3 serial, 4 screen, 5 gdt,
+  6 smp::init_bsp, 7 idt and fpu, 8 mm, 9 acpi, 10 rtc, 11 irq,
+  12 sched and fs, 13 vmware, 14 drivers, 15 loader/infoseg/perf, 16 kbd,
+  17 mouse, 18 chardev, 19 interrupts on, 20 apic, 21 other CPUs,
+  22 kernel threads, 23 boot thread, 24 CONFIG.SYS read, 25 network,
+  26 SYSDLLS/RUN=, 27 starting programs, 28 first program started
+  (`bootdiag.rs`; a QEMU boot with `bootdiag` prints the current list).
+- **No UART, no wait**: the kernel log checks COM1's scratch register at
+  boot and skips the port when nothing answers. A missing port that reads
+  00h made every logged byte wait out the "transmitter empty" timeout.
 - **`crashtest=panic|trap[,SECONDS]`** crashes on purpose (default after
   5 s), to try the crash screen on a new machine first.
 - **`cargo xtask run --bare`**: q35 without the PS/2 controller and HPET,

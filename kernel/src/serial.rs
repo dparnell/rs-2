@@ -4,7 +4,27 @@ use crate::arch::{inb, outb};
 
 const COM1: u16 = 0x3f8;
 
+/// A UART answers at COM1. Machines without one (the Surface Pro 4) may
+/// read 00h from the port: then every byte waited the full timeout below
+/// for "transmitter empty", and printing looked like a hung boot.
+static PRESENT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn present() -> bool {
+    PRESENT.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn init() {
+    // The scratch register keeps what is written to it (16450 and later).
+    let found = unsafe {
+        outb(COM1 + 7, 0x5a);
+        let a = inb(COM1 + 7);
+        outb(COM1 + 7, 0xa5);
+        a == 0x5a && inb(COM1 + 7) == 0xa5
+    };
+    PRESENT.store(found, core::sync::atomic::Ordering::Relaxed);
+    if !found {
+        return;
+    }
     unsafe {
         outb(COM1 + 1, 0x00); // no interrupts
         outb(COM1 + 3, 0x80); // DLAB
@@ -21,6 +41,9 @@ pub fn init() {
 pub static COM1_HW: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 
 pub fn write_byte(b: u8) {
+    if !present() {
+        return;
+    }
     // Tried, not waited for: the log must get out even if a CPU stopped
     // holding it (panics).
     let mut g = None;
