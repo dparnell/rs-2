@@ -985,7 +985,8 @@ tests: `tests/owatcom2/f77/BUILD.CMD` with tests/owatcom/f77's sources in
 `C:\F77T`.
 
 The Current-build has bugs of its own, found on rs2 and traced in its
-sources; they are not rs2's (each also shows on other hosts or follows
+sources (all Open Watcom bugs found on rs2, 1.9's too, are collected in
+docs/OPENWATCOM-BUGS.md); they are not rs2's (each also shows on other hosts or follows
 from the code whatever the system does):
 
 - Every `wfc`/`wfc386` compilation ends with `*ERR* CP-09` ("dynamic
