@@ -121,6 +121,16 @@ The SP4 has no serial port. Done (2026-11-15):
   Confirmed on the Surface Pro 4 the same day: the touchpad moves the
   pointer and clicks, and rs2 installed from the live stick to the
   internal drive.
+- **Type Cover keyboard** (2026-11-16, after the install: no keys): its
+  keyboard is presumably on the touchpad's report-protocol interface
+  under its own report ID, not a boot keyboard. The report descriptor
+  is now searched for a Keyboard application collection too (modifiers,
+  a key array or a key bitmap), and its reports are turned into boot
+  keyboard reports for the existing code (scancodes, repeat, Ctrl+C).
+  Ignored when the device also has a boot keyboard interface; no LEDs
+  for such keyboards yet. Checked: the parser alone on a keyboard plus
+  mouse descriptor (report IDs 1 and 2) and a bitmap keyboard; QEMU's
+  boot keyboard and usb-tablet unchanged. Not yet on the Surface.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

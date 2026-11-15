@@ -348,9 +348,9 @@ enum Step {
 struct Hid {
     iface: usb::HidIface,
     kind: hid::Kind,
-    /// Report protocol (not a boot device): where its mouse is in its
-    /// reports; None until the report descriptor is read.
-    layout: Option<super::hidreport::MouseLayout>,
+    /// Report protocol (not a boot device): where its mouse and keyboard
+    /// are in its reports; None until the report descriptor is read.
+    layout: Option<super::hidreport::Found>,
     /// Boot protocol (SET_PROTOCOL 0); else the report descriptor.
     boot: bool,
     dci: u8,
@@ -1557,27 +1557,36 @@ impl Ctrl {
                 let h = &d.hids[n as usize];
                 let len = h.iface.report_len as usize;
                 let iface = h.iface.iface;
-                match super::hidreport::find_mouse(d.data_slice(len)) {
-                    Some(l) => {
-                        crate::println!(
-                            "{name}: port {path}: interface {iface}: mouse in its reports (report ID {:?}, {})",
-                            l.id,
-                            if l.x.relative { "relative" } else { "absolute" }
-                        );
-                        let h = &mut d.hids[n as usize];
-                        h.layout = Some(l);
-                        h.kind = hid::Kind::Mouse;
-                        d.step = Step::SetIdle(n);
-                        self.control(i, Setup::set_idle(iface));
-                    }
-                    None => {
-                        crate::println!("{name}: port {path}: interface {iface}: HID, no mouse in its {len}-byte report descriptor");
-                        d.hids.remove(n as usize);
-                        if (n as usize) < d.hids.len() {
-                            self.hid_setup(i, n);
-                        } else {
-                            self.configure_endpoints(i);
-                        }
+                let mut found = super::hidreport::parse(d.data_slice(len));
+                // A boot keyboard on another interface already types.
+                if d.hids.iter().any(|h| h.boot && h.kind == hid::Kind::Keyboard) {
+                    found.keyboard = None;
+                }
+                if found.mouse.is_some() || found.keyboard.is_some() {
+                    let what = match (&found.mouse, &found.keyboard) {
+                        (Some(m), Some(k)) => alloc::format!(
+                            "keyboard (report ID {:?}) and {} mouse (report ID {:?})",
+                            k.id,
+                            if m.x.relative { "relative" } else { "absolute" },
+                            m.id
+                        ),
+                        (Some(m), None) => alloc::format!("{} mouse (report ID {:?})", if m.x.relative { "relative" } else { "absolute" }, m.id),
+                        (None, Some(k)) => alloc::format!("keyboard (report ID {:?})", k.id),
+                        (None, None) => unreachable!(),
+                    };
+                    crate::println!("{name}: port {path}: interface {iface}: {what} in its reports");
+                    let h = &mut d.hids[n as usize];
+                    h.kind = if found.mouse.is_none() { hid::Kind::Keyboard } else { hid::Kind::Mouse };
+                    h.layout = Some(found);
+                    d.step = Step::SetIdle(n);
+                    self.control(i, Setup::set_idle(iface));
+                } else {
+                    crate::println!("{name}: port {path}: interface {iface}: HID, no mouse or keyboard in its {len}-byte report descriptor");
+                    d.hids.remove(n as usize);
+                    if (n as usize) < d.hids.len() {
+                        self.hid_setup(i, n);
+                    } else {
+                        self.configure_endpoints(i);
                     }
                 }
             }
@@ -1778,7 +1787,7 @@ impl Ctrl {
         d.leds = 0xff;
         for h in d.hids.iter_mut() {
             h.handle = match h.layout {
-                Some(l) => hid::attach_mouse(l),
+                Some(l) => hid::attach_report(l),
                 None => hid::attach(h.kind),
             };
             crate::println!(
@@ -1819,7 +1828,7 @@ impl Ctrl {
             if d.step != Step::Running || d.ctl_busy || d.leds == want {
                 continue;
             }
-            let Some(h) = d.hids.iter().find(|h| h.kind == hid::Kind::Keyboard) else { continue };
+            let Some(h) = d.hids.iter().find(|h| h.boot && h.kind == hid::Kind::Keyboard) else { continue };
             let iface = h.iface.iface;
             d.leds = want;
             d.ctl_busy = true;

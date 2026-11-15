@@ -45,6 +45,16 @@ impl Kind {
     }
 }
 
+/// A report-protocol device (one HID interface).
+#[derive(Clone, Copy)]
+struct Report {
+    handle: u32,
+    mouse: Option<super::hidreport::MouseLayout>,
+    keyboard: Option<super::hidreport::KbdLayout>,
+    /// The mouse's last absolute position.
+    last: Option<(i32, i32)>,
+}
+
 struct Keyboard {
     handle: u32,
     /// Previous report: modifiers and key usages.
@@ -79,8 +89,8 @@ struct State {
     next: u32,
     keyboards: Vec<Keyboard>,
     mice: Vec<u32>,
-    /// Report-protocol mice: their layout and last absolute position.
-    layouts: Vec<(u32, super::hidreport::MouseLayout, Option<(i32, i32)>)>,
+    /// Report-protocol devices: their mouse and keyboard layouts.
+    reports: Vec<Report>,
     mouse: MouseState,
     events: VecDeque<MouseEvent>,
 }
@@ -89,7 +99,7 @@ static STATE: SpinLock<State> = SpinLock::new(State {
     next: 1,
     keyboards: Vec::new(),
     mice: Vec::new(),
-    layouts: Vec::new(),
+    reports: Vec::new(),
     mouse: MouseState { buttons: 0, dx: 0, dy: 0, wheel: 0 },
     events: VecDeque::new(),
 });
@@ -184,10 +194,19 @@ pub fn attach(kind: Kind) -> u32 {
     h
 }
 
-/// Register a report-protocol mouse (a touchpad, a tablet).
-pub fn attach_mouse(layout: super::hidreport::MouseLayout) -> u32 {
-    let h = attach(Kind::Mouse);
-    STATE.lock().layouts.push((h, layout, None));
+/// Register a report-protocol device: a mouse (a touchpad, a tablet), a
+/// keyboard, or both on one interface (a Surface Type Cover).
+pub fn attach_report(found: super::hidreport::Found) -> u32 {
+    let mut s = STATE.lock();
+    let h = s.next;
+    s.next += 1;
+    if found.keyboard.is_some() {
+        s.keyboards.push(Keyboard { handle: h, mods: 0, keys: [0; 6], repeat: None });
+    }
+    if found.mouse.is_some() {
+        s.mice.push(h);
+    }
+    s.reports.push(Report { handle: h, mouse: found.mouse, keyboard: found.keyboard, last: None });
     h
 }
 
@@ -200,7 +219,7 @@ pub fn detach(handle: u32) {
             let k = s.keyboards.remove(i);
             release_all(&k, &mut codes);
         }
-        s.layouts.retain(|l| l.0 != handle);
+        s.reports.retain(|r| r.handle != handle);
         if let Some(i) = s.mice.iter().position(|&m| m == handle) {
             s.mice.remove(i);
             if s.mice.is_empty() {
@@ -229,10 +248,17 @@ pub fn report(handle: u32, data: &[u8]) {
     let mut codes = Codes::new();
     {
         let mut s = STATE.lock();
-        if let Some(k) = s.keyboards.iter_mut().find(|k| k.handle == handle) {
+        if let Some(n) = s.reports.iter().position(|r| r.handle == handle) {
+            let r = s.reports[n];
+            if let Some(boot) = r.keyboard.and_then(|k| k.boot_report(data)) {
+                if let Some(k) = s.keyboards.iter_mut().find(|k| k.handle == handle) {
+                    keyboard_report(k, &boot, now, &mut codes);
+                }
+            } else if r.mouse.is_some() {
+                report_mouse(&mut s, n, data, now);
+            }
+        } else if let Some(k) = s.keyboards.iter_mut().find(|k| k.handle == handle) {
             keyboard_report(k, data, now, &mut codes);
-        } else if let Some(n) = s.layouts.iter().position(|l| l.0 == handle) {
-            report_mouse(&mut s, n, data, now);
         } else if s.mice.contains(&handle) {
             mouse_report(&mut s, data, now);
         }
@@ -292,9 +318,9 @@ fn mouse_report(s: &mut State, data: &[u8], now: u64) {
     mouse_event(s, ev, None);
 }
 
-/// A report of report-protocol mouse `s.layouts[n]`.
+/// A report of report-protocol mouse `s.reports[n]`.
 fn report_mouse(s: &mut State, n: usize, data: &[u8], now: u64) {
-    let (_, l, last) = s.layouts[n];
+    let Report { mouse: Some(l), last, .. } = s.reports[n] else { return };
     let Some(p) = l.payload(data) else { return };
     let (Some(x), Some(y)) = (l.x.read(p), l.y.read(p)) else { return };
     let wheel = l.wheel.and_then(|w| w.read(p)).filter(|_| l.wheel.is_some_and(|w| w.relative)).unwrap_or(0);
@@ -307,7 +333,7 @@ fn report_mouse(s: &mut State, n: usize, data: &[u8], now: u64) {
     // Absolute (a tablet): the motion since the last report for the
     // queue, the position itself for the pointer.
     let (dx, dy) = last.map_or((0, 0), |(px, py)| (x - px, y - py));
-    s.layouts[n].2 = Some((x, y));
+    s.reports[n].last = Some((x, y));
     let ev = MouseEvent { buttons, dx, dy, wheel, time: now as u32 };
     let span = |f: &super::hidreport::Field, v: i32| ((v - f.min).max(0) as u32, (f.max - f.min).max(1) as u32);
     let (ax, mx) = span(&l.x, x);
