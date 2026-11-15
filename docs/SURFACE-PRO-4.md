@@ -37,7 +37,10 @@ The SP4 has no serial port. Done (2026-11-15):
   with
   `cargo xtask iso --dist -o work/rs2-live.iso --cmdline bootlog`. Nothing
   is written from a crashed kernel, so the file can miss the last
-  seconds; the QR code below has them.
+  seconds; the QR code below has them. Nor to a boot volume that was not
+  shut down cleanly until AUTOCHECK's CHKDSK /F has been over it (a line
+  on the log says so); FAT on a USB stick is written through and never
+  gets the dirty flag.
 - **The crash screen** (`kernel/src/crash.rs`): a kernel panic or kernel
   trap fills the framebuffer with what happened in large text (message,
   registers, backtrace), the end of the log, and a QR code holding a crash

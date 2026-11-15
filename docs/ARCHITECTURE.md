@@ -511,6 +511,10 @@ kernel runs `CHKDSK d: /F /AUTOCHECK` on each volume that is dirty and listed
 in CONFIG.SYS: `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`
 or `DISKCACHE=...,AC:C`. The IFS line does not decide the file system: any
 listed drive is checked. A dirty drive not listed gets a line on the console.
+"Dirty" is as found when the volume was mounted (`fs::unchecked`; a remount
+after CHKDSK /F looks again): the flag on the disk also goes up as soon as
+this boot writes to a clean volume, which kernel threads (bootlog) may do
+before the check.
 The CONFIG.SYS rs2 ships has `/AUTOCHECK:*`; updating an installation keeps
 the user's CONFIG.SYS, which then needs the line added by hand.
 IBM's CHKDSK.SYS runs before the volumes are in use; rs2's CHKDSK is an

@@ -263,7 +263,9 @@ pub mod boot {
         // done. The drives the IFS lines do not list only get a warning.
         let listed = crate::config::autocheck(&cfg);
         let mut checks = Vec::new();
-        for d in (0..26).filter(|&d| crate::fs::drive(d).is_some_and(|f| f.needs_check())) {
+        // As found when mounted: the flag on the disk is up by now if
+        // something (bootlog) has written to a clean volume.
+        for d in (0..26).filter(|&d| crate::fs::unchecked(d) && crate::fs::drive(d).is_some()) {
             let letter = (b'A' + d) as char;
             if listed.contains(&d) {
                 checks.push((find_program("CHKDSK.EXE"), alloc::format!("{letter}: /F /AUTOCHECK")));
