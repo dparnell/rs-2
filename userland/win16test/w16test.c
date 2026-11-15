@@ -617,6 +617,68 @@ static void window_tests(HWND hwnd)
     DestroyWindow(w);
 }
 
+/* An owner-drawn menu item (MF_OWNERDRAW: Open Watcom's Dialog Editor
+ * draws its Tools menu so): WM_MEASUREITEM and WM_DRAWITEM (ODT_MENU)
+ * with the item's data, while TrackPopupMenu shows it; a timer ends it. */
+void WINAPI EndMenu(void);
+static int od_measured, od_drawn, od_draw_ok;
+
+LONG FAR PASCAL _export OdMenuProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_MEASUREITEM: {
+        MEASUREITEMSTRUCT FAR *mis = (MEASUREITEMSTRUCT FAR *)lp;
+        if (mis->CtlType == ODT_MENU && mis->itemID == 501 && mis->itemData == 0x12345678L) {
+            od_measured++;
+            mis->itemWidth = 80;
+            mis->itemHeight = 20;
+        }
+        return TRUE;
+    }
+    case WM_DRAWITEM: {
+        DRAWITEMSTRUCT FAR *dis = (DRAWITEMSTRUCT FAR *)lp;
+        if (dis->CtlType == ODT_MENU && dis->itemID == 501 && dis->itemData == 0x12345678L) {
+            od_drawn++;
+            /* The item's rectangle, 80 x 20, on the menu's DC. */
+            if (dis->rcItem.right - dis->rcItem.left >= 80 && dis->rcItem.bottom - dis->rcItem.top == 20 && dis->hDC != 0) {
+                FillRect(dis->hDC, &dis->rcItem, GetStockObject(GRAY_BRUSH));
+                od_draw_ok++;
+            }
+        }
+        return TRUE;
+    }
+    case WM_TIMER:
+        KillTimer(h, 1);
+        EndMenu();
+        return 0;
+    }
+    return DefWindowProc(h, msg, wp, lp);
+}
+
+static void owner_menu_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    HWND hwnd;
+    HMENU pop;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = OdMenuProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "OdMenu";
+    RegisterClass(&wc);
+    hwnd = CreateWindow("OdMenu", "W16TEST owner-drawn menu", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 300, 200, NULL, NULL, hInst, NULL);
+    pop = CreatePopupMenu();
+    AppendMenu(pop, MF_STRING, 500, "Text");
+    check(AppendMenu(pop, MF_OWNERDRAW, 501, (LPCSTR)0x12345678L), "AppendMenu MF_OWNERDRAW");
+    SetTimer(hwnd, 1, 1500, NULL);
+    TrackPopupMenu(pop, 0, 100, 100, 0, hwnd, NULL);
+    check(od_measured >= 1, "an owner-drawn menu item: WM_MEASUREITEM (ODT_MENU, its id and data)");
+    check(od_drawn >= 1 && od_draw_ok >= 1, "an owner-drawn menu item: WM_DRAWITEM with its rectangle and a DC to draw on");
+    DestroyMenu(pop);
+    DestroyWindow(hwnd);
+}
+
 static void stage2_tests(HINSTANCE hInst)
 {
     WNDCLASS wc;
@@ -636,6 +698,7 @@ static void stage2_tests(HINSTANCE hInst)
     dialog_tests(hwnd);
     window_tests(hwnd);
     DestroyWindow(hwnd);
+    owner_menu_tests(hInst);
 }
 
 

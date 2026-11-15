@@ -35,6 +35,7 @@ const MF_BYPOSITION: u16 = 0x0400;
 const MF_SEPARATOR: u16 = 0x0800;
 
 const MIS_TEXT: u16 = 0x0001;
+const MIS_OWNERDRAW: u16 = 0x0008;
 const MIS_SEPARATOR: u16 = 0x0004;
 const MIS_SUBMENU: u16 = 0x0010;
 const MIS_BREAKSEPARATOR: u16 = 0x0800;
@@ -196,6 +197,12 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
         };
     } else {
         mi.style = MIS_TEXT;
+        // An owner-drawn item: PM asks the owner to measure and draw it
+        // (owner_item), with the program's item data as its hItem.
+        if flags & MF_OWNERDRAW != 0 {
+            mi.style = MIS_OWNERDRAW;
+            mi.handle = core::mem::take(OD_DATA.get());
+        }
         if flags & MF_POPUP != 0 {
             let sub = pm_of(id);
             if sub == 0 {
@@ -832,9 +839,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
     })
 }
 
+/// An owner-drawn item's data (the "text" argument), for insert.
+static OD_DATA: Global<u32> = Global::new(0);
+
 /// The text of a new item (nothing for separators, bitmaps and owner
-/// drawn items).
+/// drawn items: an owner-drawn item's argument is its data).
 fn item_text(fl: u16, text: u32) -> Vec<u8> {
+    if fl & MF_OWNERDRAW != 0 {
+        *OD_DATA.get() = text;
+    }
     if fl & (MF_SEPARATOR | MF_BITMAP | MF_OWNERDRAW) != 0 {
         return Vec::new();
     }
@@ -889,4 +902,78 @@ fn track_popup(menu: u16, x: i32, y: i32, hwnd: u16) -> bool {
         unsafe { WinDispatchMsg(hab, &q) };
     }
     true
+}
+
+/// PM's WM_MEASUREITEM and WM_DRAWITEM (`oi` an OWNERITEM: hwnd, hps,
+/// fsState, fsAttribute, fsStateOld, fsAttributeOld, rclItem, idItem,
+/// hItem) for an owner-drawn item of a window's menu: Windows'
+/// WM_MEASUREITEM and WM_DRAWITEM (ODT_MENU) to the window. None for
+/// other items.
+pub fn owner_item(h: u16, msg: u32, oi: *mut u8) -> Option<u32> {
+    if oi.is_null() {
+        return None;
+    }
+    let rd = |o: usize| unsafe { (oi.add(o) as *const i32).read_unaligned() };
+    let wr = |o: usize, v: i32| unsafe { (oi.add(o) as *mut i32).write_unaligned(v) };
+    let (menu, hps, style, attr, attr_old) = (rd(0) as u32, rd(4) as u32, rd(8) as u16, rd(12) as u16, rd(20) as u16);
+    let (id, data) = (rd(40) as u16, rd(44) as u32);
+    if style & MIS_OWNERDRAW == 0 || !is_menu_window(menu) {
+        return None;
+    }
+    const ODT_MENU: u16 = 1;
+    let saved = thunk16::sp16();
+    let r = if msg == 0x0037 {
+        // MEASUREITEMSTRUCT: CtlType, CtlID, itemID, itemWidth,
+        // itemHeight, itemData.
+        let far = thunk16::alloc16(14);
+        let p = thunk16::flat(far);
+        let mut b = Vec::with_capacity(14);
+        for v in [ODT_MENU, 0, id, 0, 0] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        b.extend_from_slice(&data.to_le_bytes());
+        unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 14) };
+        user::send(h, user::W_MEASUREITEM, 0, far);
+        let rw = |o: usize| unsafe { (p.add(o) as *const u16).read_unaligned() } as i32;
+        let (l, bt) = (rd(24), rd(28));
+        wr(32, l + rw(6).max(1));
+        wr(36, bt + rw(8).max(1));
+        rw(8) as u32
+    } else {
+        // The menu window's PS as a DC: Windows' coordinates from its top.
+        let mut rc = RectL::default();
+        unsafe { WinQueryWindowRect(menu, &mut rc) };
+        let height = rc.t - rc.b;
+        let hdc = crate::gdi::new_dc(hps, menu, height, crate::gdi::DcKind::Borrowed);
+        // ODA_DRAWENTIRE, or ODA_SELECT when only the highlight changed;
+        // ODS_SELECTED, ODS_GRAYED, ODS_CHECKED.
+        const MIA_HILITED: u16 = 0x8000;
+        let action: u16 = if attr ^ attr_old == MIA_HILITED { 2 } else { 1 };
+        let state: u16 = if attr & MIA_HILITED != 0 { 1 } else { 0 } | if attr & MIA_DISABLED != 0 { 2 } else { 0 } | if attr & MIA_CHECKED != 0 { 8 } else { 0 };
+        let far = thunk16::alloc16(26);
+        let p = thunk16::flat(far);
+        let mut b = Vec::with_capacity(26);
+        for v in [ODT_MENU, 0, id, action, state, handle_of(menu), hdc] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [rd(24), height - rd(36), rd(32), height - rd(28)] {
+            b.extend_from_slice(&(v as i16).to_le_bytes());
+        }
+        b.extend_from_slice(&data.to_le_bytes());
+        unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 26) };
+        user::send(h, user::W_DRAWITEM, 0, far);
+        crate::gdi::release_dc(hdc);
+        // The highlight is the owner's to draw (PM inverts an item left
+        // MIA_HILITED).
+        wr(12, (attr & !MIA_HILITED) as i32);
+        wr(20, (attr_old & !MIA_HILITED) as i32);
+        1
+    };
+    thunk16::set_sp16(saved);
+    Some(r)
+}
+
+/// Is a PM window one of WIN16's menus?
+fn is_menu_window(pm: u32) -> bool {
+    m().menus.iter().any(|x| x.pm == pm)
 }

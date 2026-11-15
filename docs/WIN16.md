@@ -443,6 +443,13 @@ client, become Windows' WM_INITMENU (made from the bar's first
 WM_MENUSELECT: PM sends no WM_INITMENU for a menu bar), WM_INITMENUPOPUP (with the pop-up's
 HMENU and position), WM_MENUSELECT and WM_COMMAND. "&" mnemonics are PM's
 "~". TrackPopupMenu shows a pop-up at a point and returns when it closes.
+Owner-drawn items (MF_OWNERDRAW, the "text" argument their data) are
+PM's MIS_OWNERDRAW items with that data as their hItem: PM's
+WM_MEASUREITEM and WM_DRAWITEM (an OWNERITEM) reach the window as
+Windows' (ODT_MENU, the item's ID and data; WM_DRAWITEM with the menu
+window's PS lent as an HDC, the item's rectangle from its top, ODS_SELECTED,
+ODS_GRAYED, ODS_CHECKED), and the highlight is the program's to draw
+(Open Watcom's Dialog Editor draws its Tools menu so; W16TEST checks).
 Accelerator tables (RT_ACCELERATOR) are WIN16's: TranslateAccelerator
 matches WM_KEYDOWN (FVIRTKEY entries, with the shift states) or WM_CHAR
 (ASCII entries) and sends WM_COMMAND with lParam 1 << 16, unless the

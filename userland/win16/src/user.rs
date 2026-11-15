@@ -3123,7 +3123,7 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_COMMAND | WM_INITMENU | WM_MENUSELECT | WM_MENUEND => crate::menu::pm_message(h, msg, mp1, mp2),
         // The menu bar's MDI items (a maximized child's): WIN16 draws
         // them.
-        0x0036 | 0x0037 => match crate::mdi::owner_item(msg, mp2 as *mut u8) {
+        0x0036 | 0x0037 => match crate::mdi::owner_item(msg, mp2 as *mut u8).or_else(|| crate::menu::owner_item(h, msg, mp2 as *mut u8)) {
             Some(r) => r,
             None => unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) },
         },

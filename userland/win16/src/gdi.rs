@@ -25,6 +25,9 @@ pub enum DcKind {
     Paint,
     /// From GetDC: ReleaseDC.
     Window,
+    /// A PS PM lent for a moment (an owner-drawn menu item's): released
+    /// by PM.
+    Borrowed,
     /// From CreateCompatibleDC (or CreateDC/CreateIC of the display): a
     /// PM memory PS on a memory DC (bitmap.rs); DeleteDC.
     Memory,
@@ -659,6 +662,7 @@ pub fn release_dc(hdc: u16) -> bool {
         match d.kind {
             DcKind::Paint => WinEndPaint(d.hps),
             DcKind::Window => WinReleasePS(d.hps),
+            DcKind::Borrowed => 1,
             DcKind::Memory => {
                 crate::bitmap::delete_memory(&d);
                 1
