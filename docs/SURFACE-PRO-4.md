@@ -96,6 +96,16 @@ The SP4 has no serial port. Done (2026-11-15):
   after it switches, and writes all it printed to `\LOADER.LOG` on the
   boot volume just before ExitBootServices (the list scrolled off the
   Surface's screen too fast to read).
+- **ExitBootServices refused** (2026-11-16, with the native mode kept:
+  one blue square, then a red one: the firmware refused
+  ExitBootServices, every try, which is also where the very first stick
+  stopped). The loader allocated everything the kernel keeps as memory
+  type 0x80000001 (OS-defined), which some vendors' firmware mishandles;
+  OVMF and VMware never minded. Now it allocates plain EfiLoaderData,
+  remembers the ranges itself and hands them to the kernel as
+  `MemoryKind::Loader` (QEMU: the same 454 MB usable of 510 as before).
+  If the firmware still refuses, the second row shows its error number
+  as that many red squares (2 = invalid parameter).
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

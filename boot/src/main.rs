@@ -90,14 +90,59 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 }
 
+/// Pages the kernel keeps (its image, modules, page tables, stack, boot
+/// info), merged where they touch. They are allocated as plain
+/// EfiLoaderData and told apart here: a Surface Pro 4 refused
+/// ExitBootServices for good once the loader had pages of an OS-defined
+/// type (0x80000001, as it used to), as some vendors' firmware does;
+/// OVMF and VMware never minded.
+static mut KEPT: [(u64, u64); 256] = [(0, 0); 256];
+static mut KEPT_N: usize = 0;
+
+fn kept() -> &'static mut [(u64, u64)] {
+    unsafe { &mut (&mut *ptr::addr_of_mut!(KEPT))[..KEPT_N] }
+}
+
+fn keep(start: u64, len: u64) {
+    for r in kept().iter_mut() {
+        if r.0 + r.1 == start {
+            r.1 += len;
+            return;
+        }
+        if start + len == r.0 {
+            *r = (start, r.1 + len);
+            return;
+        }
+    }
+    unsafe {
+        if KEPT_N == (*ptr::addr_of!(KEPT)).len() {
+            panic!("too many separate allocations");
+        }
+        (*ptr::addr_of_mut!(KEPT))[KEPT_N] = (start, len);
+        KEPT_N += 1;
+    }
+}
+
+/// Give back pages from `alloc_pages`.
+fn free_pages(start: u64, count: usize) {
+    (bs().free_pages)(start, count);
+    let (a, b) = (start, start + count as u64 * 4096);
+    if let Some(i) = kept().iter().position(|r| r.0 <= a && b <= r.0 + r.1) {
+        let r = kept()[i];
+        // What is left on each side.
+        kept()[i] = (r.0, a - r.0);
+        if r.0 + r.1 > b {
+            keep(b, r.0 + r.1 - b);
+        }
+    }
+}
+
 /// Allocate zeroed pages the kernel will keep.
 fn alloc_pages(count: usize) -> u64 {
     let mut addr = 0u64;
-    check(
-        (bs().allocate_pages)(0 /* AnyPages */, memtype::RS2_KEEP, count, &mut addr),
-        "AllocatePages",
-    );
+    check((bs().allocate_pages)(0 /* AnyPages */, memtype::LOADER_DATA, count, &mut addr), "AllocatePages");
     unsafe { ptr::write_bytes(addr as *mut u8, 0, count * 4096) };
+    keep(addr, count as u64 * 4096);
     addr
 }
 
@@ -356,7 +401,7 @@ fn find_rsdp() -> u64 {
 /// resolution, if offered; otherwise keep the current mode.
 /// Running in a virtual machine (CPUID's "hypervisor present" bit).
 fn hypervisor() -> bool {
-    unsafe { core::arch::x86_64::__cpuid(1).ecx & (1 << 31) != 0 }
+    core::arch::x86_64::__cpuid(1).ecx & (1 << 31) != 0
 }
 
 /// The pixel layout of a GOP mode as `Framebuffer::format` (0 RGBX,
@@ -510,7 +555,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     let kf = root.open("\\RS2\\KERNEL").expect("\\RS2\\KERNEL not found");
     let (kimg, klen) = read_file(kf);
     let kernel = load_elf(unsafe { core::slice::from_raw_parts(kimg as *const u8, klen as usize) });
-    (bs().free_pages)(kimg, (klen as usize).div_ceil(4096));
+    free_pages(kimg, (klen as usize).div_ceil(4096));
     info.kernel_phys = kernel.phys;
     info.kernel_len = kernel.len;
     println!("  kernel {:#x} bytes at {:#x}, entry {:#x}", kernel.len, kernel.phys, kernel.entry);
@@ -599,6 +644,13 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
         // any more after one).
         if diag {
             bootinfo::diag_square(&info.framebuffer, 0, 1, 0xe00000);
+            // The firmware's error number as that many red squares on
+            // the second row (2 = invalid parameter: a stale map key).
+            if tries == 1 {
+                for k in 0..(status & 0xff).min(48) as u32 {
+                    bootinfo::diag_square(&info.framebuffer, 0, 48 + k, 0xe00000);
+                }
+            }
         }
         if tries == 16 {
             panic!("ExitBootServices failed 16 times, last status {status:#x}");
@@ -609,32 +661,56 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
         bootinfo::diag_square(&info.framebuffer, 0, 1, 0x0060ff);
     }
     let mut count = 0;
+    let mut push = |start: u64, len: u64, kind: MemoryKind| {
+        if len == 0 {
+            return;
+        }
+        // Merge with the previous region when contiguous and the same kind.
+        if count > 0 {
+            let prev = &mut info.memory[count - 1];
+            if prev.kind == kind && prev.start + prev.len == start {
+                prev.len += len;
+                return;
+            }
+        }
+        if count < info.memory.len() {
+            info.memory[count] = MemoryRegion { start, len, kind, _pad: 0 };
+            count += 1;
+        }
+    };
     for i in 0..size / dsize {
         let d = unsafe { &*(map_buf.as_ptr().add(i * dsize) as *const MemoryDescriptor) };
+        let (start, end) = (d.phys_start, d.phys_start + d.pages * 4096);
+        if d.ty == memtype::LOADER_DATA {
+            // The kernel's pieces in it are kept, the rest is free.
+            let mut at = start;
+            while at < end {
+                let next = kept().iter().filter(|r| r.0 + r.1 > at && r.0 < end).min_by_key(|r| r.0).copied();
+                match next {
+                    Some((ks, kl)) if ks <= at => {
+                        let e = (ks + kl).min(end);
+                        push(at, e - at, MemoryKind::Loader);
+                        at = e;
+                    }
+                    Some((ks, _)) => {
+                        push(at, ks - at, MemoryKind::Usable);
+                        at = ks;
+                    }
+                    None => {
+                        push(at, end - at, MemoryKind::Usable);
+                        at = end;
+                    }
+                }
+            }
+            continue;
+        }
         let kind = match d.ty {
-            memtype::LOADER_CODE
-            | memtype::LOADER_DATA
-            | memtype::BOOT_CODE
-            | memtype::BOOT_DATA
-            | memtype::CONVENTIONAL => MemoryKind::Usable,
-            memtype::RS2_KEEP => MemoryKind::Loader,
+            memtype::LOADER_CODE | memtype::BOOT_CODE | memtype::BOOT_DATA | memtype::CONVENTIONAL => MemoryKind::Usable,
             memtype::RUNTIME_CODE | memtype::RUNTIME_DATA => MemoryKind::Runtime,
             memtype::ACPI_RECLAIM => MemoryKind::AcpiReclaim,
             _ => MemoryKind::Reserved,
         };
-        let region = MemoryRegion { start: d.phys_start, len: d.pages * 4096, kind, _pad: 0 };
-        // Merge with the previous region when contiguous and the same kind.
-        if count > 0 {
-            let prev = &mut info.memory[count - 1];
-            if prev.kind == kind && prev.start + prev.len == region.start {
-                prev.len += region.len;
-                continue;
-            }
-        }
-        if count < info.memory.len() {
-            info.memory[count] = region;
-            count += 1;
-        }
+        push(start, end - start, kind);
     }
     info.memory_count = count as u64;
     if diag {

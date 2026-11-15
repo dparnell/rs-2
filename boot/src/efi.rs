@@ -149,8 +149,6 @@ pub mod memtype {
     pub const CONVENTIONAL: u32 = 7;
     pub const ACPI_RECLAIM: u32 = 9;
     pub const PERSISTENT: u32 = 14;
-    /// Allocations the kernel must keep (OS-defined range).
-    pub const RS2_KEEP: u32 = 0x8000_0001;
 }
 
 #[repr(C)]
