@@ -968,6 +968,83 @@ Fixed for it:
   Open Watcom's 16-bit Windows runtime reads F000:FFF5 at start, and every
   FORTRAN Windows program (the samples too) page-faulted there (W16TEST).
 
+## Open Watcom 2.0 (OS/2 host)
+
+The GitHub "Current-build" of 2026-11-14 (`open-watcom-2_0-c-os2.exe`,
+128 MB, sha256 `7f5067fb...66b9`; `open-watcom-2_0-f77-os2.exe`, 102 MB,
+`1968f147...c5bc`): the same OS/2 installer as 1.9's with a ZIP appended
+(300 MB, every host's files). The tests are in `tests/owatcom2`;
+`tests/owatcom2/mkdisk.sh` makes `work/ow2sys.img` as 1.9's script does
+(Open Watcom 2.0 unpacked as an OS/2-hosted Full installation lays it out,
+`F77=1` adds the FORTRAN package, `OUT=` another image name), with the 1.9
+tests in `C:\OWT` and tests/owatcom2's files over them; it boots into
+`RUN.CMD` (BUILD.CMD, TOOLS.CMD, TOOLS2.CMD, MORE.CMD) or, with
+`INIT="OS2\CMD.EXE /C C:\OWT\UI.CMD"`, into the PM and Windows tools one
+after another; `tests/owatcom2/getlogs.sh DIR` fetches the logs. The F77
+tests: `tests/owatcom2/f77/BUILD.CMD` with tests/owatcom/f77's sources in
+`C:\F77T`.
+
+The Current-build has bugs of its own, found on rs2 and traced in its
+sources; they are not rs2's (each also shows on other hosts or follows
+from the code whatever the system does):
+
+- Every `wfc`/`wfc386` compilation ends with `*ERR* CP-09` ("dynamic
+  memory not freed", Open Watcom issue 1623, seen on Windows XP too; the
+  DOS-hosted `binw\wfc386.exe` shows it on rs2's DOS machine as well) and
+  exit code 1, although the object file is complete. The text of the
+  message is missing (and an `*ERR* SM-02` precedes it) because the
+  compiler has closed its message resources by then and opens an error
+  file under a freed name.
+- `wfl` and `wfl386` fault (null pointer in `CompLink`) or loop for ever:
+  `ListAppendString` in `bld/f77/wfl/c/wfl.c` never sets the new list
+  item's `next`, so the file list goes on into whatever the heap held.
+- The debuggers' DWARF reader (`DWARF.D32`) faults on every program with
+  DWARF information (`-d2`, the default format): `read_Shdr` in
+  `bld/dip/dwarf/c/dfld.c` reads `sh_name` twice, so every field of every
+  ELF section header is the next one's and the section names are looked
+  up at a null pointer. `CODEVIEW.D32` divides by zero on a `-hc`
+  program's symbol hash.
+- Static C++ with `-bm` faults before `main`: the OS/2 C runtime allocates
+  `__ThreadData` only in `_beginthread`, and the C++ runtime's
+  multi-thread initialiser calls `__InitMultipleThread` before
+  (`-bm -br`, on the runtime DLLs, works).
+- `fcenable` prints its banner without line ends (`printf` of the banner
+  strings without `\n`).
+
+| What | Status | Notes |
+|------|--------|-------|
+| Installer, as the boot program | works | License, `C:\WATCOM`, Full installation (298 MB: every host's files, about 10 minutes in QEMU), the progress window over the logo, "Setup needs to modify CONFIG.SYS" (LIBPATH `BINP\DLL`, PATH `BINP;BINW`, HELP and BOOKSHELF `BINP\HELP`, INCLUDE `H;H\OS2`, WATCOM, EDPATH, WIPFC, `RUN=...\NMPBIND.EXE`; the old file kept as CONFIG.000), "Setup has completed". Without the Workplace Shell `WinCreateObject` fails, as on OS/2, and the installer says it "could not add the application(s) to the Program Manager" (Yes continues). |
+| Installer, from the Workplace Shell | works | Started from `STARTUP.CMD` (`tests/owatcom2/wpsinst.cmd`) on the desktop: the same pages, then the folders "Open Watcom 2.0 C/C++" (Getting Started, Read Me, IDE, Source Browser, Profiler, Windowed Debugger, Debugger, OS/2 VDM Remote Link, Named Pipe Remote Link) and "Open Watcom 2.0 C/C++ Tools Help", with WATCOM.ICO. |
+| F77 installer from the Workplace Shell, over C/C++ | works | "Open Watcom 2.0 FORTRAN was found in C:\WATCOM": Full installation, its DLL check ("Setup attempted to install the file std.dll in C:\WATCOM\rdos\ but it currently exists in C:\WATCOM\BINW\", keep both), CONFIG.SYS gets `SET FINCLUDE=...`, the folders "Open Watcom 2.0 FORTRAN" and "... FORTRAN Tools Help". |
+| The 1.9 tests (BUILD, TOOLS, MORE) | works | Everything as with 1.9: wcl386/wcl/wpp OS/2 32- and 16-bit, PM, wmake, C++ 32/16 (17 of 17), threads (`-bm`, `-bm -br` on MT7R20.DLL), DLLs (C and C++ on the runtime DLLs), wasm, wlib, wdis, `wlink @file`, wstrip, owcc, wmake includes and rules, wtouch, wdump, wrc with a PM program using its resources (9 of 9), wipfc, vi, wsample, ctags, dmpobj, cvpack, exe2bin (a .COM in a DOS session), ms2wlink, wbind, edbind, wasaxp/wasppc, NMPBIND on NAMPIPES.DLL; DOS (`-l=dos`), DOS/4GW (`-l=dos4g` from a .BAT), Win16 (`-l=windows`, on WIN16) and Win32 (built) targets. |
+| TOOLS2.CMD | works | C99 and file I/O on the runtime (`-za99`: long long and `<inttypes.h>` printf, snprintf, designated initialisers, `_Bool`, alloca; stdio with fseek/ftell, POSIX open/lseek/chsize/filelength, stat, rename, remove, mkdir/opendir/readdir/rmdir, tmpfile, time/strftime) 32-bit, on the runtime DLLs and 16-bit; the C++ library (std::string, the library's `std::out_of_range` from `vector::at` and `string::substr`, a `runtime_error` through six frames, map/set/list/deque/sort/accumulate, `auto_ptr`, RTTI, iostream formatting, fstream) 32-bit, `-bm -br` with exceptions in four threads at once, and 16-bit; a DLL used by two programs in turn, rebuilt, and used again; wcc/wpp/wcc386/wpp386 and wlink by themselves. |
+| F77: `wfc386`/`wfc` + `wlink` | works | FMTIO, FILEIO, FMATH, FCHARS 32-bit and 16-bit, a `-d2` build linked with `debug all`, FORTRAN calling C and back, the MTHREAD sample (`-bm`), the DLL sample, the REXX sample (`wmake -i`: EZRXFUNC.DLL registered and called from REXX), FSHAPES (PM), CALENDAR, DOS/4GW, DOS and Windows builds; all checks pass (each compile also says `*ERR* CP-09`, above). |
+| F77: `wfl386`, `wfl` | fails | Open Watcom's bug above (also fails on any OS/2). |
+| `wd` (text-mode debugger) | partial | On a `-hw` program (Watcom debug format): loads it through STD.D32 and DosDebug, stops in `main`, steps (F10), its menus and windows (assembly, registers, modules); the source window stays empty and the locals list too (the Watcom reader gives no line information for 2.0's own `-hw` output). On `-d2` (DWARF) and `-hc` programs the debugger faults in its reader (above). A debugger that dies leaves the session's keyboard in binary mode (CMD then reads one key per line). |
+| `wdw` (PM debugger) | partial | As `wd`: its window, menus, tool bar and child windows (Source, Locals, Watches, Modules); no source lines. |
+| `ide` | works | Starts with its menu bar and tool bar (also from its object in the installer's folder). Its projects, make and debug paths were not exercised for 2.0 (see 1.9). |
+| `wbrw` (source browser) | works | Starts with its menus ("no option file, no database"). |
+| `wsample`, `wprof` | partial | `wsample busy.exe` writes BUSY.SMP; the profiler's window was not seen in the screenshots (not followed). |
+| Help books (`BINP\HELP\*.INF`) in VIEW, `wipfc` | works | The C/C++ User's Guide opens with its contents; a book compiled by wipfc on rs2 too. |
+| BINW Windows tools on WIN16 | works | `viw` (the file in its MDI child, tool bar, status line), `wimgedit` (tool and colour palettes), `wre`, `wzoom` (magnifying), `wheapwlk` start as with 1.9. `wde` and `wddespy` were not tried (another session works on their 1.9 versions). |
+| Remote debugging (`nmpserv`, `tcpserv`), `wd -tr=...` | not tried | The servers and trap files are the 1.9 ones' successors; with the readers above only `-hw` programs could be tried. |
+
+Fixed for it:
+
+- PMSRV (the PM server, started as the child of the first program that
+  uses PM) closes the handles it inherits: Open Watcom 2.0's C runtime
+  DLL CLBR20 imports PMWIN, so a program built with `-br` started the
+  server with its redirected output; `prog >> LOG` followed at once by
+  `echo x >> LOG` failed with SYS0032 until the last PM program had
+  ended (APITEST, through CMD).
+- Loader: a DLL found through its file rather than its name (its internal
+  name is not the file's: 2.0's wlink names MYDLL.DLL "MYDLL.DLL") gets
+  what one found by name gets: when no process uses it its global
+  initialisation runs again on the next load (Open Watcom's C runtime in
+  the DLL keeps its thread data in instance data; the second program to
+  use the DLL faulted in `__CHK`), and an LX DLL rewritten meanwhile is
+  read from its new file (APITEST).
+
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 
 Unmodified OS/2 builds from bitwiseworks' and netlabs' RPM repository
