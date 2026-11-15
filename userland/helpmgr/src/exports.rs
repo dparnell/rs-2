@@ -42,6 +42,7 @@ aligned! {
     __a_WinLoadHelpTable => crate::WinLoadHelpTable, 3;
     __a_WinCreateHelpTable => crate::WinCreateHelpTable, 2;
     __a_Rs2ViewBook => crate::Rs2ViewBook, 4;
+    __a_Rs2WinHelp => crate::Rs2WinHelp, 9;
     __a_MscCleanUp => crate::paths::MscCleanUp, 1;
     __a_ChopDot => crate::paths::ChopDot, 2;
     __a_HPFSSplitPath => crate::paths::HPFSSplitPath, 5;

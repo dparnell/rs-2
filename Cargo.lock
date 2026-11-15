@@ -203,6 +203,13 @@ name = "win16drv"
 version = "0.1.0"
 
 [[package]]
+name = "winhlp"
+version = "0.1.0"
+dependencies = [
+ "ipf",
+]
+
+[[package]]
 name = "x86emu"
 version = "0.1.0"
 dependencies = [

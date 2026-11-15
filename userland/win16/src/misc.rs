@@ -20,14 +20,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         return r;
     }
     match ord {
-        // WinHelp(hwnd, file, cmd, data): no help engine for Windows
-        // help files.
+        // WinHelp(hwnd, file, cmd, data): WINHELP.EXE (winhelp.rs).
         171 => {
-            a.w();
-            a.l();
-            a.w();
-            a.l();
-            0
+            let (h, file, cmd, data) = (a.w(), a.l(), a.w(), a.l());
+            crate::winhelp::win_help(h, file, cmd, data)
         }
         // LoadString(hinst, id, buf, max)
         176 => crate::res::user_load_string(a),

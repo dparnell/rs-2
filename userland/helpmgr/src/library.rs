@@ -1,5 +1,8 @@
 //! Help libraries and books: files found along HELP (help libraries) or
-//! BOOKSHELF (books), read whole and kept parsed.
+//! BOOKSHELF (books), read whole and kept parsed. A Windows help file
+//! (WinHelp's `.HLP`) is converted into an IPF help library as it is
+//! read (`crates/winhlp`); its lookups (context strings, map numbers,
+//! keywords) stay with it for WINHELP.EXE's commands.
 
 use crate::pm::*;
 use alloc::boxed::Box;
@@ -19,6 +22,8 @@ pub struct Library {
     /// Opened for a search of the library list (Libraries), not one of
     /// the instance's own.
     pub extra: bool,
+    /// A Windows help file's lookups (its IPF form is `doc`).
+    pub winhelp: Option<Box<winhlp::Converted>>,
 }
 
 impl Library {
@@ -102,12 +107,24 @@ pub fn open(name: &[u8], book: bool) -> Result<Library, u32> {
     let vars: &[&[u8]] = if book { &[b"BOOKSHELF", b"HELP"] } else { &[b"HELP", b"BOOKSHELF"] };
     for t in &tries {
         let Some(path) = find(t, vars) else { continue };
-        let Some(data) = read_file(&path) else { return Err(crate::HMERR_READ_LIB_FILE) };
+        let Some(mut data) = read_file(&path) else { return Err(crate::HMERR_READ_LIB_FILE) };
+        let mut winhelp = None;
+        if winhlp::is_winhelp(&data) {
+            let base = path.rsplit(|&c| c == b'\\' || c == b'/' || c == b':').next().unwrap_or(&path);
+            let opts = winhlp::Options { name: Some(base), ..Default::default() };
+            match winhlp::convert_with(&data, &opts) {
+                Ok(mut c) => {
+                    data = core::mem::take(&mut c.ipf);
+                    winhelp = Some(Box::new(c));
+                }
+                Err(_) => return Err(crate::HMERR_LOAD_DLL_BAD_FORMAT),
+            }
+        }
         let data: &'static mut [u8] = Box::leak(data.into_boxed_slice());
         let raw = data as *mut [u8];
         match ipf::Doc::parse(data) {
             Ok(doc) if book || doc.is_help() || doc.header.kind == ipf::KIND_BOOK => {
-                return Ok(Library { doc: ManuallyDrop::new(doc), data: raw, path, base: 0, extra: false });
+                return Ok(Library { doc: ManuallyDrop::new(doc), data: raw, path, base: 0, extra: false, winhelp });
             }
             _ => {
                 unsafe { drop(Box::from_raw(raw)) };

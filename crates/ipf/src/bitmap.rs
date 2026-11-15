@@ -182,14 +182,19 @@ pub fn metafile(data: &[u8], image_start: u32, offset: u32) -> Result<Vec<u8>, E
 /// Bytes per block in the records the compiler writes.
 const BLOCK: usize = 0x4000;
 
-/// Stored (type 0) blocks of `data`, each `u16` n then the type byte and
-/// n - 1 bytes; the record's `u32` size and `u16` block size first.
+/// Blocks of `data`, each `u16` n then the type byte and n - 1 bytes:
+/// run lengths (type 1) where they are shorter, else stored (type 0);
+/// the record's `u32` size and `u16` block size first.
 fn stored_blocks(data: &[u8]) -> Vec<u8> {
     let mut b = Vec::new();
+    let mut packed = Vec::new();
     for c in data.chunks(BLOCK) {
-        b.extend_from_slice(&(c.len() as u16 + 1).to_le_bytes());
-        b.push(0);
-        b.extend_from_slice(c);
+        packed.clear();
+        rle_pack(c, &mut packed);
+        let (ty, d) = if packed.len() < c.len() { (1, packed.as_slice()) } else { (0, c) };
+        b.extend_from_slice(&(d.len() as u16 + 1).to_le_bytes());
+        b.push(ty);
+        b.extend_from_slice(d);
     }
     let mut out = Vec::new();
     out.extend_from_slice(&(b.len() as u32 + 2).to_le_bytes());
@@ -304,6 +309,44 @@ pub fn decode(data: &[u8], image_start: u32, offset: u32, display: (u16, u16)) -
         _ => return Err(Error::Invalid("bitmap type")),
     }
     Ok(Bitmap { cx: info.cx, cy: info.cy, bpp: info.bpp, palette, bits })
+}
+
+/// Run lengths as [`rle`] reads them: runs of 2 to 128 equal bytes as
+/// `n-1 byte`, other bytes in groups of 2 to 128 as `0x80|(n-1)` and
+/// the bytes (a single one as a run of one).
+pub fn rle_pack(src: &[u8], out: &mut Vec<u8>) {
+    let mut p = 0;
+    let mut lit = 0usize; // start of pending literals
+    let flush = |out: &mut Vec<u8>, from: usize, to: usize| {
+        let mut f = from;
+        while f < to {
+            let n = (to - f).min(128);
+            if n == 1 {
+                out.push(0);
+            } else {
+                out.push(0x80 | (n - 1) as u8);
+            }
+            out.extend_from_slice(&src[f..f + n]);
+            f += n;
+        }
+    };
+    while p < src.len() {
+        let c = src[p];
+        let mut n = 1;
+        while p + n < src.len() && n < 128 && src[p + n] == c {
+            n += 1;
+        }
+        if n >= 3 {
+            flush(out, lit, p);
+            out.push((n - 1) as u8);
+            out.push(c);
+            p += n;
+            lit = p;
+        } else {
+            p += n;
+        }
+    }
+    flush(out, lit, src.len());
 }
 
 /// Algorithm 1 (run lengths): `c < 0x80`: the next byte c+1 times; `0x81
