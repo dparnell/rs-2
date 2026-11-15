@@ -1,0 +1,9 @@
+[package]
+name = "winhlp"
+description = "no_std reader of Windows 3.x Help files (.HLP, WinHelp) that converts them into OS/2 IPF help libraries"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+ipf = { path = "../ipf" }
