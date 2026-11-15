@@ -356,8 +356,11 @@ pub fn init() {
             }
             continue;
         }
-        let t = p.mbr_type;
-        try_mount_fat(Arc::new(p), &alloc::format!("disk: FAT partition type {t:#x}"));
+        let what = match p.mbr_type {
+            0 => alloc::string::String::from("disk: FAT EFI system partition (GPT)"),
+            t => alloc::format!("disk: FAT partition type {t:#x}"),
+        };
+        try_mount_fat(Arc::new(p), &what);
     }
     WANT.store(0, core::sync::atomic::Ordering::Relaxed);
     // Every CD drive gets a letter, with or without a disc: the disc is

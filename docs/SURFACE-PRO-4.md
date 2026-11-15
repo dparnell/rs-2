@@ -111,7 +111,14 @@ crash report across a warm reboot (a RAM region the loader writes to
 ## Phase 1: boot to CMD and PM with an external keyboard
 
 1. Boot the dist ISO written to a USB stick (`dd`; the ISO is already
-   hybrid). Secure Boot off.
+   hybrid). Secure Boot off. Since 2026-11-15 the ISO also carries a GPT
+   (one EFI system partition over the ESP image, a hybrid MBR keeping
+   the old 0xEF entry): firmware reads a stick's GPT before El Torito,
+   and El Torito's 16-bit sector count (32 MB) cut the 57 MB ESP image
+   short, so the Surface stopped finding a boot loader on the stick
+   (QEMU's OVMF and VMware's CD boot never minded). macOS `diskutil
+   list` on the image shows the GPT; `xtask run --bare --boot-hdd
+   --usb-disk`, `--hdd` and `--iso` all boot it.
 2. Expected first faults: assumptions that only hold in VMs: the 8042
    probe (`kbd.rs`, `mouse.rs`) must time out cleanly; timers
    (`apic.rs` calibrates against the PIT, which Skylake still has but
