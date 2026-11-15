@@ -1752,7 +1752,7 @@ pub fn create(c: &Create) -> u16 {
     } else {
         layout_frame(hwnd);
     }
-    if style & WS_DISABLED != 0 {
+    if style & WS_DISABLED != 0 && !child {
         unsafe { WinEnableWindow(frame, 0) };
     }
     // WS_EX_TRANSPARENT: the windows beneath show through (frame statics
@@ -2226,6 +2226,16 @@ pub fn enable_window(h: u16, on: bool) -> bool {
     }
     if on { w.style &= !WS_DISABLED } else { w.style |= WS_DISABLED }
     let (f, c) = (w.frame, w.client);
+    // A child window's PM windows stay enabled: its mouse input goes to
+    // the enabled window around it (pm_wndproc), as on Windows; PM would
+    // drop it.
+    if w.style & WS_CHILD != 0 {
+        if !on && is_child(h, focus()) {
+            unsafe { WinSetFocus(HWND_DESKTOP, 0) };
+        }
+        send(h, W_ENABLE, on as u16, 0);
+        return was;
+    }
     unsafe {
         WinEnableWindow(f, on as u32);
         if c != f {
@@ -3063,12 +3073,49 @@ fn keep_children_at_top(h: u16, old: i32, new: i32) {
     }
 }
 
+/// The window that gets a disabled child window's mouse input: the
+/// nearest enabled one it is in (itself when it and the child windows
+/// it is in are enabled); None when a top-level window is disabled.
+fn enabled_ancestor(h: u16) -> Option<u16> {
+    let mut cur = h;
+    let mut best = h;
+    let mut chain_ok = true;
+    for _ in 0..32 {
+        let w = wnd(cur)?;
+        if w.style & WS_DISABLED != 0 {
+            chain_ok = false;
+        } else if !chain_ok {
+            best = cur;
+            chain_ok = true;
+        }
+        if w.style & WS_CHILD == 0 || w.parent == 0 {
+            break;
+        }
+        cur = w.parent;
+    }
+    chain_ok.then_some(best)
+}
+
 /// PM's window procedure of the Windows windows' client areas.
 extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(h) = by_client(pmh).filter(|w| w.created).map(|w| w.hwnd) else {
         return unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) };
     };
     let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+    // Mouse input over a disabled child window goes to the nearest
+    // enabled window it is in, as Windows' hit testing skips disabled
+    // child windows (Open Watcom's form editor gets the clicks over the
+    // disabled controls it edits).
+    if (0x70..=0x79).contains(&msg) {
+        if let Some(to) = enabled_ancestor(h).filter(|&a| a != h) {
+            let Some(pm_to) = wnd(to).map(|w| w.client) else { return 0 };
+            let mut p = PointL { x: mp1 as i16 as i32, y: (mp1 >> 16) as i16 as i32 };
+            unsafe {
+                WinMapWindowPoints(pmh, pm_to, &mut p, 1);
+                return WinSendMsg(pm_to, msg, (p.y as u32 & 0xffff) << 16 | p.x as u32 & 0xffff, mp2);
+            }
+        }
+    }
     match msg {
         WM_SIZE => {
             let (cx, cy) = (mp2 as u16, (mp2 >> 16) as u16);
