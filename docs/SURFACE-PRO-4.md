@@ -106,6 +106,18 @@ The SP4 has no serial port. Done (2026-11-15):
   `MemoryKind::Loader` (QEMU: the same 454 MB usable of 510 as before).
   If the firmware still refuses, the second row shows its error number
   as that many red squares (2 = invalid parameter).
+- **Type Cover touchpad** (2026-11-16: the desktop came up, the
+  touchpad did nothing): the USB HID driver only knew boot keyboards and
+  boot mice, and a precision touchpad is neither. HID interfaces that are
+  not boot devices now have their report descriptor read
+  (`drivers/hidreport.rs`); the first Mouse application collection with
+  an X and a Y becomes a mouse, relative or absolute, with or without a
+  report ID. The touchpad sends such mouse reports until a host switches
+  it to touchpad mode, which we never do. The log names each interface
+  (`interface N: mouse in its reports ...` or `no mouse in its ...`).
+  Tested in QEMU with `cargo xtask run --usb-tablet` (absolute, no report
+  ID) and the parser alone on a touchpad-style descriptor (relative,
+  report ID 1, a digitizer report before it).
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

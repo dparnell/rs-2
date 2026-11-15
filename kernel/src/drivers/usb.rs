@@ -42,6 +42,8 @@ pub const DESC_DEVICE: u8 = 1;
 pub const DESC_CONFIG: u8 = 2;
 pub const DESC_INTERFACE: u8 = 4;
 pub const DESC_ENDPOINT: u8 = 5;
+pub const DESC_HID: u8 = 0x21;
+pub const DESC_HID_REPORT: u8 = 0x22;
 pub const DESC_HUB: u8 = 0x29;
 pub const DESC_SS_HUB: u8 = 0x2a;
 pub const DESC_SS_EP_COMPANION: u8 = 0x30;
@@ -88,6 +90,17 @@ impl Setup {
     /// SET_PROTOCOL: 0 = boot protocol.
     pub fn set_protocol(iface: u8, protocol: u16) -> Setup {
         Setup { request_type: CLASS_IFACE_OUT, request: HID_SET_PROTOCOL, value: protocol, index: iface as u16, length: 0 }
+    }
+
+    /// GET_DESCRIPTOR of interface `iface`'s HID report descriptor.
+    pub fn hid_report_descriptor(iface: u8, length: u16) -> Setup {
+        Setup {
+            request_type: DEV_TO_HOST | 1,
+            request: GET_DESCRIPTOR,
+            value: (DESC_HID_REPORT as u16) << 8,
+            index: iface as u16,
+            length,
+        }
     }
 
     /// SET_IDLE with duration 0: report only on change.
@@ -227,6 +240,8 @@ pub struct Interface {
     pub subclass: u8,
     pub protocol: u8,
     pub endpoints: Vec<Endpoint>,
+    /// HID: the length of its report descriptor (from the HID descriptor).
+    pub hid_report_len: u16,
 }
 
 /// Configuration value and all interfaces of a full configuration
@@ -251,7 +266,17 @@ pub fn parse_interfaces(d: &[u8]) -> (u8, Vec<Interface>) {
                 subclass: x[6],
                 protocol: x[7],
                 endpoints: Vec::new(),
+                hid_report_len: 0,
             }),
+            DESC_HID if len >= 9 => {
+                if let Some(i) = out.last_mut() {
+                    // The first class descriptor listed is the report
+                    // descriptor.
+                    if x[6] == DESC_HID_REPORT {
+                        i.hid_report_len = u16::from_le_bytes([x[7], x[8]]);
+                    }
+                }
+            }
             DESC_ENDPOINT if len >= 7 => {
                 if let Some(i) = out.last_mut() {
                     let max_packet = u16::from_le_bytes([x[4], x[5]]) & 0x7ff;
@@ -270,26 +295,38 @@ pub fn parse_interfaces(d: &[u8]) -> (u8, Vec<Interface>) {
     (d[5], out)
 }
 
-/// A HID boot interface with its interrupt-IN endpoint.
+/// A HID interface with its interrupt-IN endpoint.
 #[derive(Clone, Copy, Debug)]
 pub struct HidIface {
     pub iface: u8,
+    /// 1 = boot interface.
+    pub subclass: u8,
     /// Boot protocol: 1 = keyboard, 2 = mouse.
     pub protocol: u8,
     pub endpoint: u8,
     pub max_packet: u16,
     pub interval: u8,
+    pub report_len: u16,
 }
 
-/// The HID boot interfaces (alternate setting 0, keyboard or mouse) with
-/// their interrupt-IN endpoints.
-pub fn hid_boot_interfaces(ifaces: &[Interface]) -> Vec<HidIface> {
+/// The HID interfaces (alternate setting 0) with their interrupt-IN
+/// endpoints: boot keyboards and mice, and any other (a touchpad such as
+/// the Surface Type Cover's, driven through its report descriptor).
+pub fn hid_interfaces(ifaces: &[Interface]) -> Vec<HidIface> {
     ifaces
         .iter()
-        .filter(|i| i.alt == 0 && i.class == CLASS_HID && i.subclass == 1 && matches!(i.protocol, 1 | 2))
+        .filter(|i| i.alt == 0 && i.class == CLASS_HID)
         .filter_map(|i| {
             let e = Endpoint::find(&i.endpoints, EP_INTERRUPT, true)?;
-            Some(HidIface { iface: i.number, protocol: i.protocol, endpoint: e.address, max_packet: e.max_packet, interval: e.interval })
+            Some(HidIface {
+                iface: i.number,
+                subclass: i.subclass,
+                protocol: i.protocol,
+                endpoint: e.address,
+                max_packet: e.max_packet,
+                interval: e.interval,
+                report_len: i.hid_report_len,
+            })
         })
         .collect()
 }

@@ -59,7 +59,7 @@ const MAX_HID: usize = 4;
 /// Offset of the interrupt transfer buffers in the data page (HID
 /// reports, then the hub status-change bitmap).
 const REPORT_BUF: usize = 2048;
-const REPORT_MAX: usize = 64;
+const REPORT_MAX: usize = 256;
 const HUB_BUF: usize = REPORT_BUF + MAX_HID * REPORT_MAX;
 /// Time allowed for one command or control transfer.
 const STEP_TIMEOUT_MS: u64 = 1000;
@@ -329,6 +329,8 @@ enum Step {
     Config,
     SetConfig,
     SetProtocol(u8),
+    /// A HID interface that is not a boot device: its report descriptor.
+    ReportDesc(u8),
     SetIdle(u8),
     HubDesc,
     HubDepth,
@@ -342,10 +344,15 @@ enum Step {
     Failed,
 }
 
-/// A HID boot interface in use.
+/// A HID interface in use.
 struct Hid {
     iface: usb::HidIface,
     kind: hid::Kind,
+    /// Report protocol (not a boot device): where its mouse is in its
+    /// reports; None until the report descriptor is read.
+    layout: Option<super::hidreport::MouseLayout>,
+    /// Boot protocol (SET_PROTOCOL 0); else the report descriptor.
+    boot: bool,
     dci: u8,
     ring: Ring,
     len: u16,
@@ -1366,7 +1373,8 @@ impl Ctrl {
     /// device.
     fn control_error(&mut self, i: usize, code: u8) {
         let d = self.dev(i);
-        let tolerable = matches!(d.step, Step::SetProtocol(_) | Step::SetIdle(_) | Step::HubDepth | Step::Running);
+        let tolerable =
+            matches!(d.step, Step::SetProtocol(_) | Step::ReportDesc(_) | Step::SetIdle(_) | Step::HubDepth | Step::Running);
         if code == CC_STALL && tolerable {
             d.resume = d.step;
             d.step = Step::Ep0Reset;
@@ -1539,9 +1547,38 @@ impl Ctrl {
                 } else if d.hids.is_empty() {
                     self.configure_endpoints(i);
                 } else {
-                    d.step = Step::SetProtocol(0);
-                    let iface = d.hids[0].iface.iface;
-                    self.control(i, Setup::set_protocol(iface, 0));
+                    self.hid_setup(i, 0);
+                }
+            }
+            Step::ReportDesc(n) => {
+                let path = d.path();
+                let name = self.name.clone();
+                let d = self.dev(i);
+                let h = &d.hids[n as usize];
+                let len = h.iface.report_len as usize;
+                let iface = h.iface.iface;
+                match super::hidreport::find_mouse(d.data_slice(len)) {
+                    Some(l) => {
+                        crate::println!(
+                            "{name}: port {path}: interface {iface}: mouse in its reports (report ID {:?}, {})",
+                            l.id,
+                            if l.x.relative { "relative" } else { "absolute" }
+                        );
+                        let h = &mut d.hids[n as usize];
+                        h.layout = Some(l);
+                        h.kind = hid::Kind::Mouse;
+                        d.step = Step::SetIdle(n);
+                        self.control(i, Setup::set_idle(iface));
+                    }
+                    None => {
+                        crate::println!("{name}: port {path}: interface {iface}: HID, no mouse in its {len}-byte report descriptor");
+                        d.hids.remove(n as usize);
+                        if (n as usize) < d.hids.len() {
+                            self.hid_setup(i, n);
+                        } else {
+                            self.configure_endpoints(i);
+                        }
+                    }
                 }
             }
             Step::SetProtocol(n) => {
@@ -1551,9 +1588,7 @@ impl Ctrl {
             }
             Step::SetIdle(n) => {
                 if (n as usize) + 1 < d.hids.len() {
-                    d.step = Step::SetProtocol(n + 1);
-                    let iface = d.hids[n as usize + 1].iface.iface;
-                    self.control(i, Setup::set_protocol(iface, 0));
+                    self.hid_setup(i, n + 1);
                 } else {
                     self.configure_endpoints(i);
                 }
@@ -1618,12 +1653,19 @@ impl Ctrl {
                 return true;
             }
         }
-        for (n, f) in usb::hid_boot_interfaces(ifaces).into_iter().take(MAX_HID).enumerate() {
-            let Some(kind) = hid::Kind::from_protocol(f.protocol) else { continue };
+        let usable = usb::hid_interfaces(ifaces).into_iter().filter(|f| {
+            // Boot keyboards and mice as before; anything else only with
+            // a report descriptor to look for a mouse in.
+            let boot = f.subclass == 1 && matches!(f.protocol, 1 | 2);
+            boot || f.report_len > 0
+        });
+        for (n, f) in usable.take(MAX_HID).enumerate() {
+            let boot = f.subclass == 1 && matches!(f.protocol, 1 | 2);
+            let kind = if boot { hid::Kind::from_protocol(f.protocol).unwrap() } else { hid::Kind::Mouse };
             let ring = Ring::new(d.page(4 + n));
             let dci = (f.endpoint & 0xf) * 2 + 1;
             let len = f.max_packet.clamp(1, REPORT_MAX as u16);
-            d.hids.push(Hid { iface: f, kind, dci, ring, len, handle: 0, errors: 0 });
+            d.hids.push(Hid { iface: f, kind, layout: None, boot, dci, ring, len, handle: 0, errors: 0 });
         }
         !d.hids.is_empty()
     }
@@ -1656,6 +1698,22 @@ impl Ctrl {
             write_volatile(ctx.add(2), ring as u32);
             write_volatile(ctx.add(3), (ring >> 32) as u32);
             write_volatile(ctx.add(4), (esit & 0xffff) << 16 | avg);
+        }
+    }
+
+    /// Start setting up HID interface `n`: boot protocol, or read its
+    /// report descriptor.
+    fn hid_setup(&mut self, i: usize, n: u8) {
+        let d = self.dev(i);
+        let h = &d.hids[n as usize];
+        let iface = h.iface.iface;
+        if h.boot {
+            d.step = Step::SetProtocol(n);
+            self.control(i, Setup::set_protocol(iface, 0));
+        } else {
+            let len = h.iface.report_len.min(REPORT_BUF as u16);
+            d.step = Step::ReportDesc(n);
+            self.control(i, Setup::hid_report_descriptor(iface, len));
         }
     }
 
@@ -1719,7 +1777,10 @@ impl Ctrl {
         // Force the first LED update.
         d.leds = 0xff;
         for h in d.hids.iter_mut() {
-            h.handle = hid::attach(h.kind);
+            h.handle = match h.layout {
+                Some(l) => hid::attach_mouse(l),
+                None => hid::attach(h.kind),
+            };
             crate::println!(
                 "{name}: port {path}: USB {:?} {vendor:04x}:{product:04x} (slot {slot}, endpoint {:#x})",
                 h.kind,

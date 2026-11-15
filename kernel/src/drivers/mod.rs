@@ -7,6 +7,7 @@ pub mod floppy;
 pub mod es137x;
 pub mod hda;
 pub mod hid;
+pub mod hidreport;
 pub mod hotplug;
 pub mod hub;
 pub mod ide;

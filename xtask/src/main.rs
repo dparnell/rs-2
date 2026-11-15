@@ -4,7 +4,7 @@
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [--desktop]
 //!                  [--type KEYS | --type-file FILE] [--type-at S]
-//!                  [--hdd IMG] [--nvme IMG] [--floppy IMG|empty]... [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
+//!                  [--hdd IMG] [--nvme IMG] [--floppy IMG|empty]... [--usb-kbd] [--usb-mouse] [--usb-tablet] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
@@ -151,6 +151,9 @@ struct Opts {
     bare: bool,
     cmdline_extra: Vec<String>,
     usb_mouse: bool,
+    /// QEMU's usb-tablet (a report-protocol HID with absolute X/Y)
+    /// instead of the USB mouse, so the monitor's mouse_move reaches it.
+    usb_tablet: bool,
     /// `run`: raw images attached as USB mass storage devices.
     usb_disks: Vec<PathBuf>,
     /// `run`: tiers of USB hubs in front of the USB devices.
@@ -227,6 +230,7 @@ fn parse(args: &[String]) -> Opts {
         bare: false,
         cmdline_extra: vec![],
         usb_mouse: false,
+        usb_tablet: false,
         usb_disks: vec![],
         usb_hubs: 0,
         vmware: false,
@@ -308,6 +312,7 @@ fn parse(args: &[String]) -> Opts {
                 o.cmdline_extra.extend(args[i].split_whitespace().map(String::from));
             }
             "--usb-mouse" => o.usb_mouse = true,
+            "--usb-tablet" => o.usb_tablet = true,
             "--usb-hub" => o.usb_hubs += 1,
             "--vmware" => o.vmware = true,
             "--pvscsi" => {
@@ -1307,7 +1312,7 @@ fn ovmf() -> (PathBuf, PathBuf) {
 
 /// The xHCI controller, hubs and USB devices.
 fn usb_devices(o: &Opts, c: &mut Command) {
-    if !o.usb_kbd && !o.usb_mouse && o.usb_disks.is_empty() && o.usb_hubs == 0 {
+    if !o.usb_kbd && !o.usb_mouse && !o.usb_tablet && o.usb_disks.is_empty() && o.usb_hubs == 0 {
         return;
     }
     c.args(["-device", "qemu-xhci,id=xhci"]);
@@ -1326,8 +1331,11 @@ fn usb_devices(o: &Opts, c: &mut Command) {
     if o.usb_kbd {
         c.arg("-device").arg(format!("usb-kbd,bus=xhci.0,id=usbkbd{}", port()));
     }
-    if o.usb_mouse {
+    if o.usb_mouse && !o.usb_tablet {
         c.arg("-device").arg(format!("usb-mouse,bus=xhci.0,id=usbmouse{}", port()));
+    }
+    if o.usb_tablet {
+        c.arg("-device").arg(format!("usb-tablet,bus=xhci.0,id=usbtablet{}", port()));
     }
     for (n, d) in o.usb_disks.iter().enumerate() {
         c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
