@@ -7,6 +7,10 @@ name = "bootinfo"
 version = "0.1.0"
 
 [[package]]
+name = "crashqr"
+version = "0.1.0"
+
+[[package]]
 name = "dos"
 version = "0.1.0"
 dependencies = [
