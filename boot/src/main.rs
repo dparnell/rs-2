@@ -29,8 +29,19 @@ fn bs() -> &'static BootServices {
 
 struct Console;
 
+/// Everything printed, for `\LOADER.LOG` (`bootdiag`: the Surface's
+/// mode list scrolled off the screen too fast to read).
+static mut LOG: [u8; 32 * 1024] = [0; 32 * 1024];
+static mut LOG_LEN: usize = 0;
+
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        unsafe {
+            let log = &mut *ptr::addr_of_mut!(LOG);
+            let n = s.len().min(log.len() - LOG_LEN);
+            log[LOG_LEN..LOG_LEN + n].copy_from_slice(&s.as_bytes()[..n]);
+            LOG_LEN += n;
+        }
         let out = st().con_out;
         let mut buf = [0u16; 128];
         let mut n = 0;
@@ -104,6 +115,26 @@ fn ucs2(s: &str, buf: &mut [u16; 260]) -> *const u16 {
 struct Dir(*mut File);
 
 impl Dir {
+    /// Replace `path` with what the loader printed so far. Errors (a CD,
+    /// a read-only stick) are ignored.
+    fn write_log(&self, path: &str) {
+        let mut name = [0u16; 260];
+        let mut f = ptr::null_mut();
+        unsafe {
+            // Delete first, so a shorter log leaves no tail of an old one.
+            if ((*self.0).open)(self.0, &mut f, ucs2(path, &mut name), FILE_MODE_READ | FILE_MODE_WRITE, 0) == SUCCESS {
+                ((*f).delete)(f);
+            }
+            let mode = FILE_MODE_READ | FILE_MODE_WRITE | FILE_MODE_CREATE;
+            if ((*self.0).open)(self.0, &mut f, ucs2(path, &mut name), mode, 0) != SUCCESS {
+                return;
+            }
+            let mut len = LOG_LEN;
+            ((*f).write)(f, &mut len, ptr::addr_of!(LOG) as *const u8);
+            ((*f).close)(f);
+        }
+    }
+
     fn open(&self, path: &str) -> Option<*mut File> {
         let mut name = [0u16; 260];
         let mut f = ptr::null_mut();
@@ -543,6 +574,9 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
         println!("  bootdiag: squares at the top: blue = loader, green (every 5th yellow) = kernel stages");
     }
     println!("  exiting boot services");
+    if diag {
+        root.write_log("\\LOADER.LOG");
+    }
     if diag {
         bootinfo::diag_square(&info.framebuffer, 0, 0, 0x0060ff);
     }

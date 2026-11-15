@@ -93,7 +93,9 @@ The SP4 has no serial port. Done (2026-11-15):
   first try, keeping the firmware's mode, still ended in 1024x768: the
   Surface's native mode was presumably refused for its pixel format).
   With `bootdiag` the loader lists every mode, with format and masks,
-  after it switches.
+  after it switches, and writes all it printed to `\LOADER.LOG` on the
+  boot volume just before ExitBootServices (the list scrolled off the
+  Surface's screen too fast to read).
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

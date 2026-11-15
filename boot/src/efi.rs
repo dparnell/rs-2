@@ -178,15 +178,17 @@ pub struct File {
     pub revision: u64,
     pub open: extern "efiapi" fn(*mut File, *mut *mut File, *const u16, u64, u64) -> Status,
     pub close: extern "efiapi" fn(*mut File) -> Status,
-    pub delete: Unused,
+    pub delete: extern "efiapi" fn(*mut File) -> Status,
     pub read: extern "efiapi" fn(*mut File, *mut usize, *mut u8) -> Status,
-    pub write: Unused,
+    pub write: extern "efiapi" fn(*mut File, *mut usize, *const u8) -> Status,
     pub get_position: Unused,
     pub set_position: extern "efiapi" fn(*mut File, u64) -> Status,
     pub get_info: extern "efiapi" fn(*mut File, *const Guid, *mut usize, *mut u8) -> Status,
 }
 
 pub const FILE_MODE_READ: u64 = 1;
+pub const FILE_MODE_WRITE: u64 = 2;
+pub const FILE_MODE_CREATE: u64 = 0x8000_0000_0000_0000;
 pub const FILE_DIRECTORY: u64 = 0x10;
 
 /// Fixed part of `EFI_FILE_INFO`; the UCS-2 file name follows.
