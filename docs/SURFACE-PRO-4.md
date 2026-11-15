@@ -118,6 +118,9 @@ The SP4 has no serial port. Done (2026-11-15):
   Tested in QEMU with `cargo xtask run --usb-tablet` (absolute, no report
   ID) and the parser alone on a touchpad-style descriptor (relative,
   report ID 1, a digitizer report before it).
+  Confirmed on the Surface Pro 4 the same day: the touchpad moves the
+  pointer and clicks, and rs2 installed from the live stick to the
+  internal drive.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.
