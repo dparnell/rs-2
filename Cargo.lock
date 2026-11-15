@@ -169,6 +169,7 @@ dependencies = [
  "pathcache",
  "smb",
  "tcpip",
+ "wlan",
 ]
 
 [[package]]
@@ -208,6 +209,10 @@ version = "0.1.0"
 dependencies = [
  "ipf",
 ]
+
+[[package]]
+name = "wlan"
+version = "0.1.0"
 
 [[package]]
 name = "x86emu"
