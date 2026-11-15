@@ -2846,6 +2846,15 @@ static void dll_cycle_tests(void)
     UINT (FAR PASCAL *m)(void);
     HINSTANCE (FAR PASCAL *inst)(void);
 
+    /* First by its path: each DLL's import of the other is a path (the
+     * importer's directory), and a DLL loading by its path must be found
+     * by it (the kernel recursed until its stack overflowed). */
+    d = LoadLibrary("C:\\RS2\\W16CYC1.DLL");
+    f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16CYC1VALUE") : NULL;
+    check(f && f() == 11, "two DLLs that import each other load by their paths");
+    if (d > HINSTANCE_ERROR)
+        FreeLibrary(d);
+
     d = LoadLibrary("W16CYC1.DLL");
     f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16CYC1VALUE") : NULL;
     m = d > HINSTANCE_ERROR ? (UINT (FAR PASCAL *)(void))GetProcAddress(d, "W16CYC1MESSAGE") : NULL;
