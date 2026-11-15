@@ -1000,14 +1000,38 @@ from the code whatever the system does):
   item's `next`, so the file list goes on into whatever the heap held.
 - The debuggers' DWARF reader (`DWARF.D32`) faults on every program with
   DWARF information (`-d2`, the default format): `read_Shdr` in
-  `bld/dip/dwarf/c/dfld.c` reads `sh_name` twice, so every field of every
-  ELF section header is the next one's and the section names are looked
-  up at a null pointer. `CODEVIEW.D32` divides by zero on a `-hc`
-  program's symbol hash.
-- Static C++ with `-bm` faults before `main`: the OS/2 C runtime allocates
-  `__ThreadData` only in `_beginthread`, and the C++ runtime's
-  multi-thread initialiser calls `__InitMultipleThread` before
-  (`-bm -br`, on the runtime DLLs, works).
+  `bld/dip/dwarf/c/dfld.c` reads `sh_name` twice (since commit e1134ccd
+  of 2026-06-14, "dip: fix dwarf endianness processing"), so every field
+  of every ELF section header is the next one's; the string table gets
+  size 0, `malloc(0)` gives NULL and the section names are looked up at
+  address 0 (on DOS, where address 0 can be read, the debugger just finds
+  no sections: upstream issue 1687 reports no source on MS-DOS with
+  `-hd` as well as `-hw`).
+- The debugger closes the file it read the debug information from right
+  after `DIPLoadInfo` (`ProcImgSymInfo` in `bld/wv/c/dbgprog.c` calls
+  `FileClose` whether or not the load succeeded; the 2015 code closed it
+  only on failure), while the Watcom and CodeView readers go on reading
+  through that handle on demand (apitrace: `DosClose` of handle 4, then
+  `DosSetFilePtr` on handle 4 fails with error 6). So a `-hw` program
+  shows no source lines or locals (upstream issue 1687, on MS-DOS) and a
+  `-hc` program makes `CODEVIEW.D32` divide by a hash-bucket count it
+  never read. The profiler does the same (`setsamps.c` closes the image
+  after `WPDipLoadInfo`; WPROF then `fseek`s a NULL stream and faults).
+  Open Watcom 1.9's debugger, on the same rs2, stops in `main` with the
+  source and the locals of a `-hw` program.
+- The named pipe link (`NMP.D32`, `NMPSERV`) opens `TCN` instead of
+  `\PIPE\NMPLink.TCN` and retries for ever: since the link code was split
+  into `RemoteLinkSet`, `NameEnd = NameBuff + strlen( NameBuff )` runs
+  before `OpenRequest` has put the bindery's answer into `NameBuff[0]`,
+  which is still 0 (`bld/trap/nmp/c/nmplink.c`; the 2019 code computed it
+  after `OpenRequest`).
+- Static C++ with `-bm` faults before `main`: `wpp386 -bm` makes every
+  object import `__imthread` (`plusplus/c/cginfo.c`), whose initialiser
+  calls `__InitMultipleThread`, which stores into `__ThreadData[1]`; on
+  32-bit OS/2 nothing has allocated `__ThreadData` yet (only
+  `_beginthread` and the DLL startup call `__InitThreadProcessing`). No
+  system call is involved before the fault. (`-bm -br`, on the runtime
+  DLLs, works; Open Watcom 1.9's static `-bm` C++ works on rs2.)
 - `fcenable` prints its banner without line ends (`printf` of the banner
   strings without `\n`).
 
@@ -1020,14 +1044,16 @@ from the code whatever the system does):
 | TOOLS2.CMD | works | C99 and file I/O on the runtime (`-za99`: long long and `<inttypes.h>` printf, snprintf, designated initialisers, `_Bool`, alloca; stdio with fseek/ftell, POSIX open/lseek/chsize/filelength, stat, rename, remove, mkdir/opendir/readdir/rmdir, tmpfile, time/strftime) 32-bit, on the runtime DLLs and 16-bit; the C++ library (std::string, the library's `std::out_of_range` from `vector::at` and `string::substr`, a `runtime_error` through six frames, map/set/list/deque/sort/accumulate, `auto_ptr`, RTTI, iostream formatting, fstream) 32-bit, `-bm -br` with exceptions in four threads at once, and 16-bit; a DLL used by two programs in turn, rebuilt, and used again; wcc/wpp/wcc386/wpp386 and wlink by themselves. |
 | F77: `wfc386`/`wfc` + `wlink` | works | FMTIO, FILEIO, FMATH, FCHARS 32-bit and 16-bit, a `-d2` build linked with `debug all`, FORTRAN calling C and back, the MTHREAD sample (`-bm`), the DLL sample, the REXX sample (`wmake -i`: EZRXFUNC.DLL registered and called from REXX), FSHAPES (PM), CALENDAR, DOS/4GW, DOS and Windows builds; all checks pass (each compile also says `*ERR* CP-09`, above). |
 | F77: `wfl386`, `wfl` | fails | Open Watcom's bug above (also fails on any OS/2). |
-| `wd` (text-mode debugger) | partial | On a `-hw` program (Watcom debug format): loads it through STD.D32 and DosDebug, stops in `main`, steps (F10), its menus and windows (assembly, registers, modules); the source window stays empty and the locals list too (the Watcom reader gives no line information for 2.0's own `-hw` output). On `-d2` (DWARF) and `-hc` programs the debugger faults in its reader (above). A debugger that dies leaves the session's keyboard in binary mode (CMD then reads one key per line). |
+| `wd` (text-mode debugger) | partial | On a `-hw` program (Watcom debug format): loads it through STD.D32 and DosDebug, stops in `main`, steps (F10), its menus and windows (assembly, registers, modules); the source window stays empty and the locals list too (the debugger has closed the file its reader reads, above). On `-d2` (DWARF) and `-hc` programs the debugger faults in its reader (above). A debugger that dies leaves the session's keyboard in binary mode (rs2's CMD then reads one key per line; IBM's CMD resets the mode only in PAUSE and its Ctrl+C handler, so it was left as it is). |
 | `wdw` (PM debugger) | partial | As `wd`: its window, menus, tool bar and child windows (Source, Locals, Watches, Modules); no source lines. |
 | `ide` | works | Starts with its menu bar and tool bar (also from its object in the installer's folder). Its projects, make and debug paths were not exercised for 2.0 (see 1.9). |
 | `wbrw` (source browser) | works | Starts with its menus ("no option file, no database"). |
-| `wsample`, `wprof` | partial | `wsample busy.exe` writes BUSY.SMP; the profiler's window was not seen in the screenshots (not followed). |
+| `wsample`, `wprof` | partial | `wsample busy.exe` writes BUSY.SMP; `wprof busy.smp` faults (Open Watcom's closed-file bug above). |
+| DOS and Windows programs built on rs2 | works | F77: FMATHD, FILEIOD (16-bit DOS) and FMATHX (DOS/4GW) pass all checks in a DOS session (`DOSRUN.BAT`); FMATHW in its "Standard IO" window and the ELLIPSE sample on WIN16. C: as with 1.9 (TOOLS.CMD). |
 | Help books (`BINP\HELP\*.INF`) in VIEW, `wipfc` | works | The C/C++ User's Guide opens with its contents; a book compiled by wipfc on rs2 too. |
 | BINW Windows tools on WIN16 | works | `viw` (the file in its MDI child, tool bar, status line), `wimgedit` (tool and colour palettes), `wre`, `wzoom` (magnifying), `wheapwlk` start as with 1.9. `wde` and `wddespy` were not tried (another session works on their 1.9 versions). |
-| Remote debugging (`nmpserv`, `tcpserv`), `wd -tr=...` | not tried | The servers and trap files are the 1.9 ones' successors; with the readers above only `-hw` programs could be tried. |
+| Remote debugging over named pipes | fails | Open Watcom's link name bug above: `wd -tr=nmp` asks NMPBIND, gets its answer, then retries opening `TCN` for ever. |
+| Remote debugging over TCP/IP | partial | `tcpserv` listens, `wd -tr=tcp;127.0.0.1` connects and TCPSERV starts HELLO.EXE under DosDebug; the debugger then waits in a socket receive and its screen stays black (not followed further; Open Watcom 1.9's TCP link works on rs2). |
 
 Fixed for it:
 
@@ -1044,6 +1070,12 @@ Fixed for it:
   the DLL keeps its thread data in instance data; the second program to
   use the DLL faulted in `__CHK`), and an LX DLL rewritten meanwhile is
   read from its new file (APITEST).
+- WPS: a folder view keeps the places it gives icons that have none
+  (their `.ICONPOS` record is written then, not only after an Arrange or
+  a drag): the installers' new folders, and the icons of a new desktop,
+  came up in another order after the next start (`WPSTEST SHELL ICONPOS
+  C:\DESKTOP DRIVES`). Long titles (four lines) still reach into the
+  next row on the desktop's grid.
 
 ## GCC and kLIBC programs (the ArcaOS RPM ports)
 

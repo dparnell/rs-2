@@ -221,7 +221,7 @@ pub fn dos16_read(c: &mut Ctx) -> u32 {
 pub fn dos_read(c: &mut Ctx) -> u32 {
     let (e, n) = read_handle(c, c.arg(0), c.arg(1), c.arg(2));
     if c.trace {
-        crate::trace!("    read {} of {} at {:x}", n, c.arg(2), c.arg(1));
+        crate::trace!("    read {} of {} at {:x} (handle {})", n, c.arg(2), c.arg(1), c.arg(0));
     }
     c.write_u32(c.arg(3), n);
     e
@@ -229,6 +229,9 @@ pub fn dos_read(c: &mut Ctx) -> u32 {
 
 pub fn dos_close(c: &mut Ctx) -> u32 {
     let hf = c.arg(0) as usize;
+    if c.trace {
+        crate::trace!("    close handle {hf}");
+    }
     let old = {
         let mut hs = c.process.handles.lock();
         match hs.get_mut(hf) {
@@ -284,7 +287,7 @@ fn seek(c: &Ctx, hf: u32, off: i64, method: u32) -> Result<u64, u32> {
 pub fn dos_set_file_ptr(c: &mut Ctx) -> u32 {
     let r = seek(c, c.arg(0), c.arg(1) as i32 as i64, c.arg(2));
     if c.trace {
-        crate::trace!("    seek {} {} -> {:?}", c.arg(1) as i32, c.arg(2), r);
+        crate::trace!("    seek {} {} -> {:?} (handle {})", c.arg(1) as i32, c.arg(2), r, c.arg(0));
     }
     match r {
         Ok(p) => {
@@ -530,6 +533,9 @@ pub fn dos_open(c: &mut Ctx) -> u32 {
     }
     match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6), eas) {
         Ok((h, act)) => {
+            if c.trace {
+                crate::trace!("    handle {h}");
+            }
             c.write_u32(c.arg(1), h);
             c.write_u32(c.arg(2), act);
             0

@@ -736,6 +736,7 @@ fn place_icons(w: usize, recs: &[u32]) {
             None => unplaced.push(r),
         }
     }
+    let placed_new = !unplaced.is_empty();
     for r in unplaced {
         let mut p = slot(w, 0);
         for i in 0..2000 {
@@ -750,6 +751,13 @@ fn place_icons(w: usize, recs: &[u32]) {
         used.push(p);
     }
     send(wins()[w].child, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
+    // Icons given a place now keep it (the folder's .ICONPOS), as the
+    // Workplace Shell remembers where it put an object: the desktop of a
+    // new install, or one an installer added folders to (Open Watcom's),
+    // came up in another order at the next start.
+    if placed_new && wins()[w].view == OPEN_CONTENTS {
+        save_positions(w);
+    }
 }
 
 /// Arrange: every icon on the grid (kept).

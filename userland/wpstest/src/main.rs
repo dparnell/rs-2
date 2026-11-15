@@ -1056,6 +1056,17 @@ fn shell(args: &[u8]) -> u32 {
                 println!("wpstest: create {} {}: {:#x}", s(arg(1)), s(arg(2)), h);
             }
             b"MMPARTS" => mmparts(),
+            // ICONPOS folder-path name: the folder keeps the place it gave
+            // the named file's icon (its .ICONPOS EA), as the Workplace
+            // Shell does: a new desktop's icons, and an installer's
+            // folders, came up in another order at the next start.
+            b"ICONPOS" => {
+                let v = ea_value(arg(1), b".ICONPOS");
+                let name = arg(2);
+                let found = v.windows(name.len().max(1)).any(|x| x.eq_ignore_ascii_case(name));
+                check(&alloc::format!("{} keeps the place of {} ({} bytes of .ICONPOS)", s(arg(1)), s(name), v.len()), found);
+                println!("wpstest done: {} failure(s)", unsafe { FAILS });
+            }
             // RUN program arguments: runs a program and waits for it (a
             // REXX procedure that scripts the shell: CMD.EXE /C X.CMD).
             b"RUN" => {
