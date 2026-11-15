@@ -30,7 +30,7 @@ docs/COMPATIBILITY.md:
 
 | Bug | Symptom | Cause |
 |-----|---------|-------|
-| `wde` sizing (also in 2.0) | Application Error in FMEDIT.DLL (0001:4592) when a control is sized from a corner handle | `WdeGetCurrentDialog` asks the object being sized (an FMEDIT EATOM) for its parent. The EATOM doesn't answer, so WDE uses a pointer it never initialized. On rs2 the trigger is a toolbox WM_PAINT during sizing; whether rs2 should send that paint at all is being fixed in rs2's PMWIN. |
+| `wde` sizing (also in 2.0) | Application Error in FMEDIT.DLL (0001:4592) when a control is sized from a corner handle | `WdeGetCurrentDialog` asks the object being sized (an FMEDIT EATOM) for its parent. The EATOM doesn't answer, so WDE uses a pointer it never initialized. On rs2 the trigger was a toolbox WM_PAINT during sizing, which IBM's PM does not send: rs2's PMWIN repainted the whole toolbox on every click (activation raised the main window over it, then lifted it again). Fixed in rs2: PMWIN repaints only what a change uncovers, so sizing from a corner works. |
 | `wde` Tools menu | Icons are drawn but most item texts are blank | 1.9's tool-bitmap table in `WdeInitToolMenu` has no end marker. The loop runs on into a second copy and owner-draws items again with text it can no longer read from them. This would happen on Windows too. |
 | F77 FWCOPY sample | The program ends at start | Its AppendMenu calls push 8 bytes of arguments where the function takes 10 (`value far` of a LOC() value in WINAPI.FI) |
 | F77 help object | The "Fortran Error Messages" object finds no book | It names WFCERRS.INF; the package only ships WFCERRS.HLP |
