@@ -127,7 +127,61 @@ heatmap path, not single touch.
 
 ## Phase 4: WiFi
 
-### The chip
+### A generic wireless layer, the Marvell chip as its first driver
+
+WiFi is built as a layer of its own (`kernel/src/net/wlan/`, with the
+protocol code host-testable in a `crates/wlan` crate), so that other
+chips can be added later without touching the rest. The split follows
+what differs between chips and what does not:
+
+```
+  WIFI.EXE / PM applet / \MPTN\ETC\WIFI.CFG
+                │ RS2API calls: scan, connect, disconnect, status
+        net::wlan (one per adapter)
+          - connection manager: profiles, choosing a network from scan
+            results, reconnect after loss, roaming between BSSs of an ESS
+          - supplicant: WPA2-PSK 4-way and group handshakes, PMK cache
+            (later WPA3-SAE, 802.1X/EAP)
+          - Nic adapter: link up only while associated and keyed
+                │ trait WlanDriver
+     ┌──────────┴─────────────┬───────────────────────────┐
+  full-MAC drivers         soft-MAC drivers (later)
+  (firmware associates:    + net::wlan::mac: 802.11 frame building,
+   Marvell 88W8897,          auth/assoc state machine, CCMP in
+   Broadcom FullMAC,         software, rate control
+   Intel's iwlwifi is NOT    (Realtek, MediaTek USB dongles,
+   this kind)                Atheros ath9k, Intel iwlwifi)
+```
+
+`WlanDriver` is the boundary every chip implements. A full-MAC driver
+implements the high-level calls; a soft-MAC driver implements only
+`tx_raw`/`rx_raw`, channel setting and key installation, and gets the
+rest from `net::wlan::mac`:
+
+```rust
+pub trait WlanDriver: Send + Sync {
+    fn caps(&self) -> WlanCaps;           // bands, ciphers, full/soft MAC, hw crypto
+    fn mac_address(&self) -> [u8; 6];
+    fn scan(&self, req: &ScanRequest) -> Result<(), WlanError>;  // results arrive as events
+    fn connect(&self, bss: &Bss, ies: &[u8]) -> Result<(), WlanError>; // full MAC
+    fn disconnect(&self, reason: u16);
+    fn set_key(&self, key: &Key) -> Result<(), WlanError>; // pairwise/group, CCMP/TKIP
+    fn send(&self, frame: &[u8]) -> bool; // 802.3 frames (EAPOL included)
+    fn poll_events(&self, f: &mut dyn FnMut(WlanEvent)); // scan result, associated, deauth, rx frame
+    // soft MAC only:
+    fn set_channel(&self, _ch: Channel) -> Result<(), WlanError> { Err(WlanError::Unsupported) }
+    fn tx_raw(&self, _frame: &[u8]) -> bool { false }
+}
+```
+
+Everything above the trait (network choice, WPA2, configuration, the
+user interface, the TCP/IP binding) is shared. A new full-MAC chip is
+just its transport and command set, and the first soft-MAC chip adds
+the MAC layer once for all later ones. The supplicant and the 802.11
+element parsing live in `crates/wlan` and are tested on the host against
+the IEEE 802.11 test vectors and `hostapd` captures.
+
+### The first driver: Marvell 88W8897
 
 Marvell 88W8897 on PCIe (Linux `mwifiex` + `mwifiex_pcie`). Its firmware
 does the 802.11 MAC work: scanning, authentication, association and
@@ -145,7 +199,7 @@ USB dongle. It does need:
 3. **Host commands.** GET_HW_SPEC, FUNC_INIT, MAC address, 802_11_SCAN
    (and the scan result parsing), 802_11_ASSOCIATE, KEY_MATERIAL, power
    save off, deauthenticate.
-4. **WPA2-PSK on the host.** The firmware encrypts (CCMP) once the keys
+4. **WPA2-PSK on the host** (in the shared supplicant, not in the driver). The firmware encrypts (CCMP) once the keys
    are installed with KEY_MATERIAL, but the 4-way handshake is the host's
    job (Linux runs wpa_supplicant): PBKDF2-SHA1 for the PMK from the
    passphrase, the PRF for the PTK, HMAC-SHA1 MIC on EAPOL-Key frames, AES
