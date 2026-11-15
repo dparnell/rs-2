@@ -9,14 +9,20 @@
 //! * [`mwifiex`]: the host command format of Marvell's full-MAC firmware
 //!   (88W8897 and relatives, Linux `mwifiex`): commands, responses, events
 //!   and scan results, without the bus transport.
+//! * [`crypto`]: SHA-1, HMAC, PBKDF2, the 802.11 PRF, AES-128 and the
+//!   RFC 3394 key wrap: what WPA2-Personal key management needs.
+//! * [`wpa`]: the WPA2-PSK supplicant (4-way and group key handshakes,
+//!   CCMP pairwise), driven by the EAPOL frames the network layer passes.
 
 #![no_std]
 
 extern crate alloc;
 
 pub mod config;
+pub mod crypto;
 pub mod ie;
 pub mod mwifiex;
+pub mod wpa;
 
 pub use ie::Bss;
 
