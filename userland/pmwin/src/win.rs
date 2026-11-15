@@ -186,7 +186,8 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     }
     if style & ws::VISIBLE != 0 {
         let r = st().desk.screen_rect(h);
-        st().desk.invalidate_screen(r);
+        let above = st().desk.above_painted(h);
+        st().desk.invalidate_screen_below(r, &above);
     }
     h
 }
@@ -249,6 +250,8 @@ pub fn remove(h: u32) {
     }
     let r = s.desk.screen_rect(h);
     let showing = s.desk.is_showing(h);
+    // (what was above it is not uncovered)
+    let above = if showing { s.desk.above(h) } else { Default::default() };
     let gone = s.desk.destroy(h);
     crate::cursor::windows_gone(s, &gone);
     crate::gpiapi::windows_gone(s, &gone);
@@ -282,7 +285,7 @@ pub fn remove(h: u32) {
         q.sent.retain(|m| !gone.contains(&m.hwnd) || m.reply);
     }
     if showing {
-        s.desk.invalidate_screen(r);
+        s.desk.invalidate_screen_below(r, &above);
     }
     crate::menu::forget(&gone);
     // The next window up becomes active when the active one went.
@@ -638,8 +641,11 @@ fn activate_ex(h: u32, raise: bool) {
     let s = st();
     let old = s.active;
     if raise {
-        s.desk.to_top(top);
-        ownees_follow(top);
+        if s.frames.contains_key(&top) {
+            s.desk.raise(top);
+        } else {
+            s.desk.to_top(top);
+        }
     }
     s.active = top;
     let saved = s.frames.get(&top).map_or(0, |f| f.focus_save);
@@ -835,7 +841,11 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
         show(h, false);
     }
     if fl & SWP_ZORDER != 0 && behind == HWND_TOP {
-        st().desk.to_top(h);
+        if st().frames.contains_key(&h) {
+            st().desk.raise(h);
+        } else {
+            st().desk.to_top(h);
+        }
     }
     // HWND_BOTTOM: below its siblings (above a pinned desktop window).
     if fl & SWP_ZORDER != 0 && behind == 4 {
@@ -908,8 +918,7 @@ fn activate_window_ex(h: u32, raise: bool) {
         return;
     }
     if raise {
-        st().desk.to_top(h);
-        ownees_follow(h);
+        st().desk.raise(h);
     }
     let f = st().focus;
     if f != 0 && (f == h || st().desk.is_ancestor(h, f)) {

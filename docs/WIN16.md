@@ -1283,6 +1283,17 @@ What they needed (W16TEST checks each):
   hides the window (without WM_SHOWWINDOW, as on Windows): the Dialog
   Editor shows the dialogs it reads from a .RES or .DLG so, and drew
   nothing after File > Open.
+- **Painting only what is uncovered** (PMWIN, see docs/PM.md): a window
+  shown, hidden, moved or destroyed made every window under the changed
+  rectangle repaint, also windows above it, and activating the Dialog
+  Editor's main window raised it over its toolbox, then lifted the
+  toolbox again, repainting it whole on every click. The toolbox's hook
+  (`wdeControlsHook`) asks for the current dialog on each message, which
+  while a control is sized from a corner asks the object being sized
+  for its parent, an action that object does not answer (an editor bug,
+  in 2.0 too, never reached on Windows, where the toolbox does not
+  repaint then): FMEDIT faulted at 0001:4592. Sizing from a corner now
+  works.
 - **The desktop window** (GetDesktopWindow's 0 here) has the screen as
   its window and client rectangle: the Dialog Editor puts its toolbox
   where it intersects the desktop's, and placed it off the screen.

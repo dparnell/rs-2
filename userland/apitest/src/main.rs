@@ -88,6 +88,7 @@ fn main(s: &Startup) -> u32 {
     sessions();
     debugging();
     cmd_beginlibpath();
+    cmd_errorlevel();
     libpath_errors();
     exe_formats();
     messages();
@@ -838,6 +839,35 @@ fn cmd_beginlibpath() {
         DosDelete(b"C:\\RS2LP.CMD\0".as_ptr());
         DosDelete(b"C:\\RS2LP.TXT\0".as_ptr());
         check("CMD: SET BEGINLIBPATH is the extended LIBPATH", rc == 0 && rc2 == 0 && buf[..got as usize].starts_with(b"C:\\RS2LP\r\n"));
+    }
+}
+
+/// CMD's IF [NOT] ERRORLEVEL n: true when the last program's code is n or
+/// more; ECHO (and IF itself) leave ERRORLEVEL as it was, so a FAILED
+/// line is not followed by an OK one.
+fn cmd_errorlevel() {
+    unsafe {
+        let (mut hf, mut action, mut n) = (0, 0, 0);
+        DosOpen(b"C:\\RS2EL.CMD\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL,
+            OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE, null_mut());
+        let text = b"@C:\\OS2\\CMD.EXE /C EXIT 3\r\n@IF ERRORLEVEL 1 ECHO A>C:\\RS2EL.TXT\r\n@IF NOT ERRORLEVEL 1 ECHO B>>C:\\RS2EL.TXT\r\n@IF ERRORLEVEL 3 ECHO C>>C:\\RS2EL.TXT\r\n@IF ERRORLEVEL 4 ECHO D>>C:\\RS2EL.TXT\r\n@IF NOT ERRORLEVEL 4 ECHO E>>C:\\RS2EL.TXT\r\n";
+        DosWrite(hf, text.as_ptr(), text.len() as u32, &mut n);
+        DosClose(hf);
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        DosExecPgm(null_mut(), 0, 0, b"CMD.EXE\0/C C:\\RS2EL.CMD\0\0".as_ptr(), null(), &mut res, b"C:\\OS2\\CMD.EXE\0".as_ptr());
+        let mut buf = [0u8; 32];
+        let mut got = 0;
+        if DosOpen(b"C:\\RS2EL.TXT\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYWRITE, null_mut()) == 0 {
+            DosRead(hf, buf.as_mut_ptr(), buf.len() as u32, &mut got);
+            DosClose(hf);
+        }
+        DosDelete(b"C:\\RS2EL.CMD\0".as_ptr());
+        DosDelete(b"C:\\RS2EL.TXT\0".as_ptr());
+        let ok = &buf[..got as usize] == b"A\r\nC\r\nE\r\n";
+        if !ok {
+            println!("CMD wrote {:?}", core::str::from_utf8(&buf[..got as usize]).unwrap_or("?"));
+        }
+        check("CMD: IF [NOT] ERRORLEVEL n (code >= n), ECHO keeps ERRORLEVEL", ok);
     }
 }
 

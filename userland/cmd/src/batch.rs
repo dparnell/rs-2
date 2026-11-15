@@ -194,10 +194,9 @@ pub fn if_cmd(sh: &mut Shell, s: &Simple) -> u32 {
     };
     if cond != not {
         sh.run_line(cmd.trim());
-        sh.rc
-    } else {
-        0
     }
+    // (the command's code, or ERRORLEVEL as it was)
+    sh.rc
 }
 
 /// First operand (respecting quotes) and the rest.

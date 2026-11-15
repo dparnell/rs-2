@@ -30,6 +30,7 @@ mod ddeml;
 mod drag;
 mod hooks;
 mod owatcom;
+mod paint;
 mod owner;
 mod pm;
 mod pres;
@@ -222,6 +223,7 @@ fn main(s: &Startup) -> u32 {
         drag::drag_checks(hab, client);
         win16::win16_checks(hab);
         owatcom::owatcom_checks(hab, hmq, client);
+        paint::paint_checks(hab);
     }
     unsafe {
         WinDestroyWindow(frame);
