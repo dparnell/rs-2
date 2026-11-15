@@ -290,17 +290,19 @@ rest from `net::wlan::mac`:
 
 ```rust
 pub trait WlanDriver: Send + Sync {
-    fn caps(&self) -> WlanCaps;           // bands, ciphers, full/soft MAC, hw crypto
+    fn name(&self) -> String;
+    fn caps(&self) -> WlanCaps;           // bands, full/soft MAC (later: ciphers, hw crypto)
     fn mac_address(&self) -> [u8; 6];
-    fn scan(&self, req: &ScanRequest) -> Result<(), WlanError>;  // results arrive as events
-    fn connect(&self, bss: &Bss, ies: &[u8]) -> Result<(), WlanError>; // full MAC
-    fn disconnect(&self, reason: u16);
-    fn set_key(&self, key: &Key) -> Result<(), WlanError>; // pairwise/group, CCMP/TKIP
-    fn send(&self, frame: &[u8]) -> bool; // 802.3 frames (EAPOL included)
-    fn poll_events(&self, f: &mut dyn FnMut(WlanEvent)); // scan result, associated, deauth, rx frame
-    // soft MAC only:
-    fn set_channel(&self, _ch: Channel) -> Result<(), WlanError> { Err(WlanError::Unsupported) }
-    fn tx_raw(&self, _frame: &[u8]) -> bool { false }
+    fn start(&self) -> Result<String, WlanError>; // firmware, init; on the wlan thread
+    fn scan(&self, req: &ScanRequest) -> Result<Vec<Bss>, WlanError>; // blocks a few seconds
+    fn diagnostics(&self) -> Vec<(String, String)>; // for WIFI STATUS
+    // next rounds:
+    // fn connect(&self, bss: &Bss, ies: &[u8]) -> Result<(), WlanError>; // full MAC
+    // fn disconnect(&self, reason: u16);
+    // fn set_key(&self, key: &Key) -> Result<(), WlanError>; // pairwise/group, CCMP/TKIP
+    // fn send(&self, frame: &[u8]) -> bool; // 802.3 frames (EAPOL included)
+    // fn poll_events(&self, f: &mut dyn FnMut(WlanEvent)); // associated, deauth, rx frame
+    // soft MAC only: set_channel, tx_raw
 }
 ```
 
@@ -310,6 +312,46 @@ just its transport and command set, and the first soft-MAC chip adds
 the MAC layer once for all later ones. The supplicant and the 802.11
 element parsing live in `crates/wlan` and are tested on the host against
 the IEEE 802.11 test vectors and `hostapd` captures.
+
+### Status (2026-11-16): round 1, firmware and scan
+
+Written, not yet run on the chip (QEMU has none):
+
+- `crates/wlan` (host tests: `cargo test -p wlan`): 802.11 elements and
+  `Bss` (SSID, channel, RSSI, RSN/WPA security), `WIFI.CFG` profiles,
+  and Marvell's host command format (`wlan::mwifiex`: framing,
+  PCIE_DESC_DETAILS, GET_HW_SPEC, legacy and extended scan commands and
+  their results).
+- `kernel/src/net/wlan`: the trait above (its first half), the adapters,
+  a `wlan` kernel thread started after CONFIG.SYS is read that starts
+  each chip, reads `\MPTN\ETC\WIFI.CFG` and scans once, logging every
+  network found.
+- `kernel/src/drivers/mwifiex.rs`: the 88W8897 (11AB:2B38). Firmware
+  from `C:\RS2\FIRMWARE\PCIE8897.BIN` (xtask fetches
+  `mrvl/pcie8897_uapsta.bin` from linux-firmware into `work/firmware`;
+  Marvell's licence, which allows binary redistribution, is
+  `RS2\FIRMWARE\MARVELL.TXT` from `dist/firmware/`), then
+  PCIE_DESC_DETAILS, FUNC_INIT, GET_HW_SPEC, RECONFIGURE_TX_BUFF,
+  MAC_CONTROL. Scans with the legacy command, four channels at a time
+  (2.4 GHz 1-11 active, 12-13 passive; 5 GHz 36-48 active, the rest
+  passive), and falls back to SCAN_EXT (results as events, what Linux
+  uses on this chip) if the firmware refuses it or it finds nothing.
+  Interrupts are not used yet: the driver polls the host interrupt
+  status while it waits for a command.
+- RS2API 620-622 (`kernel/src/api/wlan.rs`) and `WIFI.EXE`
+  (`userland/netapps/src/bin/wifi.rs`): `WIFI STATUS`, `WIFI SCAN`,
+  `WIFI LIST`, `WIFI RELOAD`.
+
+Testing on the Surface: boot the live stick with `bootlog`, wait for the
+desktop, then either open a command prompt and run `WIFI STATUS` and
+`WIFI SCAN`, or read `BOOT.LOG` afterwards: the lines starting
+`88W8897` and `wlan0` show each start-up step (BAR, revision, firmware
+status, the firmware blocks sent, each command), the first scan per
+channel group, and the networks found.
+
+Next rounds: association (802_11_ASSOCIATE with the profile from
+WIFI.CFG, link events), the data path (TX ring, received frames to a
+`net::Nic`), MSI, then WPA2-PSK in `crates/wlan`.
 
 ### The first driver: Marvell 88W8897
 

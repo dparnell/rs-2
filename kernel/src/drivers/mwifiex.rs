@@ -208,6 +208,8 @@ pub struct Card {
     revision: AtomicU32,
     rx_frames: AtomicU64,
     events: AtomicU64,
+    /// A scan has run (the first one logs each step).
+    scanned: core::sync::atomic::AtomicBool,
 }
 
 fn delay_ms(ms: u64) {
@@ -279,6 +281,7 @@ pub fn probe(d: &pci::Device) {
         revision: AtomicU32::new(0),
         rx_frames: AtomicU64::new(0),
         events: AtomicU64::new(0),
+        scanned: core::sync::atomic::AtomicBool::new(false),
     };
     crate::net::wlan::register(Arc::new(card));
 }
@@ -484,6 +487,10 @@ impl Card {
         if resp.result != 0 {
             return Err(WlanError::Refused(name, resp.result));
         }
+        if !g.up {
+            // Start-up: every step in the log until the chip has worked once.
+            crate::println!("{}: {name} done ({} bytes, {} ms)", self.name, resp.body.len(), crate::irq::uptime_ms() - t0);
+        }
         Ok(resp.body.to_vec())
     }
 
@@ -497,6 +504,14 @@ impl Card {
             0x1200 => "B0",
             _ => "?",
         };
+        crate::println!(
+            "{}: BAR 2 at {:#x}, revision {rev:#x} ({rev_name}), firmware status {:#x}, scratch 13 {:#x}, host interrupt status {:#x}",
+            self.name,
+            self.dev.bar(2),
+            r.r(FW_STATUS),
+            r.r(SCRATCH_13),
+            r.r(HOST_INT_STATUS)
+        );
         if g.rings.is_none() {
             g.rings = Some(Rings::new().ok_or(WlanError::Failed("out of memory".into()))?);
         }
@@ -632,25 +647,13 @@ impl WlanDriver for Card {
         if !g.up {
             return Err(WlanError::NotReady);
         }
-        // Up to four channels per command, one band and kind at a time
-        // (the response buffer holds about 2 KB of beacons).
-        let chans = mw::default_channels();
-        let mut found = Vec::new();
-        let mut i = 0;
-        while i < chans.len() {
-            let mut j = i + 1;
-            while j < chans.len() && j - i < 4 && chans[j].band == chans[i].band && chans[j].passive == chans[i].passive {
-                j += 1;
-            }
-            match self.scan_group(&mut g, &chans[i..j]) {
-                Ok(v) => found.extend(v),
-                Err(e @ WlanError::Timeout(_)) => return Err(e),
-                Err(e) => crate::println!("{}: scan of channels {}-{}: {e}", self.name, chans[i].channel, chans[j - 1].channel),
-            }
-            i = j;
-        }
-        for (cause, _) in core::mem::take(&mut g.events) {
-            self.note_event(cause);
+        let found = self.scan_all(&mut g)?;
+        if found.is_empty() && !g.ext_scan {
+            // Linux always uses the extended scan on this chip: if the
+            // legacy one finds nothing, try that before believing it.
+            crate::println!("{}: the legacy scan found nothing; trying the extended scan", self.name);
+            g.ext_scan = true;
+            return self.scan_all(&mut g);
         }
         Ok(found)
     }
@@ -662,5 +665,37 @@ impl WlanDriver for Card {
             ("events".into(), alloc::format!("{}", self.events.load(Ordering::Relaxed))),
             ("rx_frames".into(), alloc::format!("{}", self.rx_frames.load(Ordering::Relaxed))),
         ]
+    }
+}
+
+impl Card {
+    fn scan_all(&self, g: &mut Inner) -> Result<Vec<Bss>, WlanError> {
+        // Up to four channels per command, one band and kind at a time
+        // (the response buffer holds about 2 KB of beacons).
+        let first = !self.scanned.swap(true, Ordering::Relaxed);
+        let chans = mw::default_channels();
+        let mut found = Vec::new();
+        let mut i = 0;
+        while i < chans.len() {
+            let mut j = i + 1;
+            while j < chans.len() && j - i < 4 && chans[j].band == chans[i].band && chans[j].passive == chans[i].passive {
+                j += 1;
+            }
+            match self.scan_group(g, &chans[i..j]) {
+                Ok(v) => {
+                    if first {
+                        crate::println!("{}: channels {}-{}{}: {} network(s)", self.name, chans[i].channel, chans[j - 1].channel, if chans[i].passive { " (passive)" } else { "" }, v.len());
+                    }
+                    found.extend(v)
+                }
+                Err(e @ WlanError::Timeout(_)) => return Err(e),
+                Err(e) => crate::println!("{}: scan of channels {}-{}: {e}", self.name, chans[i].channel, chans[j - 1].channel),
+            }
+            i = j;
+        }
+        for (cause, _) in core::mem::take(&mut g.events) {
+            self.note_event(cause);
+        }
+        Ok(found)
     }
 }
