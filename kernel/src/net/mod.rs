@@ -58,12 +58,19 @@ pub trait Nic: Send + Sync {
     fn interrupt_driven(&self) -> bool {
         false
     }
+    /// The device was removed (a USB adapter): a new NIC with the same
+    /// MAC address takes its interface.
+    fn gone(&self) -> bool {
+        false
+    }
 }
 
 /// Timer interval of the network thread.
 pub const POLL_MS: u64 = 20;
 
 static NICS: SpinLock<Vec<Arc<dyn Nic>>> = SpinLock::new(Vec::new());
+/// The configuration given to [`start`], for NICs that come later.
+static CONFIG: SpinLock<Option<Config>> = SpinLock::new(None);
 static STACK: Mutex<Option<Stack>> = Mutex::new(None);
 /// Bumped on every change socket waiters may care about.
 pub static EVENTS: AtomicU64 = AtomicU64::new(0);
@@ -159,10 +166,37 @@ static KICK: AtomicBool = AtomicBool::new(false);
 static THREAD_WAIT: WaitQueue = WaitQueue::new();
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// A driver found a NIC.
+/// A driver found a NIC (also later, from interrupt context: a USB
+/// adapter plugged in). One that comes back (same MAC address) takes its
+/// old interface; a new one gets an interface from the network thread.
 pub fn register(nic: Arc<dyn Nic>) {
     crate::println!("net: {} {} (link {})", nic.name(), MacFmt(nic.mac()), if nic.link_up() { "up" } else { "down" });
-    NICS.lock().push(nic);
+    {
+        let mut nics = NICS.lock();
+        match nics.iter().position(|n| n.mac() == nic.mac() && n.gone()) {
+            Some(i) => nics[i] = nic,
+            None => nics.push(nic),
+        }
+    }
+    kick();
+}
+
+/// Add interface `n` (eth`n`) for `nic` to the stack, configured as `cfg`
+/// says.
+fn add_iface(st: &mut Stack, n: usize, nic: &Arc<dyn Nic>, cfg: &Config, now: u64) {
+    let i = st.add_ethernet(&alloc::format!("eth{n}"), nic.mac(), nic.mtu());
+    st.set_link(i, nic.link_up());
+    match cfg {
+        Config::Off => st.iface_up(i, false),
+        Config::Dhcp => st.start_dhcp(i, now),
+        Config::Static { addr, mask, gateway, dns } if n == 0 => {
+            st.configure(i, *addr, *mask, *gateway, dns);
+            let gw = gateway.map_or(String::from("none"), |g| alloc::format!("{g}"));
+            let dns: Vec<String> = dns.iter().map(|d| alloc::format!("{d}")).collect();
+            crate::println!("net: eth0 {}/{} gateway {gw} dns {} (static)", addr, mask.prefix_len(), dns.join(","));
+        }
+        Config::Static { .. } => st.iface_up(i, false),
+    }
 }
 
 pub fn nic_count() -> usize {
@@ -217,19 +251,7 @@ pub fn start(cfg: Config) {
         let mut g = STACK.lock();
         let mut st = Stack::new(seed(), "rs2");
         for (n, nic) in nics.iter().enumerate() {
-            let i = st.add_ethernet(&alloc::format!("eth{n}"), nic.mac(), nic.mtu());
-            st.set_link(i, nic.link_up());
-            match &cfg {
-                Config::Off => st.iface_up(i, false),
-                Config::Dhcp => st.start_dhcp(i, now),
-                Config::Static { addr, mask, gateway, dns } if n == 0 => {
-                    st.configure(i, *addr, *mask, *gateway, dns);
-                    let gw = gateway.map_or(String::from("none"), |g| alloc::format!("{g}"));
-                    let dns: Vec<String> = dns.iter().map(|d| alloc::format!("{d}")).collect();
-                    crate::println!("net: eth0 {}/{} gateway {gw} dns {} (static)", addr, mask.prefix_len(), dns.join(","));
-                }
-                Config::Static { .. } => st.iface_up(i, false),
-            }
+            add_iface(&mut st, n, nic, &cfg, now);
         }
         st.take_log();
         *g = Some(st);
@@ -240,6 +262,7 @@ pub fn start(cfg: Config) {
         crate::println!("net: interfaces disabled (net=off)");
     }
     flush_and_log();
+    *CONFIG.lock() = Some(cfg);
     RUNNING.store(true, Ordering::Release);
     crate::task::kthread::spawn("network", thread_main);
 }
@@ -281,6 +304,14 @@ fn thread_main() {
         {
             let mut g = STACK.lock();
             let st = g.as_mut().unwrap();
+            // NICs that came after start (interface 0 is the loopback).
+            if nics.len() + 1 > st.ifaces.len() {
+                let cfg = CONFIG.lock().clone().unwrap_or(Config::Dhcp);
+                for n in st.ifaces.len() - 1..nics.len() {
+                    add_iface(st, n, &nics[n], &cfg, now);
+                    links.push(nics[n].link_up());
+                }
+            }
             links.resize(nics.len(), false);
             for (n, nic) in nics.iter().enumerate() {
                 let up = nic.link_up();

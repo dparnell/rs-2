@@ -23,6 +23,7 @@ pub mod scsi;
 pub mod storage;
 pub mod svga;
 pub mod usb;
+pub mod usbnet;
 pub mod vbox;
 pub mod vmmouse;
 pub mod virtio;

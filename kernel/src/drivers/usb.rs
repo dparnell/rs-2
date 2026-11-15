@@ -22,6 +22,9 @@ pub const CLEAR_FEATURE: u8 = 1;
 pub const SET_FEATURE: u8 = 3;
 pub const GET_DESCRIPTOR: u8 = 6;
 pub const SET_CONFIGURATION: u8 = 9;
+pub const SET_INTERFACE: u8 = 11;
+/// bmRequestType of a standard request to an interface (host to device).
+pub const STD_IFACE_OUT: u8 = 0x01;
 /// Feature selector ENDPOINT_HALT.
 pub const ENDPOINT_HALT: u16 = 0;
 
@@ -37,9 +40,17 @@ pub const HID_SET_REPORT: u8 = 0x09;
 pub const HID_SET_IDLE: u8 = 0x0a;
 pub const HID_SET_PROTOCOL: u8 = 0x0b;
 
+// Communications (CDC) class requests.
+pub const CDC_SET_ETHERNET_PACKET_FILTER: u8 = 0x43;
+pub const NCM_GET_NTB_PARAMETERS: u8 = 0x80;
+pub const NCM_SET_NTB_INPUT_SIZE: u8 = 0x86;
+/// Packet filter bits: all multicast, directed, broadcast.
+pub const CDC_FILTER_DEFAULT: u16 = 0x02 | 0x04 | 0x08;
+
 // Descriptor types.
 pub const DESC_DEVICE: u8 = 1;
 pub const DESC_CONFIG: u8 = 2;
+pub const DESC_STRING: u8 = 3;
 pub const DESC_INTERFACE: u8 = 4;
 pub const DESC_ENDPOINT: u8 = 5;
 pub const DESC_HID: u8 = 0x21;
@@ -47,7 +58,11 @@ pub const DESC_HID_REPORT: u8 = 0x22;
 pub const DESC_HUB: u8 = 0x29;
 pub const DESC_SS_HUB: u8 = 0x2a;
 pub const DESC_SS_EP_COMPANION: u8 = 0x30;
+/// Class-specific interface descriptor (CDC functional descriptors).
+pub const DESC_CS_INTERFACE: u8 = 0x24;
 
+pub const CLASS_CDC: u8 = 2;
+pub const CLASS_CDC_DATA: u8 = 0x0a;
 pub const CLASS_HID: u8 = 3;
 pub const CLASS_STORAGE: u8 = 8;
 pub const CLASS_HUB: u8 = 9;
@@ -55,6 +70,14 @@ pub const CLASS_HUB: u8 = 9;
 /// Mass storage subclass SCSI transparent command set, protocol Bulk-Only.
 pub const MSC_SCSI: u8 = 6;
 pub const MSC_BOT: u8 = 0x50;
+
+/// Communications subclasses: Ethernet Control Model, Network Control
+/// Model.
+pub const CDC_ECM: u8 = 0x06;
+pub const CDC_NCM: u8 = 0x0d;
+// CDC functional descriptor subtypes.
+const CDC_UNION: u8 = 0x06;
+const CDC_ETHERNET: u8 = 0x0f;
 
 // Endpoint transfer types (bmAttributes bits 0-1).
 pub const EP_BULK: u8 = 2;
@@ -81,6 +104,35 @@ pub struct Setup {
 impl Setup {
     pub fn get_descriptor(kind: u8, index: u8, length: u16) -> Setup {
         Setup { request_type: DEV_TO_HOST, request: GET_DESCRIPTOR, value: (kind as u16) << 8 | index as u16, index: 0, length }
+    }
+
+    /// GET_DESCRIPTOR of configuration `index` (0-based, not its value).
+    pub fn get_config(index: u8, length: u16) -> Setup {
+        Self::get_descriptor(DESC_CONFIG, index, length)
+    }
+
+    /// GET_DESCRIPTOR of string `index` in US English.
+    pub fn get_string(index: u8, length: u16) -> Setup {
+        Setup { index: 0x0409, ..Self::get_descriptor(DESC_STRING, index, length) }
+    }
+
+    pub fn set_interface(iface: u8, alt: u8) -> Setup {
+        Setup { request_type: STD_IFACE_OUT, request: SET_INTERFACE, value: alt as u16, index: iface as u16, length: 0 }
+    }
+
+    /// CDC SET_ETHERNET_PACKET_FILTER on the communications interface.
+    pub fn packet_filter(iface: u8, filter: u16) -> Setup {
+        Setup { request_type: CLASS_IFACE_OUT, request: CDC_SET_ETHERNET_PACKET_FILTER, value: filter, index: iface as u16, length: 0 }
+    }
+
+    /// NCM GET_NTB_PARAMETERS (28 bytes back).
+    pub fn ntb_parameters(iface: u8) -> Setup {
+        Setup { request_type: CLASS_IFACE_IN, request: NCM_GET_NTB_PARAMETERS, value: 0, index: iface as u16, length: 28 }
+    }
+
+    /// NCM SET_NTB_INPUT_SIZE with a 4-byte dwNtbInMaxSize.
+    pub fn ntb_input_size(iface: u8) -> Setup {
+        Setup { request_type: CLASS_IFACE_OUT, request: NCM_SET_NTB_INPUT_SIZE, value: 0, index: iface as u16, length: 4 }
     }
 
     pub fn set_configuration(value: u8) -> Setup {
@@ -242,6 +294,10 @@ pub struct Interface {
     pub endpoints: Vec<Endpoint>,
     /// HID: the length of its report descriptor (from the HID descriptor).
     pub hid_report_len: u16,
+    /// CDC: the first subordinate interface of its union descriptor.
+    pub cdc_union: Option<u8>,
+    /// CDC Ethernet: the string index of the MAC address (iMACAddress).
+    pub cdc_mac: u8,
 }
 
 /// Configuration value and all interfaces of a full configuration
@@ -267,7 +323,18 @@ pub fn parse_interfaces(d: &[u8]) -> (u8, Vec<Interface>) {
                 protocol: x[7],
                 endpoints: Vec::new(),
                 hid_report_len: 0,
+                cdc_union: None,
+                cdc_mac: 0,
             }),
+            DESC_CS_INTERFACE if len >= 4 => {
+                if let Some(i) = out.last_mut() {
+                    match x[2] {
+                        CDC_UNION if len >= 5 => i.cdc_union = Some(x[4]),
+                        CDC_ETHERNET if len >= 4 => i.cdc_mac = x[3],
+                        _ => {}
+                    }
+                }
+            }
             DESC_HID if len >= 9 => {
                 if let Some(i) = out.last_mut() {
                     // The first class descriptor listed is the report
@@ -329,4 +396,76 @@ pub fn hid_interfaces(ifaces: &[Interface]) -> Vec<HidIface> {
             })
         })
         .collect()
+}
+
+/// A CDC Ethernet function (ECM or NCM): its communications interface
+/// and the alternate setting of its data interface with bulk endpoints.
+#[derive(Clone, Copy, Debug)]
+pub struct CdcEther {
+    pub ncm: bool,
+    pub comm: u8,
+    pub data: u8,
+    pub alt: u8,
+    pub mac_string: u8,
+    pub ep_in: Endpoint,
+    pub ep_out: Endpoint,
+    /// The notification endpoint (link state), if any.
+    pub ep_notify: Option<Endpoint>,
+}
+
+/// The first CDC ECM or NCM function of a configuration.
+pub fn cdc_ether(ifaces: &[Interface]) -> Option<CdcEther> {
+    for c in ifaces.iter().filter(|f| f.alt == 0 && f.class == CLASS_CDC && matches!(f.subclass, CDC_ECM | CDC_NCM)) {
+        let data = c.cdc_union.unwrap_or(c.number + 1);
+        let found = ifaces.iter().filter(|f| f.number == data && f.class == CLASS_CDC_DATA).find_map(|f| {
+            let ep_in = Endpoint::find(&f.endpoints, EP_BULK, true)?;
+            let ep_out = Endpoint::find(&f.endpoints, EP_BULK, false)?;
+            Some((f.alt, ep_in, ep_out))
+        });
+        if let Some((alt, ep_in, ep_out)) = found {
+            return Some(CdcEther {
+                ncm: c.subclass == CDC_NCM,
+                comm: c.number,
+                data,
+                alt,
+                mac_string: c.cdc_mac,
+                ep_in,
+                ep_out,
+                ep_notify: Endpoint::find(&c.endpoints, EP_INTERRUPT, true),
+            });
+        }
+    }
+    None
+}
+
+/// A MAC address from a string descriptor of 12 hex digits (UTF-16).
+pub fn parse_mac_string(d: &[u8]) -> Option<[u8; 6]> {
+    if d.len() < 2 + 24 || d[1] != DESC_STRING || (d[0] as usize) < 2 + 24 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
+    for (n, c) in d[2..2 + 24].chunks(2).enumerate() {
+        let v = (c[1] == 0).then(|| (c[0] as char).to_digit(16)).flatten()? as u8;
+        mac[n / 2] |= if n % 2 == 0 { v << 4 } else { v };
+    }
+    (mac != [0; 6]).then_some(mac)
+}
+
+/// What an NCM function's GET_NTB_PARAMETERS says (the parts we use).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NtbParams {
+    pub in_max: u32,
+    pub out_max: u32,
+    pub out_divisor: u16,
+    pub out_remainder: u16,
+    pub out_align: u16,
+}
+
+pub fn parse_ntb_params(d: &[u8]) -> Option<NtbParams> {
+    if d.len() < 28 || u16::from_le_bytes([d[0], d[1]]) < 28 {
+        return None;
+    }
+    let w = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]);
+    let dw = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]);
+    Some(NtbParams { in_max: dw(4), out_max: dw(16), out_divisor: w(20), out_remainder: w(22), out_align: w(24) })
 }

@@ -21,6 +21,7 @@ programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
                      Nic trait                     loopback
          ┌────────────────┴──┬───────────────┬───────────────┐
   drivers/e1000.rs  drivers/vmxnet3.rs  drivers/pcnet.rs  drivers/virtio/net.rs
+                                       drivers/usbnet.rs (USB CDC ECM/NCM, over xhci)
 ```
 
 The LAN requester (SMB file and print sharing: network drives, UNC
@@ -75,6 +76,17 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
   (1.x) or 10-byte (legacy) `virtio_net_hdr` without offloads, header and
   frame as a two-descriptor chain (what legacy devices without
   ANY_LAYOUT need), the receive queue kept full.
+* **USB Ethernet adapters, CDC ECM and NCM** (`drivers/usbnet.rs`,
+  transfers in `drivers/xhci.rs`; QEMU's `usb-net`, RTL8153 adapters
+  through their ECM configuration): MAC address from the iMACAddress
+  string, the data interface's bulk alternate setting, packet filter;
+  8 receive buffers kept queued on bulk IN (NCM: up to 16 KB transfer
+  blocks, every datagram taken), 16 page-sized transmit buffers (NCM:
+  one frame per NTB16), link state from NETWORK_CONNECTION
+  notifications. Completions are seen in the xHCI interrupt, which wakes
+  the network thread. Adapters plugged in after boot get the next
+  interface; one plugged in again takes its old one (same MAC). See
+  [SURFACE-PRO-4.md](SURFACE-PRO-4.md) (Phase 2).
 
 NICs with MSI (the 82574L) or MSI-X (virtio-net, vmxnet3) interrupt on received
 frames and link changes: the handler acknowledges the device and calls
@@ -295,6 +307,7 @@ cargo xtask run --net ...                              # e1000 (82540EM) on QEMU
 cargo xtask run --net vmxnet3 ...                      # also 82545em, e1000e, virtio
 cargo xtask run --net-model DEVICE ...                 # any QEMU NIC device
 cargo xtask run --virtio-net [--virtio-legacy] ...     # virtio-net
+cargo xtask run --usb-net ...                          # QEMU's usb-net on xHCI (CDC ECM, drivers/usbnet.rs)
 cargo xtask run --net --hostfwd tcp::8080-:80 ...      # more port forwards (5555 -> 23 is always there)
 cargo xtask run --net --guestfwd "tcp:10.0.2.100:79-cmd:nc 127.0.0.1 7979" ...   # guest connections to a host port
 ```
@@ -314,7 +327,8 @@ from it (5558), and a listener on port 23 the host reaches through
 listeners and a client that retries until the guest listens (a `nc -l
 5556` and `nc localhost 5555` do for the first and last). Verified with
 e1000 (82540EM), e1000e (82574L), e1000-82545em, virtio-net (1.x and
-legacy) with `--smp 4`, vmxnet3 (MSI-X, and polled with `nomsi`), and
+legacy) with `--smp 4`, vmxnet3 (MSI-X, and polled with `nomsi`), the
+USB CDC ECM adapter (`--usb-net`), and
 pcnet (also behind a PCI bridge, and with its registers in 32-bit mode;
 IBM FTP's `get`/`put` of 300 KB byte-identical on each model too): all checks pass, about 5-7 MB/s each way under
 TCG; apitest and stress still pass with a NIC present.

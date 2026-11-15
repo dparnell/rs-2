@@ -23,6 +23,16 @@
 //! speed devices behind a high-speed hub, its transaction translator in
 //! the slot context.
 //!
+//! USB network adapters (CDC ECM and NCM, `usbnet`) run asynchronously
+//! like the HID endpoints: receive buffers stay queued on the bulk-IN
+//! endpoint and completed ones wait for the network thread
+//! ([`net_take`]), which copies them out and queues them again; frames
+//! to send go into transmit buffers on the bulk-OUT endpoint
+//! ([`net_send`]) that their completion frees. A device whose first
+//! configuration has no driver has its other configurations read (QEMU's
+//! usb-net lists RNDIS first, Realtek RTL8153 adapters their vendor
+//! mode).
+//!
 //! Mass storage transfers are synchronous instead and run in the thread
 //! doing the I/O (`storage`): [`bulk`] and [`control`] queue the TRBs under
 //! the controller lock, then poll the event ring themselves, dropping the
@@ -36,7 +46,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{fence, Ordering};
+use core::sync::atomic::{fence, AtomicBool, Ordering};
 
 use super::hub::{self, Hub};
 use super::pci;
@@ -61,6 +71,15 @@ const MAX_HID: usize = 4;
 const REPORT_BUF: usize = 2048;
 const REPORT_MAX: usize = 256;
 const HUB_BUF: usize = REPORT_BUF + MAX_HID * REPORT_MAX;
+/// USB network adapters: the notification endpoint's buffer in the data
+/// page, the receive buffers (of up to NET_RX_MAX_PAGES pages: a frame,
+/// or an NCM transfer block) and the transmit buffers (a page each).
+const NET_INT_BUF: usize = HUB_BUF + 64;
+const NET_INT_MAX: usize = 64;
+const NET_RX_BUFS: usize = 8;
+const NET_RX_MAX_PAGES: usize = 4;
+const NET_TX_BUFS: usize = 16;
+const NET_BUF_PAGES: usize = NET_RX_BUFS * NET_RX_MAX_PAGES + NET_TX_BUFS;
 /// Time allowed for one command or control transfer.
 const STEP_TIMEOUT_MS: u64 = 1000;
 /// Boot-time wait for devices to appear and be configured (hubs take a
@@ -334,6 +353,14 @@ enum Step {
     SetIdle(u8),
     HubDesc,
     HubDepth,
+    /// Network adapters: the MAC address string, NCM transfer block
+    /// parameters and receive size, the data interface's alternate
+    /// setting, the packet filter.
+    NetMac,
+    NcmParams,
+    NcmInputSize,
+    NetAlt,
+    NetFilter,
     Configure,
     /// Recovering EP0 after a stall, then continuing the saved step.
     Ep0Reset,
@@ -377,6 +404,71 @@ struct Msc {
     ep_out: usb::Endpoint,
     ring_in: Ring,
     ring_out: Ring,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RxState {
+    Idle,
+    Queued,
+    Ready,
+}
+
+/// A receive buffer of a network adapter.
+#[derive(Clone, Copy)]
+struct RxBuf {
+    state: RxState,
+    /// Its TRBs while queued.
+    trbs: [u64; NET_RX_MAX_PAGES],
+    len: usize,
+}
+
+/// What a USB network adapter's NIC reads without the controller lock
+/// (it is asked while the lock is held: registration, the timer tick).
+#[derive(Default)]
+pub struct NetState {
+    /// Configured and running (false once removed or failed).
+    pub alive: AtomicBool,
+    /// Link up: true until a NETWORK_CONNECTION notification says not.
+    pub link: AtomicBool,
+    /// Received transfers wait for `net_take`.
+    pub rx: AtomicBool,
+}
+
+/// A CDC Ethernet (ECM or NCM) function: its endpoints and the buffers of
+/// its transfers.
+struct NetDev {
+    state: Arc<NetState>,
+    cdc: usb::CdcEther,
+    mac: [u8; 6],
+    /// NCM: the transfer block parameters.
+    ntb: Option<usb::NtbParams>,
+    ring_in: Ring,
+    ring_out: Ring,
+    ring_int: Ring,
+    /// NET_BUF_PAGES contiguous pages: receive buffers, then transmit
+    /// buffers.
+    bufs: u64,
+    /// Pages of each receive buffer.
+    rx_pages: usize,
+    rx: [RxBuf; NET_RX_BUFS],
+    /// Completed receive buffers in arrival order (a ring).
+    ready: [u8; NET_RX_BUFS],
+    ready_head: usize,
+    ready_len: usize,
+    /// TRB of each transmit buffer's transfer in flight (0: free).
+    tx: [u64; NET_TX_BUFS],
+    tx_next: usize,
+    errors: u32,
+}
+
+impl NetDev {
+    fn rx_buf(&self, b: usize) -> u64 {
+        self.bufs + (b * NET_RX_MAX_PAGES * PAGE) as u64
+    }
+
+    fn tx_buf(&self, b: usize) -> u64 {
+        self.bufs + ((NET_RX_BUFS * NET_RX_MAX_PAGES + b) * PAGE) as u64
+    }
 }
 
 /// A transfer started from thread context, and its outcome.
@@ -425,6 +517,9 @@ struct Device {
     hids: Vec<Hid>,
     hub: Option<HubDev>,
     msc: Option<Msc>,
+    net: Option<NetDev>,
+    /// Index of the configuration being read or used.
+    config_index: u8,
     /// LED state last sent; a SET_REPORT (or hub request) is in flight.
     leds: u8,
     ctl_busy: bool,
@@ -456,6 +551,8 @@ impl Device {
             hids: Vec::new(),
             hub: None,
             msc: None,
+            net: None,
+            config_index: 0,
             leds: 0,
             ctl_busy: false,
             reports: 0,
@@ -494,6 +591,15 @@ impl Device {
         if self.hub.as_ref().is_some_and(|h| h.ep.dci() == dci) {
             return self.hub.as_mut().map(|h| &mut h.ring);
         }
+        if let Some(n) = self.net.as_mut() {
+            if n.cdc.ep_in.dci() == dci {
+                return Some(&mut n.ring_in);
+            } else if n.cdc.ep_out.dci() == dci {
+                return Some(&mut n.ring_out);
+            } else if n.cdc.ep_notify.is_some_and(|e| e.dci() == dci) {
+                return Some(&mut n.ring_int);
+            }
+        }
         let m = self.msc.as_mut()?;
         if m.ep_in.dci() == dci {
             Some(&mut m.ring_in)
@@ -528,8 +634,9 @@ enum Cmd {
     /// Interrupt endpoint `dci` recovery after an error.
     EpReset(u8),
     EpDequeue(u8),
-    /// Slot of a removed device; its memory is freed on completion.
-    DisableSlot(u64),
+    /// Slot of a removed device; its memory (and a network adapter's
+    /// buffers) is freed on completion.
+    DisableSlot(u64, u64),
     /// Issued from thread context; the completion code is kept in
     /// `sync_cmds`.
     Sync,
@@ -1038,6 +1145,10 @@ impl Ctrl {
         for h in &d.hids {
             hid::detach(h.handle);
         }
+        if let Some(n) = &d.net {
+            n.state.alive.store(false, Ordering::Release);
+            crate::net::kick();
+        }
         if matches!(d.step, Step::Running) {
             crate::println!("{}: port {} device removed", self.name, d.path());
             if d.msc.is_some() {
@@ -1046,10 +1157,15 @@ impl Ctrl {
         }
         if d.slot != 0 {
             let trb = self.cmd.push(0, 0, TRB_DISABLE_SLOT << 10 | (d.slot as u32) << 24);
-            self.cmds.push((trb, i, 0, Cmd::DisableSlot(d.mem)));
+            self.cmds.push((trb, i, 0, Cmd::DisableSlot(d.mem, d.net.as_ref().map_or(0, |n| n.bufs))));
             self.ring_doorbell(0, 0);
-        } else if d.mem != 0 {
-            free_pages(d.mem);
+        } else {
+            if d.mem != 0 {
+                free_pages(d.mem);
+            }
+            if let Some(n) = &d.net {
+                free_net(n.bufs);
+            }
         }
     }
 
@@ -1058,6 +1174,10 @@ impl Ctrl {
         if let Some(d) = self.devs[i].as_mut() {
             crate::println!("{name}: port {}: {why} (step {:?})", d.path(), d.step);
             d.step = Step::Failed;
+            if let Some(n) = &d.net {
+                n.state.alive.store(false, Ordering::Release);
+                crate::net::kick();
+            }
         }
     }
 
@@ -1216,12 +1336,15 @@ impl Ctrl {
         let Some(n) = self.cmds.iter().position(|c| c.0 == ev.param) else { return };
         let (trb, i, epoch, kind) = self.cmds.remove(n);
         match kind {
-            Cmd::DisableSlot(mem) => {
+            Cmd::DisableSlot(mem, bufs) => {
                 if ev.slot() != 0 {
                     unsafe { write_volatile((phys::phys_to_virt(self.dcbaa) as *mut u64).add(ev.slot() as usize), 0) };
                 }
                 if mem != 0 {
                     free_pages(mem);
+                }
+                if bufs != 0 {
+                    free_net(bufs);
                 }
                 return;
             }
@@ -1243,8 +1366,8 @@ impl Ctrl {
                 let ctl = TRB_SET_DEQ << 10 | (slot as u32) << 24 | (dci as u32) << 16;
                 self.command(i, Cmd::EpDequeue(dci), deq, ctl);
             }
-            Cmd::EpDequeue(dci) => self.queue_interrupt(i, dci),
-            Cmd::DisableSlot(_) | Cmd::Sync => {}
+            Cmd::EpDequeue(dci) => self.restart_endpoint(i, dci),
+            Cmd::DisableSlot(..) | Cmd::Sync => {}
         }
     }
 
@@ -1307,6 +1430,12 @@ impl Ctrl {
         }
         let ok = code == CC_SUCCESS || code == CC_SHORT;
         let d = self.dev(i);
+        if d.net.as_ref().is_some_and(|n| {
+            n.cdc.ep_in.dci() == dci || n.cdc.ep_out.dci() == dci || n.cdc.ep_notify.is_some_and(|e| e.dci() == dci)
+        }) {
+            self.net_event(i, dci, &ev);
+            return;
+        }
         if d.hub.as_ref().is_some_and(|h| h.ep.dci() == dci) {
             if ok {
                 self.hub_changed(i, &ev);
@@ -1373,8 +1502,17 @@ impl Ctrl {
     /// device.
     fn control_error(&mut self, i: usize, code: u8) {
         let d = self.dev(i);
-        let tolerable =
-            matches!(d.step, Step::SetProtocol(_) | Step::ReportDesc(_) | Step::SetIdle(_) | Step::HubDepth | Step::Running);
+        let tolerable = matches!(
+            d.step,
+            Step::SetProtocol(_)
+                | Step::ReportDesc(_)
+                | Step::SetIdle(_)
+                | Step::HubDepth
+                | Step::NetMac
+                | Step::NcmInputSize
+                | Step::NetFilter
+                | Step::Running
+        );
         if code == CC_STALL && tolerable {
             d.resume = d.step;
             d.step = Step::Ep0Reset;
@@ -1516,13 +1654,23 @@ impl Ctrl {
                 let h = d.data_slice(9);
                 let total = u16::from_le_bytes([h[2], h[3]]).clamp(9, REPORT_BUF as u16);
                 d.step = Step::Config;
-                self.control(i, Setup::get_descriptor(usb::DESC_CONFIG, 0, total));
+                let index = d.config_index;
+                self.control(i, Setup::get_config(index, total));
             }
             Step::Config => {
                 let (value, ifaces) = usb::parse_interfaces(d.data_slice(REPORT_BUF));
                 d.config = value;
                 d.iface_class = if d.desc.class != 0 { d.desc.class } else { ifaces.iter().find(|f| f.alt == 0).map_or(0, |f| f.class) };
                 if !self.choose_driver(i, &ifaces) {
+                    let d = self.dev(i);
+                    if d.config_index + 1 < d.desc.configs {
+                        // Another configuration may have a driver.
+                        d.config_index += 1;
+                        d.step = Step::ConfigHead;
+                        let index = d.config_index;
+                        self.control(i, Setup::get_config(index, 9));
+                        return;
+                    }
                     let name = self.name.clone();
                     let d = self.dev(i);
                     crate::println!(
@@ -1544,12 +1692,58 @@ impl Ctrl {
                     let usb3 = h.hub.usb3;
                     d.step = Step::HubDesc;
                     self.control(i, Setup::hub_descriptor(usb3));
+                } else if let Some(n) = &d.net {
+                    match n.cdc.mac_string {
+                        0 => self.net_after_mac(i),
+                        index => {
+                            d.step = Step::NetMac;
+                            self.control(i, Setup::get_string(index, 26));
+                        }
+                    }
                 } else if d.hids.is_empty() {
                     self.configure_endpoints(i);
                 } else {
                     self.hid_setup(i, 0);
                 }
             }
+            Step::NetMac => {
+                let mac = usb::parse_mac_string(d.data_slice(26));
+                let (vendor, product, slot) = (d.desc.vendor, d.desc.product, d.slot);
+                let n = d.net.as_mut().unwrap();
+                n.mac = mac.unwrap_or_else(|| {
+                    // Locally administered, stable for the device.
+                    let (v, p) = (vendor.to_be_bytes(), product.to_be_bytes());
+                    [0x02, v[0], v[1], p[0], p[1], slot]
+                });
+                if mac.is_none() {
+                    crate::println!("{}: port {}: no MAC address string; using a made-up one", self.name, self.devs[i].as_ref().unwrap().path());
+                }
+                self.net_after_mac(i);
+            }
+            Step::NcmParams => {
+                let p = usb::parse_ntb_params(d.data_slice(28)).unwrap_or(usb::NtbParams {
+                    in_max: 2048,
+                    out_max: 2048,
+                    out_divisor: 4,
+                    out_remainder: 0,
+                    out_align: 4,
+                });
+                let n = d.net.as_mut().unwrap();
+                let size = (p.in_max as usize).clamp(2048, NET_RX_MAX_PAGES * PAGE);
+                n.rx_pages = size.div_ceil(PAGE);
+                n.ntb = Some(p);
+                let comm = n.cdc.comm;
+                unsafe { (phys::phys_to_virt(d.data()) as *mut u32).write_unaligned((size as u32).to_le()) };
+                d.step = Step::NcmInputSize;
+                self.control(i, Setup::ntb_input_size(comm));
+            }
+            Step::NcmInputSize => self.net_set_alt(i),
+            Step::NetAlt => {
+                let comm = d.net.as_ref().unwrap().cdc.comm;
+                d.step = Step::NetFilter;
+                self.control(i, Setup::packet_filter(comm, usb::CDC_FILTER_DEFAULT));
+            }
+            Step::NetFilter => self.configure_endpoints(i),
             Step::ReportDesc(n) => {
                 let path = d.path();
                 let name = self.name.clone();
@@ -1624,7 +1818,7 @@ impl Ctrl {
                     let mut buf = [0u8; 32];
                     buf.copy_from_slice(d.data_slice(32));
                     d.hub.as_mut().unwrap().hub.done(&buf, now);
-                } else {
+                } else if d.net.is_none() {
                     crate::trace!("usb: slot {} LEDs set to {:#x}", d.slot, d.leds);
                 }
             }
@@ -1662,6 +1856,35 @@ impl Ctrl {
                 return true;
             }
         }
+        if let Some(cdc) = usb::cdc_ether(ifaces) {
+            let Some(bufs) = alloc_pages(NET_BUF_PAGES, self.limit) else {
+                crate::println!("{name}: port {}: out of memory for a network adapter", self.dev(i).path());
+                return false;
+            };
+            let d = self.dev(i);
+            let idle = RxBuf { state: RxState::Idle, trbs: [0; NET_RX_MAX_PAGES], len: 0 };
+            let state = Arc::new(NetState { alive: AtomicBool::new(false), link: AtomicBool::new(true), rx: AtomicBool::new(false) });
+            d.net = Some(NetDev {
+                state,
+                cdc,
+                mac: [0; 6],
+                ntb: None,
+                ring_in: Ring::new(d.page(4)),
+                ring_out: Ring::new(d.page(5)),
+                ring_int: Ring::new(d.page(6)),
+                bufs,
+                rx_pages: 1,
+                rx: [idle; NET_RX_BUFS],
+                ready: [0; NET_RX_BUFS],
+                ready_head: 0,
+                ready_len: 0,
+                tx: [0; NET_TX_BUFS],
+                tx_next: 0,
+                errors: 0,
+            });
+            return true;
+        }
+        let d = self.dev(i);
         let usable = usb::hid_interfaces(ifaces).into_iter().filter(|f| {
             // Boot keyboards and mice as before; anything else only with
             // a report descriptor to look for a mouse in.
@@ -1741,6 +1964,13 @@ impl Ctrl {
             eps.push((m.ep_in, EP_BULK_IN, m.ring_in.base));
             eps.push((m.ep_out, EP_BULK_OUT, m.ring_out.base));
         }
+        if let Some(n) = &d.net {
+            eps.push((n.cdc.ep_in, EP_BULK_IN, n.ring_in.base));
+            eps.push((n.cdc.ep_out, EP_BULK_OUT, n.ring_out.base));
+            if let Some(e) = n.cdc.ep_notify {
+                eps.push((e, EP_INTERRUPT_IN, n.ring_int.base));
+            }
+        }
         let mut add = 1u32;
         let mut max_dci = 1;
         for (ep, kind, ring) in &eps {
@@ -1783,6 +2013,23 @@ impl Ctrl {
             }
             return;
         }
+        if let Some(n) = &d.net {
+            let (mac, ntb, notify, state) = (n.mac, n.ntb, n.cdc.ep_notify.map(|e| e.dci()), n.state.clone());
+            state.alive.store(true, Ordering::Release);
+            let kind = if ntb.is_some() { "NCM" } else { "ECM" };
+            let mtu = 1500;
+            crate::println!(
+                "{name}: port {path}: USB Ethernet ({kind}) {vendor:04x}:{product:04x}, MAC {} (slot {slot})",
+                tcpip::MacFmt(mac)
+            );
+            let h = Handle { ctrl: index, dev: i, epoch: d.epoch };
+            self.net_queue_rx(i);
+            if let Some(dci) = notify {
+                self.queue_interrupt(i, dci);
+            }
+            super::usbnet::attach(h, state, mac, ntb, mtu, alloc::format!("usb {} port {path}", self.name));
+            return;
+        }
         // Force the first LED update.
         d.leds = 0xff;
         for h in d.hids.iter_mut() {
@@ -1814,6 +2061,10 @@ impl Ctrl {
         } else if let Some(h) = d.hub.as_mut().filter(|h| h.ep.dci() == dci) {
             let len = h.ep.max_packet.clamp(1, 8) as u32;
             h.ring.push(data + HUB_BUF as u64, len, TRB_NORMAL << 10 | TRB_IOC | TRB_ISP);
+        } else if let Some(n) = d.net.as_mut().filter(|n| n.cdc.ep_notify.is_some_and(|e| e.dci() == dci)) {
+            let e = n.cdc.ep_notify.unwrap();
+            let len = (e.max_packet as usize).clamp(8, NET_INT_MAX) as u32;
+            n.ring_int.push(data + NET_INT_BUF as u64, len, TRB_NORMAL << 10 | TRB_IOC | TRB_ISP);
         } else {
             return;
         }
@@ -1834,6 +2085,149 @@ impl Ctrl {
             d.ctl_busy = true;
             unsafe { write_volatile(phys::phys_to_virt(d.data()), want) };
             self.control(i, Setup::set_leds(iface));
+        }
+    }
+
+    // Network adapters.
+
+    /// After the MAC address: NCM transfer block parameters, or the data
+    /// interface.
+    fn net_after_mac(&mut self, i: usize) {
+        let d = self.dev(i);
+        let n = d.net.as_ref().unwrap();
+        if n.cdc.ncm {
+            let comm = n.cdc.comm;
+            d.step = Step::NcmParams;
+            self.control(i, Setup::ntb_parameters(comm));
+        } else {
+            self.net_set_alt(i);
+        }
+    }
+
+    /// Select the data interface's alternate setting with the bulk
+    /// endpoints (the device starts moving frames).
+    fn net_set_alt(&mut self, i: usize) {
+        let d = self.dev(i);
+        let n = d.net.as_ref().unwrap();
+        let (data, alt) = (n.cdc.data, n.cdc.alt);
+        d.step = Step::NetAlt;
+        self.control(i, Setup::set_interface(data, alt));
+    }
+
+    /// Queue every idle receive buffer on the bulk-IN endpoint.
+    fn net_queue_rx(&mut self, i: usize) {
+        let Some(d) = self.devs[i].as_mut() else { return };
+        let slot = d.slot;
+        let Some(n) = d.net.as_mut() else { return };
+        let (dci, mps, pages) = (n.cdc.ep_in.dci(), n.cdc.ep_in.max_packet as usize, n.rx_pages);
+        let mut any = false;
+        for b in 0..NET_RX_BUFS {
+            if n.rx[b].state != RxState::Idle {
+                continue;
+            }
+            let base = n.rx_buf(b);
+            for k in 0..pages {
+                let last = k + 1 == pages;
+                let flags = TRB_NORMAL << 10 | TRB_ISP | if last { TRB_IOC } else { TRB_CH };
+                let status = PAGE as u32 | td_size((pages - 1 - k) * PAGE, mps) << 17;
+                n.rx[b].trbs[k] = n.ring_in.push(base + (k * PAGE) as u64, status, flags);
+            }
+            n.rx[b].state = RxState::Queued;
+            any = true;
+        }
+        if any {
+            self.ring_doorbell(slot, dci);
+        }
+    }
+
+    /// A transfer of a network adapter completed.
+    fn net_event(&mut self, i: usize, dci: u8, ev: &Event) {
+        let code = ev.code();
+        let ok = code == CC_SUCCESS || code == CC_SHORT;
+        let residue = (ev.status & 0xff_ffff) as usize;
+        let d = self.dev(i);
+        let data = d.data();
+        let n = d.net.as_mut().unwrap();
+        let failed = if dci == n.cdc.ep_in.dci() {
+            let pages = n.rx_pages;
+            let found = (0..NET_RX_BUFS)
+                .filter(|&b| n.rx[b].state == RxState::Queued)
+                .find_map(|b| n.rx[b].trbs[..pages].iter().position(|&t| t == ev.param).map(|k| (b, k)));
+            let Some((b, k)) = found else { return };
+            if ok {
+                n.errors = 0;
+                n.rx[b].state = RxState::Ready;
+                n.rx[b].len = k * PAGE + PAGE.saturating_sub(residue.min(PAGE));
+                let tail = (n.ready_head + n.ready_len) % NET_RX_BUFS;
+                n.ready[tail] = b as u8;
+                n.ready_len += 1;
+                n.state.rx.store(true, Ordering::Release);
+                crate::net::kick();
+                false
+            } else {
+                n.rx[b].state = RxState::Idle;
+                true
+            }
+        } else if dci == n.cdc.ep_out.dci() {
+            let Some(k) = n.tx.iter().position(|&t| t == ev.param) else { return };
+            n.tx[k] = 0;
+            if ok {
+                n.errors = 0;
+            }
+            !ok
+        } else {
+            if ok {
+                n.errors = 0;
+                let len = n.cdc.ep_notify.map_or(8, |e| (e.max_packet as usize).clamp(8, NET_INT_MAX));
+                let got = len.saturating_sub(residue);
+                let b = unsafe { core::slice::from_raw_parts(phys::phys_to_virt(data).add(NET_INT_BUF), got) };
+                // NETWORK_CONNECTION: wValue 1 = connected.
+                if got >= 8 && b[0] == 0xa1 && b[1] == 0x00 {
+                    let up = b[2] != 0;
+                    if n.state.link.swap(up, Ordering::AcqRel) != up {
+                        crate::net::kick();
+                    }
+                }
+                self.queue_interrupt(i, dci);
+                return;
+            }
+            true
+        };
+        if failed {
+            let n = self.dev(i).net.as_mut().unwrap();
+            n.errors += 1;
+            let errors = n.errors;
+            crate::trace!("usb: slot {} network endpoint {dci} completion code {code}", self.dev(i).slot);
+            // A stall also halted the device's side.
+            let d = self.dev(i);
+            if code == CC_STALL && !d.ctl_busy {
+                let n = d.net.as_ref().unwrap();
+                let ep = [n.cdc.ep_in, n.cdc.ep_out].into_iter().chain(n.cdc.ep_notify).find(|e| e.dci() == dci);
+                if let Some(ep) = ep {
+                    d.ctl_busy = true;
+                    self.control(i, Setup::clear_halt(ep.address));
+                }
+            }
+            self.endpoint_error(i, dci, errors);
+        }
+    }
+
+    /// Endpoint `dci` was reset after an error and its queue dropped:
+    /// queue its transfers again.
+    fn restart_endpoint(&mut self, i: usize, dci: u8) {
+        let Some(n) = self.devs[i].as_mut().and_then(|d| d.net.as_mut()) else {
+            self.queue_interrupt(i, dci);
+            return;
+        };
+        if n.cdc.ep_in.dci() == dci {
+            for b in n.rx.iter_mut().filter(|b| b.state == RxState::Queued) {
+                b.state = RxState::Idle;
+            }
+            self.net_queue_rx(i);
+        } else if n.cdc.ep_out.dci() == dci {
+            n.tx = [0; NET_TX_BUFS];
+        } else {
+            self.queue_interrupt(i, dci);
         }
     }
 
@@ -1911,6 +2305,8 @@ pub fn generation() -> u32 {
 pub enum UsbKind {
     Hub { ports: u8, usb3: bool },
     Storage,
+    /// A CDC Ethernet adapter.
+    Net,
     /// HID boot interfaces (keyboard, mouse or both).
     Hid(Vec<hid::Kind>),
     /// No driver; the device's (or first interface's) class.
@@ -1956,6 +2352,8 @@ pub fn devices() -> Vec<UsbInfo> {
                 UsbKind::Hub { ports: h.hub.desc.ports, usb3: h.hub.usb3 }
             } else if d.msc.is_some() {
                 UsbKind::Storage
+            } else if d.net.is_some() {
+                UsbKind::Net
             } else if !d.hids.is_empty() {
                 let mut k: Vec<hid::Kind> = d.hids.iter().map(|h| h.kind).collect();
                 k.dedup();
@@ -2197,8 +2595,67 @@ fn stop_endpoint(h: Handle, dci: u8) -> Result<(), XferError> {
     set_dequeue(h, dci)
 }
 
+fn free_net(bufs: u64) {
+    for i in 0..NET_BUF_PAGES {
+        phys::free(bufs + (i * PAGE) as u64);
+    }
+}
+
 fn free_pages(mem: u64) {
     for i in 0..DEV_PAGES {
         phys::free(mem + (i * PAGE) as u64);
     }
+}
+
+// Network adapters (thread context, for `usbnet`).
+
+/// Fill a free transmit buffer (`fill` gets it and the bulk-OUT packet
+/// size, and returns the length) and send it. False if none is free, the
+/// device is gone or `fill` returned 0.
+pub fn net_send(h: Handle, fill: impl FnOnce(&mut [u8], usize) -> usize) -> bool {
+    with_dev(h, |c| {
+        let d = c.dev(h.dev);
+        let slot = d.slot;
+        let Some(n) = d.net.as_mut() else { return false };
+        let k = n.tx_next;
+        if n.tx[k] != 0 {
+            return false;
+        }
+        let buf = n.tx_buf(k);
+        let page = unsafe { core::slice::from_raw_parts_mut(phys::phys_to_virt(buf), PAGE) };
+        let len = fill(page, n.cdc.ep_out.max_packet as usize).min(PAGE);
+        if len == 0 {
+            return false;
+        }
+        n.tx[k] = n.ring_out.push(buf, len as u32, TRB_NORMAL << 10 | TRB_IOC);
+        n.tx_next = (k + 1) % NET_TX_BUFS;
+        let dci = n.cdc.ep_out.dci();
+        c.ring_doorbell(slot, dci);
+        true
+    })
+    .unwrap_or(false)
+}
+
+/// Copies of the transfers received since the last call (frames, or NCM
+/// transfer blocks), oldest first; their buffers are queued again.
+pub fn net_take(h: Handle) -> Vec<Vec<u8>> {
+    with_dev(h, |c| {
+        let mut out = Vec::new();
+        let Some(n) = c.dev(h.dev).net.as_mut() else { return out };
+        while n.ready_len > 0 {
+            let b = n.ready[n.ready_head] as usize;
+            n.ready_head = (n.ready_head + 1) % NET_RX_BUFS;
+            n.ready_len -= 1;
+            let len = n.rx[b].len.min(n.rx_pages * PAGE);
+            let src = unsafe { core::slice::from_raw_parts(phys::phys_to_virt(n.rx_buf(b)), len) };
+            out.push(src.to_vec());
+            n.rx[b].state = RxState::Idle;
+        }
+        n.state.rx.store(false, Ordering::Release);
+        if !out.is_empty() {
+            c.net_queue_rx(h.dev);
+        }
+        out
+    })
+    .unwrap_or_default()
 }
