@@ -223,8 +223,10 @@ port.
 **Debugging a wedged system.** Ctrl+Alt+F12 (QEMU: `--type '{ctrl-alt-f12}'`)
 prints to the serial port the device interrupt counts, every process's
 threads with their state, priority, last user-mode address and the
-kernel return addresses on their stacks, and then (through an IPI) where
-each CPU is. Symbolise the addresses against the kernel ELF
+kernel return addresses on their stacks (a blocked thread also its wake-up
+tick and whether it is on the sleeper list), the mutex semaphores that
+are owned (owner, count, waiting threads), the tick count, and then
+(through an IPI) where each CPU is. Symbolise the addresses against the kernel ELF
 (`target/x86_64-unknown-none/{checked,release}/rs2-kernel`, e.g. with
 `llvm-nm -n`). Locks are only tried, so the dump works when something
 holds them.

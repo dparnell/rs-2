@@ -455,6 +455,25 @@ pub fn dos_request_mutex_sem(c: &mut Ctx) -> u32 {
     }
 }
 
+/// Owned mutex semaphores (name, owner, count, waiting thread ids), for
+/// thread reports; None when the table is busy.
+pub fn mutex_report() -> Option<Vec<String>> {
+    let t = TABLE.try_lock()?;
+    let mut out = Vec::new();
+    for (&h, s) in t.sems.iter() {
+        let Some(k) = s.kind.try_lock() else { continue };
+        if let Kind::Mutex { owner: Some((pid, tid)), count, .. } = &*k {
+            out.push(alloc::format!(
+                "mutex {:x} {} owner pid {pid} tid {tid} count {count} waiters {:?}",
+                h,
+                s.name.as_deref().unwrap_or("-"),
+                s.waiters.try_ids()
+            ));
+        }
+    }
+    Some(out)
+}
+
 /// Undo one try_mutex (a muxwait that could not take every member).
 fn give_back(s: &Sem, me: (u32, u32)) {
     let freed = {
