@@ -94,5 +94,24 @@ pub fn paint_checks(hab: u32) {
         WinDestroyWindow(top);
         WinDestroyWindow(low);
         crate::pump_for(hab, 200);
+
+        // A frame with a tool palette it owns above it: raising the frame
+        // (a click on it) brings the palette along, which repaints
+        // nothing of the palette (IBM's FrameAdjustFramePos).
+        let mut fcf = 0x0001u32; // FCF_TITLEBAR
+        let mut client = 0;
+        let frame = WinCreateStdWindow(HWND_DESKTOP, 0x8000_0000, &mut fcf, b"PmxPaint\0".as_ptr(), b"Pal\0".as_ptr(), 0, 0, 1, &mut client);
+        WinSetWindowPos(frame, 3, 400, 100, 250, 250, 0x0001 | 0x0002 | 0x0004 | 0x0008);
+        let pal = WinCreateWindow(HWND_DESKTOP, b"PmxPaint\0".as_ptr(), b"\0".as_ptr(), 0x8000_0000 | 0x1000_0000, 600, 300, 80, 80, frame, 3, 3, core::ptr::null(), core::ptr::null());
+        let other = mk(2, 300, 50, 200, 120);
+        crate::pump_for(hab, 300);
+        reset();
+        WinSetWindowPos(frame, 3, 0, 0, 0, 0, 0x0004);
+        crate::pump_for(hab, 300);
+        check("raising a frame keeps the palette it owns painted (no WM_PAINT)", paints(3) == 0);
+        WinDestroyWindow(other);
+        WinDestroyWindow(pal);
+        WinDestroyWindow(frame);
+        crate::pump_for(hab, 200);
     }
 }

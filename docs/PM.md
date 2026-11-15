@@ -917,6 +917,18 @@ mouse and keyboard. What PMWIN has:
   client). IBM's `XUpdateWindow` leaves such a window for later
   instead, but rs2 also invalidates a parent where a child is shown,
   which would keep it waiting.
+- What a change repaints, as IBM's PM: a window shown, hidden, moved,
+  reshaped or destroyed invalidates, in each window under the changed
+  area, only that window's visible region there; never the windows
+  above it (`Desktop::above`, `invalidate_screen_below`), except
+  siblings a window without `WS_CLIPSIBLINGS` paints over
+  (`above_painted`). Raising a frame (activation, `HWND_TOP`) brings the
+  windows it owns along as one change (`Desktop::raise`, as IBM's
+  FrameAdjustFramePos), and each repaints only what it did not show
+  before; a tool palette nowhere near the change gets no `WM_PAINT`
+  (Open Watcom's Dialog Editor's toolbox was repainted on every click,
+  and its hook then faulted). `CS_SYNCPAINT` and `CS_SAVEBITS` get no
+  special handling here.
 - Controls, each a registered class with its own window procedure:
   `WC_BUTTON` (push, default, check box, radio, 3-state and their
   automatic kinds, `BM_*`, `BN_CLICKED`), `WC_STATIC` (text with DT_*

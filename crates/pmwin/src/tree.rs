@@ -10,6 +10,7 @@ use crate::ws;
 
 pub type Hwnd = u32;
 
+
 pub const HWND_DESKTOP: Hwnd = 1;
 pub const HWND_OBJECT: Hwnd = 2;
 
@@ -634,6 +635,71 @@ impl Desktop {
     /// FrameAddSelfAndOwnees). Qt's popup menus are owned by their frame,
     /// which a click on the menu bar activates after the menu opened.
     pub fn lift_ownees(&mut self, h: Hwnd) {
+        let affected = self.ownees(h);
+        let before: Vec<Region> = affected.iter().map(|&w| self.visible_region(w, false)).collect();
+        self.reorder_ownees(h);
+        self.repaint_gained(&affected, before);
+    }
+
+    /// Bring a window to the top of its siblings with the windows it owns
+    /// just above it, as one change (IBM's FrameAdjustFramePos): only what
+    /// each of them did not show before paints. Clicking a frame with a
+    /// tool palette above it repainted the whole palette (raised over it,
+    /// then lifted again).
+    pub fn raise(&mut self, h: Hwnd) {
+        if h == self.pinned && h != 0 {
+            return;
+        }
+        let mut affected = alloc::vec![h];
+        affected.extend(self.ownees(h));
+        let before: Vec<Region> = affected.iter().map(|&w| self.visible_region(w, false)).collect();
+        let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        if let Some(pw) = self.windows.get_mut(&p) {
+            pw.children.retain(|&c| c != h);
+            pw.children.push(h);
+        }
+        self.reorder_ownees(h);
+        self.generation = self.generation.wrapping_add(1);
+        self.repaint_gained(&affected, before);
+    }
+
+    /// What each of `windows` shows now and did not show in `before`
+    /// (their visible regions then) paints.
+    fn repaint_gained(&mut self, windows: &[Hwnd], before: Vec<Region>) {
+        for (&w, b) in windows.iter().zip(before) {
+            let mut gained = self.visible_region(w, false);
+            for r in &b.rects {
+                gained.subtract(r);
+            }
+            let o = self.origin(w);
+            for r in gained.rects {
+                self.invalidate(w, Some(r.offset(-o.x, -o.y)), true);
+            }
+        }
+    }
+
+    /// The siblings `h` owns, directly or through other siblings it owns.
+    fn ownees(&self, h: Hwnd) -> Vec<Hwnd> {
+        let Some(p) = self.get(h).map(|w| w.parent) else { return Vec::new() };
+        let Some(kids) = self.windows.get(&p).map(|pw| pw.children.clone()) else { return Vec::new() };
+        let owned = |w: Hwnd| {
+            let mut o = self.get(w).map_or(0, |x| x.owner);
+            for _ in 0..kids.len() {
+                if o == h {
+                    return true;
+                }
+                if o == 0 || o == w || !kids.contains(&o) {
+                    return false;
+                }
+                o = self.get(o).map_or(0, |x| x.owner);
+            }
+            false
+        };
+        kids.iter().copied().filter(|&c| c != h && owned(c)).collect()
+    }
+
+    /// lift_ownees' new z-order, without repainting.
+    fn reorder_ownees(&mut self, h: Hwnd) {
         let Some(p) = self.get(h).map(|w| w.parent) else { return };
         let Some(kids) = self.windows.get(&p).map(|pw| pw.children.clone()) else { return };
         let owned = |w: Hwnd| {
@@ -664,12 +730,6 @@ impl Desktop {
             pw.children = rest;
         }
         self.generation = self.generation.wrapping_add(1);
-        for o in ownees {
-            if self.get(o).is_some_and(|w| w.visible_style()) {
-                let r = self.screen_rect(o);
-                self.invalidate_screen(r);
-            }
-        }
     }
 
     /// Put a window just below a sibling (WinCreateWindow's and
@@ -921,6 +981,31 @@ mod tests {
         d.invalidate_screen(Rect::new(120, 120, 160, 160));
         assert!(d.get(top).unwrap().update.is_empty());
         assert!(!d.get(low).unwrap().update.is_empty());
+    }
+
+    #[test]
+    fn raising_a_frame_keeps_its_palette_painted() {
+        let mut d = desk();
+        let other = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 300, 300), 1, 7, 0, 0).unwrap();
+        let main = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(10, 10, 200, 200), 2, 8, 0, 0).unwrap();
+        let pal = d.create(HWND_DESKTOP, main, 1, ws::VISIBLE, Rect::new(150, 150, 250, 250), 3, 9, 0, 0).unwrap();
+        // The other window comes above both, then the main window is
+        // raised again: its palette comes with it, and only what each did
+        // not show paints.
+        d.raise(other);
+        for h in [other, main, pal, HWND_DESKTOP] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        d.raise(main);
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().children.iter().rev().take(2).copied().collect::<Vec<_>>(), alloc::vec![pal, main]);
+        assert!(!d.get(main).unwrap().update.is_empty());
+        // Clicking main again (already at the top with its palette):
+        // nothing paints, the palette above it neither.
+        for h in [other, main, pal] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        d.raise(main);
+        assert!(d.get(pal).unwrap().update.is_empty() && d.get(main).unwrap().update.is_empty());
     }
 
     #[test]
