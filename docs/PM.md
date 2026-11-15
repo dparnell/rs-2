@@ -3671,6 +3671,11 @@ it gets.
   category and PM REXX (bringing REXX) installed, the Games and REXX
   folders appearing on the desktop, and after a restart Solitaire
   started from the Games folder.
+- Windows help files (`docs/WIN16.md` "Windows Help"): `cargo test -p winhlp`
+  converts every `.HLP` under work/win16apps (Delphi's, the CD's, CICA's)
+  and checks topics, jumps, keywords and contexts; QEMU runs with
+  `--init "OS2\VIEW.EXE C:\DELPHI\BIN\DELPHI.HLP"` and Delphi's
+  Help|Contents and F1.
 - The help manager: `cargo test -p ipf` (the IBM files on the media:
   structures, rendered text of the System Editor's help and REXX.INF,
   every panel laid out and every bitmap decoded), and QEMU runs with

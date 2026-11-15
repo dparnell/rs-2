@@ -717,6 +717,46 @@ WM_RENDERALLFORMATS and WM_DESTROYCLIPBOARD, the viewer
 WM_DRAWCLIPBOARD (PM has one viewer: SetClipboardViewer replaces it,
 ChangeClipboardChain removes it).
 
+### Windows Help
+
+Windows programs' help files (WinHelp's `.HLP`, Windows 3.0 and 3.1)
+show in the help manager's window, which reads them by converting them
+into IPF help libraries as it opens them (`crates/winhlp`): every topic
+becomes a panel (`res` = its number + 1), the contents topic and the
+topics it leads to the table of contents, K keywords the index; fonts,
+bold/italic/underline, colours, indents, tab stops, tables, jumps
+(links), popups (the footnote window), the Jump/Popup macros into the
+same file, and the pictures (SHG/MRB bitmaps with their hotspots,
+metafiles drawn into bitmaps) are kept. Not done: other macros
+(buttons, BrowseButtons...), jumps into other files (plain text),
+secondary windows, the non-scrolling region's own look, A-keywords,
+WinHelp 4 files. `VIEW FILE.HLP` shows one; the crate's `hlp2ipf` and
+`render` examples convert one on the host.
+
+![A Windows help file in VIEW: a See Also popup](images/rs2-winhelp-view-popup.png)
+
+WinHelp(hwnd, file, command, data) (`winhelp.rs`) goes to rs2's
+WINHELP.EXE (`userland/winhelp`), a program of its own as on Windows:
+WinHelp finds its window by class (`MS_WINHELP`), starting
+`\OS2\WINHELP.EXE` when there is none (a `WINHELP.EXE` in the Windows
+directory or along the PATH comes first), and writes the request into
+its named shared memory (the file as a full path, the command, its
+number or string, the caller's frame) under a named mutex. WINHELP.EXE
+shows one file at a time, as Windows' does, opening files on a thread of
+its own (DELPHI.HLP, 4 MB, takes about 20 s under QEMU's emulation;
+programs asking for help do not wait); it ends when its window is closed
+or every program that asked for help said HELP_QUIT. The help manager's
+`Rs2WinHelp` (HELPMGR.201) carries the command out: HELP_CONTEXT (and
+HELP_CONTEXTPOPUP) by `[MAP]` number, HELP_CONTENTS and HELP_SETCONTENTS,
+HELP_KEY and HELP_MULTIKEY (one topic: shown; else the index),
+HELP_PARTIALKEY, HELP_COMMAND's JumpId/JI, JumpContext/JC, their popups,
+JumpContents/Contents and Search(), HELP_HELPONHELP; Borland's MULTIHLP
+search (1004h) looks the keyword up in the help file's `.HDX` index
+(next to it: `Borland Help Data File`, the help files, and records of
+keyword, context string, title and file number). Windows programs get F1
+as a key (PM's F1 accelerator, which makes it WM_HELP, is declined for
+WIN16's windows).
+
 ### What stage 3 leaves
 
 Multiple selection in the Open dialog (OFN_ALLOWMULTISELECT), the
@@ -894,7 +934,7 @@ Windows; what they needed, in the order they asked for it:
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
-| **Delphi** | 1.0 | Delphi 1 | **works** | Installs from its CD with its own installer; designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
+| **Delphi** | 1.0 | Delphi 1 | **works** | Installs from its CD with its own installer; designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on; Help and F1 (below) |
 | Delphi 1.01 patch | 1.01 | DOS (RTPatch) | works | PATCH.EXE from the RAD Pack CD in a DOS session; the patched Delphi compiles and runs programs |
 | RAD Pack setup | 1995 | Delphi 1 | works | The CD's launcher and the four installers it starts (below) |
 | **Resource Workshop** | 4.5 | C++ (OWL) | **works** | Opens a resource script, edits a dialog (a control placed from its tool palette), saves the script |
@@ -1013,7 +1053,7 @@ What the installer needed (each has a W16TEST check):
 
 Not yet: the installer still says SHARE.EXE is not loaded (its check is
 not INT 2Fh; it is a notice, Continue goes on; OS/2 shares files
-itself). Windows' Help files it installs need WinHelp (below). Its own
+itself). Windows' Help files it installs open in WINHELP (below). Its own
 registry keys read `DELPHI\shellopencommand`: the backslashes are
 missing in Borland's compiled script itself.
 
@@ -1119,15 +1159,33 @@ debuggers" says how rs2 gives it that.
 
 ![Step Over: the execution point on the next line](images/rs2-win16-delphi-step.png)
 
-Not yet:
+**Help**: Help|Contents, Topic Search and F1 show Delphi's help (see
+"Windows Help" below): F1 on a component, a property or a word in the
+code editor finds its topic through Borland's MULTIHLP search (WinHelp
+command 1004h) in `C:\DELPHI\BIN\DELPHI.HDX`, the keyword index HELPINST
+built from the `.KWF` files, which names the topic's help file
+(DELPHI.HLP, WINAPI.HLP or CWG.HLP) and context string. A keyword with
+several topics shows the first (Windows' MULTIHLP lists them).
 
-- **Help**: Help|Contents and F1 do nothing; Windows Help (WINHELP.EXE)
-  is not there, and WinHelp has no viewer to start (rs2's VIEW reads
-  OS/2 .INF/.HLP files, not Windows .HLP).
-- The Object Inspector's name column starts narrow: TPropListBox sets
-  its divider from its first WM_SIZE, which Windows sends from
-  CreateWindow while the list is still 0 pels wide (as WIN16 now does);
-  drag the divider. The IDE's toolbar hints sometimes stay up.
+![F1 on a form: the TForm component's topic](images/rs2-win16-delphi-help-f1.png)
+
+As on Windows:
+
+- The Object Inspector's name column starts narrow (twice a row's
+  height). TPropListBox halves its width for the divider on its first
+  WM_SIZE, and limits it to at least two rows' height and at most its
+  width less three; Delphi measures the row height before the list has a
+  window, and the WM_SIZE that CreateWindow sends a child window (hidden
+  too: Windows, Wine and ReactOS alike) finds the list 0 pels wide. Drag
+  the divider.
+- The installer's SHARE.EXE notice during the copy (Continue goes on;
+  OS/2 shares files itself): the check is in Borland's install script
+  engine (INSTRUN's `SHARELOADED`), not INT 2Fh AX=1000h, which WIN16
+  answers.
+
+The speedbar hints (they once stayed up) hide when the pointer leaves
+the button, for the desktop, another window or another button, and when
+it is clicked.
 
 ### The Delphi RAD Pack
 
@@ -1253,7 +1311,6 @@ Not yet:
   Typing the path works.
 - The Turbo Debugger installer's last page shows its picture button
   empty (Borland's BORBTNII class gets its bitmaps another way).
-- WinHelp (all the RAD Pack's .HLP files, as Delphi's).
 - **Turbo Debugger for Windows** (`C:\TDW\BIN\TDW.EXE`) starts, loads
   its debugger DLL (TDWINTH.DLL, TOOLHELP-based) and its display DLL
   (TDWGUI.DLL, which draws TDW's text screen in a window) and stops with
