@@ -140,10 +140,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     // the kernel thread's 128 KB (KSTACK_SIZE) is what the shell restarts
     // and CALL= chains, started from Process::finish, always had.
     let cmdline: &'static str = cmdline;
-    task::kthread::spawn("boot", move || {
-        boot::start(cmdline);
-        klog::BOOTED.store(true, core::sync::atomic::Ordering::Release);
-    });
+    task::kthread::spawn("boot", move || boot::start(cmdline));
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();
 }

@@ -50,10 +50,6 @@ pub fn tail(out: &mut [u8]) -> usize {
     since(0, out)
 }
 
-/// Set once `boot::start` has returned (CONFIG.SYS read, the shell
-/// started).
-pub static BOOTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
 /// `bootlog`: copy the log to `\RS2\BOOT.LOG` on the boot volume every
 /// few seconds while it grows (the first copy once the disks are up).
 pub fn start_bootlog() {
@@ -64,15 +60,6 @@ pub fn start_bootlog() {
         let mut written = usize::MAX;
         let mut buf = alloc::vec![0u8; SIZE];
         let mut warned = false;
-        // Not while boot::start runs. This gate was the first workaround
-        // for a race that is fixed now (boot::start blocked on CPU 0's idle
-        // thread, sched::wake queued the idle thread and a second CPU ran
-        // it too; docs/SURFACE-PRO-4.md, phase 0): boot::start runs on its
-        // own kernel thread and idle threads are never queued. Dropping
-        // the gate would get BOOT.LOG written earlier.
-        while !BOOTED.load(Ordering::Acquire) {
-            crate::task::sched::sleep_ms(200);
-        }
         loop {
             let head = position();
             if head != written {

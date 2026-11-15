@@ -73,8 +73,9 @@ Fixed (2026-11-15): idle threads are never queued (waking one only marks
 it ready) and `boot::start` runs on its own kernel thread ("boot"; its
 128 KB stack is what shell restarts have always loaded programs on).
 Checked with the repro and the bootlog gate removed (USB and AHCI, fresh
-images, BOOT.LOG written during `boot::start`). The gate (`klog::BOOTED`)
-stays but is no longer needed.
+images, BOOT.LOG written during `boot::start`). The `klog::BOOTED` gate that
+kept bootlog waiting until `boot::start` returned is gone: BOOT.LOG gets
+its first copy as soon as the boot volume is up.
 
 Still to do: UDP syslog once a network adapter works (phase 2); saving a
 crash report across a warm reboot (a RAM region the loader writes to
