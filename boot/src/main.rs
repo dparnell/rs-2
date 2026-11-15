@@ -493,6 +493,9 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
         println!("  bootdiag: squares at the top: blue = loader, green (every 5th yellow) = kernel stages");
     }
     println!("  exiting boot services");
+    if diag {
+        bootinfo::diag_square(&info.framebuffer, 0, 0, 0x0060ff);
+    }
     let (mut size, mut key, mut dsize, mut ver);
     // The map changes between the two calls only if the firmware does
     // something meanwhile; a few tries, not forever.
@@ -508,13 +511,18 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
             break;
         }
         tries += 1;
+        // A red square 1 for each refusal (the firmware may not print
+        // any more after one).
+        if diag {
+            bootinfo::diag_square(&info.framebuffer, 0, 1, 0xe00000);
+        }
         if tries == 16 {
             panic!("ExitBootServices failed 16 times, last status {status:#x}");
         }
     }
     // No firmware calls from here on.
     if diag {
-        bootinfo::diag_square(&info.framebuffer, 0, 0, 0x0060ff);
+        bootinfo::diag_square(&info.framebuffer, 0, 1, 0x0060ff);
     }
     let mut count = 0;
     for i in 0..size / dsize {
@@ -546,7 +554,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     }
     info.memory_count = count as u64;
     if diag {
-        bootinfo::diag_square(&info.framebuffer, 0, 1, 0x0060ff);
+        bootinfo::diag_square(&info.framebuffer, 0, 2, 0x0060ff);
     }
 
     unsafe {

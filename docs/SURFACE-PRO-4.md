@@ -59,20 +59,26 @@ The SP4 has no serial port. Done (2026-11-15):
   format, address; "none usable" if GOP gave none the kernel can draw
   on), the top of memory and where the page tables, stack and boot info
   are, then gives up after 16 failed ExitBootServices instead of looping.
-  Then every stage draws the next 16-pixel square in a row at the top of
+  Then every stage draws the next square in a row at the top right of
   the framebuffer, straight into its pixels, so even a hang before the
-  kernel's screen works shows how far boot got: blue = the loader
-  (0 boot services left, 1 jumping to the kernel), green with every
-  fifth yellow = kernel stages, which also print `bootdiag: N name` once
-  the screen works (and `bootdiag: pci ...` for each PCI function before
-  its driver probes it). `bootdiag=N` stops after square N, to
-  photograph the kernel's text before the desktop covers it. The squares:
-  0-1 loader, 2 kernel entered, 3 serial, 4 screen, 5 gdt,
-  6 smp::init_bsp, 7 idt and fpu, 8 mm, 9 acpi, 10 rtc, 11 irq,
-  12 sched and fs, 13 vmware, 14 drivers, 15 loader/infoseg/perf, 16 kbd,
-  17 mouse, 18 chardev, 19 interrupts on, 20 apic, 21 other CPUs,
-  22 kernel threads, 23 boot thread, 24 CONFIG.SYS read, 25 network,
-  26 SYSDLLS/RUN=, 27 starting programs, 28 first program started
+  kernel's screen works shows how far boot got. Squares are 16 pixels on
+  a 1024-wide screen, 32 at 2736x1824. Blue = the loader: 0 before
+  ExitBootServices (firmware still up; if it is missing, drawing into the
+  framebuffer does not work at all), 1 boot services left (red instead:
+  the firmware refused ExitBootServices), 2 jumping to the kernel. Green
+  with every fifth yellow = kernel stages, which also print
+  `bootdiag: N name` once the screen works (and `bootdiag: pci ...` for
+  each PCI function before its driver probes it). `bootdiag=N` stops
+  after square N, to photograph the kernel's text before the desktop
+  covers it. The squares: 0-2 loader, 3 kernel entered, 4 serial,
+  5 screen, 6 gdt, 7 smp::init_bsp, 8 idt and fpu, 9 mm, 10 acpi, 11 rtc,
+  12 irq, 13 sched and fs, 14 vmware, 15 drivers, 16 loader/infoseg/perf,
+  17 kbd, 18 mouse, 19 chardev, 20 interrupts on, 21 apic, 22 other CPUs,
+  23 kernel threads, 24 boot thread, 25 CONFIG.SYS read, 26 network,
+  27 SYSDLLS/RUN=, 28 starting programs, 29 first program started
+  (2026-11-16: the second stick still stopped after "exiting boot
+  services" with no squares seen, so square 0 was added before it and
+  the squares grew on large screens)
   (`bootdiag.rs`; a QEMU boot with `bootdiag` prints the current list).
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads

@@ -162,29 +162,36 @@ pub fn diag_on(cmdline: &str) -> bool {
     cmdline.split_whitespace().any(|w| w.eq_ignore_ascii_case("bootdiag") || w.starts_with("bootdiag="))
 }
 
-/// `bootdiag` squares the loader draws (the kernel's come after them).
-pub const DIAG_LOADER_SQUARES: u32 = 2;
+/// `bootdiag` squares the loader draws (the kernel's come after them):
+/// 0 before ExitBootServices (the firmware still running: if even this
+/// one is missing, drawing into the framebuffer does not work), 1 after
+/// it, 2 just before jumping to the kernel.
+pub const DIAG_LOADER_SQUARES: u32 = 3;
 
 /// `bootdiag`: draw square `n` (0 = the leftmost) of the progress row at
 /// the top of the framebuffer (right-aligned), colour `rgb` (0xRRGGBB). `map` is
 /// where physical memory is mapped (0 in the loader, identity mapped).
-/// Squares are 16 pixels with 4 between; a row holds 48, then the next row.
+/// Squares are 16 pixels with 4 between on a 1024-pixel-wide screen,
+/// larger in proportion on a larger one (32 on a Surface Pro 4's 2736, so
+/// they are not lost on a high-density panel); a row holds 48, then the
+/// next row.
 pub fn diag_square(fb: &Framebuffer, map: u64, n: u32, rgb: u32) {
-    const SIZE: u32 = 16;
-    const STEP: u32 = 20;
     const PER_ROW: u32 = 48;
-    if fb.base == 0 || fb.width < PER_ROW * STEP + 16 || fb.height < 4 * STEP + 16 {
+    let scale = (fb.width / 1024).min(fb.height / 768).max(1);
+    let (size, step, margin) = (16 * scale, 20 * scale, 8 * scale);
+    if fb.base == 0 || fb.width < PER_ROW * step + 2 * margin || fb.height < 4 * step + 2 * margin {
         return;
     }
     let (r, g, b) = ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
     let px = if fb.format == 0 { r | g << 8 | b << 16 } else { b | g << 8 | r << 16 };
-    let x0 = fb.width - 8 - PER_ROW * STEP + (n % PER_ROW) * STEP;
-    let y0 = 8 + (n / PER_ROW).min(3) * STEP;
+    let x0 = fb.width - margin - PER_ROW * step + (n % PER_ROW) * step;
+    let y0 = margin + (n / PER_ROW).min(3) * step;
     let base = (map + fb.base) as *mut u32;
-    for y in y0..y0 + SIZE {
-        for x in x0..x0 + SIZE {
+    let frame = scale.max(1);
+    for y in y0..y0 + size {
+        for x in x0..x0 + size {
             // A white frame, so a square shows on any background.
-            let edge = y == y0 || y == y0 + SIZE - 1 || x == x0 || x == x0 + SIZE - 1;
+            let edge = y < y0 + frame || y >= y0 + size - frame || x < x0 + frame || x >= x0 + size - frame;
             let off = y as usize * fb.stride as usize + x as usize;
             unsafe { base.add(off).write_volatile(if edge { 0x00ff_ffff } else { px }) };
         }
