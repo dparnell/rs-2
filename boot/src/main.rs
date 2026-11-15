@@ -328,7 +328,19 @@ fn hypervisor() -> bool {
     unsafe { core::arch::x86_64::__cpuid(1).ecx & (1 << 31) != 0 }
 }
 
-fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
+/// The pixel layout of a GOP mode as `Framebuffer::format` (0 RGBX,
+/// 1 BGRX), counting a bitmask mode whose masks are one of those two;
+/// None for anything the kernel cannot draw on.
+fn pixel_layout(i: &efi::GopModeInfo) -> Option<u32> {
+    match i.pixel_format {
+        0 | 1 => Some(i.pixel_format),
+        2 if i.masks[..3] == [0xff, 0xff00, 0xff_0000] => Some(0),
+        2 if i.masks[..3] == [0xff_0000, 0xff00, 0xff] => Some(1),
+        _ => None,
+    }
+}
+
+fn setup_framebuffer(want: Option<(u32, u32)>, diag: bool) -> Framebuffer {
     let mut gop: *mut c_void = ptr::null_mut();
     let mut fb = Framebuffer { base: 0, size: 0, width: 0, height: 0, stride: 0, format: 0 };
     if (bs().locate_protocol)(&GOP_GUID, ptr::null_mut(), &mut gop) != SUCCESS {
@@ -343,33 +355,56 @@ fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
                 let mut info = ptr::null_mut();
                 ((*gop).query_mode)(gop, m, &mut size, &mut info) == SUCCESS && {
                     let i = &*info;
-                    i.width == w && i.height == h && i.pixel_format < 2
+                    i.width == w && i.height == h && pixel_layout(i).is_some()
                 }
             })
         };
-        // Without `video=`, real hardware keeps the mode the firmware
-        // booted in (the panel's own): a Surface Pro 4 offers 1024x768,
-        // but as a buffer its Blt scales onto the 2736x1824 panel, so the
+        let booted = mode.mode;
+        // Without `video=`, real hardware gets its largest mode (the
+        // panel's own): a Surface Pro 4 boots in 1024x768, but that mode
+        // is a buffer its Blt scales onto the 2736x1824 panel, so the
         // firmware's text shows and nothing written straight into the
         // "framebuffer" ever does. A virtual machine's modes are all
         // real; 1024x768 there, as before.
-        let default = if hypervisor() { find(1024, 768) } else { None };
-        let current = &*mode.info;
-        if want.is_none() && default.is_none() && current.pixel_format < 2 {
-            // Keep it.
-        } else if let Some(m) = want.and_then(|(w, h)| find(w, h)).or(default) {
-            ((*gop).set_mode)(gop, m);
+        let largest = || {
+            (0..mode.max_mode)
+                .filter_map(|m| {
+                    let mut size = 0;
+                    let mut info = ptr::null_mut();
+                    (((*gop).query_mode)(gop, m, &mut size, &mut info) == SUCCESS && pixel_layout(&*info).is_some())
+                        .then(|| (m, (*info).width as u64 * (*info).height as u64))
+                })
+                .max_by_key(|&(_, area)| area)
+                .map(|(m, _)| m)
+        };
+        let default = if hypervisor() { find(1024, 768) } else { largest() };
+        if let Some(m) = want.and_then(|(w, h)| find(w, h)).or(default) {
+            if m != mode.mode {
+                ((*gop).set_mode)(gop, m);
+            }
+        }
+        // Listed after the switch, which clears the screen.
+        if diag {
+            println!("  video modes (firmware booted in {booted}, now {}):", (*(*gop).mode).mode);
+            for m in 0..mode.max_mode {
+                let mut size = 0;
+                let mut info = ptr::null_mut();
+                if ((*gop).query_mode)(gop, m, &mut size, &mut info) == SUCCESS {
+                    let i = &*info;
+                    println!("    {m}: {}x{} format {} masks {:x?} stride {}", i.width, i.height, i.pixel_format, i.masks, i.stride);
+                }
+            }
         }
         let mode = &*(*gop).mode;
         let info = &*mode.info;
-        if info.pixel_format < 2 {
+        if let Some(format) = pixel_layout(info) {
             fb = Framebuffer {
                 base: mode.fb_base,
                 size: mode.fb_size as u64,
                 width: info.width,
                 height: info.height,
                 stride: info.stride,
-                format: info.pixel_format,
+                format,
             };
         }
     }
@@ -462,7 +497,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     info.rsdp = find_rsdp();
     info.boot_device = boot_dev;
     println!("  boot device kind {} partition {} start {}", boot_dev.kind, boot_dev.partition, boot_dev.start);
-    info.framebuffer = setup_framebuffer(bootinfo::video_mode(info.cmdline()));
+    info.framebuffer = setup_framebuffer(bootinfo::video_mode(info.cmdline()), bootinfo::diag_on(info.cmdline()));
 
     // Kernel stack: 256 KB, reached through the direct map.
     const STACK_PAGES: usize = 64;

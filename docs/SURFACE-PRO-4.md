@@ -87,8 +87,13 @@ The SP4 has no serial port. Done (2026-11-15):
   Blt scales onto the 2736x1824 panel, so the firmware's text showed and
   nothing written straight into the "framebuffer" (squares, the kernel's
   screen) ever did. On real hardware (no CPUID hypervisor bit) the loader
-  now keeps the mode the firmware booted in unless `video=` asks for
-  another; virtual machines still get 1024x768.
+  now picks the largest mode it can draw on unless `video=` asks for
+  another; virtual machines still get 1024x768. A bitmask mode (GOP
+  format 2) whose masks are plain RGBX or BGRX counts as drawable (the
+  first try, keeping the firmware's mode, still ended in 1024x768: the
+  Surface's native mode was presumably refused for its pixel format).
+  With `bootdiag` the loader lists every mode, with format and masks,
+  after it switches.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.
