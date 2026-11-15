@@ -477,6 +477,141 @@ fn Rs2ViewBook_(hab: u32, names: *const u8, topic: *const u8, rc: *mut u32) -> u
     }
 }
 
+/// rs2: carry out a Windows program's WinHelp request for WINHELP.EXE:
+/// `file` (a Windows help file, converted as it is opened) in help
+/// instance `inst` (0: a new one, a book's: closing its window posts
+/// WM_QUIT), command `cmd` (HELP_CONTEXT...) with its number `num` or
+/// string `text` (`ntext` bytes: a keyword or a macro). Returns the help
+/// instance, or 0 with the error in `*rc`.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2WinHelp(hab: u32, inst: u32, file: *const u8, cmd: u32, num: u32, text: *const u8, ntext: u32, owner: u32, rc: *mut u32) -> u32 {
+    crate::stack::deep(|| {
+        let file = unsafe { cstr(file) }.to_vec();
+        let text = if text.is_null() { Vec::new() } else { unsafe { core::slice::from_raw_parts(text, ntext as usize) }.to_vec() };
+        let r = win_help(hab, inst, &file, cmd, num, &text, owner);
+        if !rc.is_null() {
+            unsafe { *rc = r.err().unwrap_or(0) };
+        }
+        r.unwrap_or(0)
+    })
+}
+
+const HELP_CONTEXT: u32 = 0x0001;
+const HELP_CONTENTS: u32 = 0x0003;
+const HELP_HELPONHELP: u32 = 0x0004;
+const HELP_SETCONTENTS: u32 = 0x0005;
+const HELP_CONTEXTPOPUP: u32 = 0x0008;
+const HELP_FORCEFILE: u32 = 0x0009;
+const HELP_KEY: u32 = 0x0101;
+const HELP_COMMAND: u32 = 0x0102;
+const HELP_PARTIALKEY: u32 = 0x0105;
+const HELP_MULTIKEY: u32 = 0x0201;
+
+fn win_help(hab: u32, h: u32, file: &[u8], cmd: u32, num: u32, text: &[u8], owner: u32) -> Result<u32, u32> {
+    let new = h == 0 || instance(h).is_none();
+    let h = if new {
+        let h = create(hab, file, b"", HelpTable::None, false, true)?;
+        let inst = instance(h).unwrap();
+        let title = inst.libs.first().map(|l| match &l.winhelp {
+            Some(w) if !w.title.is_empty() => w.title.clone(),
+            _ => l.doc().title().to_vec(),
+        });
+        inst.title = title.unwrap_or_default();
+        h
+    } else {
+        h
+    };
+    // (`owner`, the program's frame, is not the instance's owner: that
+    // one is told 0x1003 when the window closes, as VIEWDOC is.)
+    let _ = owner;
+    let inst = instance(h).unwrap();
+    let Some(wh) = inst.libs.first().and_then(|l| l.winhelp.as_deref()) else {
+        // An OS/2 help file named to WinHelp: its contents.
+        window::show_contents(inst);
+        return Ok(h);
+    };
+    let contents = wh.contents_res;
+    let act = match cmd {
+        HELP_CONTEXT | HELP_CONTEXTPOPUP => Act::Show(wh.map_number(num).unwrap_or(contents)),
+        HELP_SETCONTENTS => match wh.map_number(num) {
+            Some(r) => Act::SetContents(r),
+            None => Act::Nothing,
+        },
+        HELP_HELPONHELP => Act::HelpOnHelp,
+        // A keyword with one topic shows it; else the index (Windows'
+        // Search dialog).
+        HELP_KEY | HELP_MULTIKEY => match wh.keyword(text) {
+            Some([one]) => Act::Show(*one),
+            _ => Act::Index,
+        },
+        HELP_PARTIALKEY => match if text.is_empty() { &[][..] } else { wh.keywords_with_prefix(text) } {
+            [(_, t)] if t.len() == 1 => Act::Show(t[0]),
+            _ => Act::Index,
+        },
+        HELP_COMMAND => macro_action(wh, text),
+        HELP_CONTENTS => Act::Show(contents),
+        // HELP_FORCEFILE and the rest: the file is shown.
+        _ => Act::Nothing,
+    };
+    let act = match act {
+        Act::SetContents(r) => {
+            if let Some(w) = inst.libs[0].winhelp.as_deref_mut() {
+                w.contents_res = r;
+            }
+            Act::Nothing
+        }
+        a => a,
+    };
+    match act {
+        Act::Show(res) => match inst.panel_by_res(res) {
+            Some(p) => window::show_panel(inst, p, true),
+            None => window::show_contents(inst),
+        },
+        Act::Index => window::show_index(inst),
+        Act::HelpOnHelp => {
+            inst.help_for_help();
+        }
+        _ if new => {
+            if let Some(p) = inst.panel_by_res(contents) {
+                window::show_panel(inst, p, true);
+            } else {
+                window::show_contents(inst);
+            }
+        }
+        _ => {}
+    }
+    Ok(h)
+}
+
+/// What a WinHelp command does.
+enum Act {
+    Show(u16),
+    Index,
+    HelpOnHelp,
+    SetContents(u16),
+    Nothing,
+}
+
+/// What a WinHelp macro (HELP_COMMAND) does: JumpId/JI, JumpContext/JC
+/// (and their popups) and JumpContents/Contents show a topic, Search()
+/// the index; the others nothing.
+fn macro_action(wh: &winhlp::Converted, m: &[u8]) -> Act {
+    let m = m.trim_ascii();
+    let Some(open) = m.iter().position(|&c| c == b'(') else { return Act::Nothing };
+    let name = m[..open].trim_ascii().to_ascii_uppercase();
+    let inner = &m[open + 1..m.iter().rposition(|&c| c == b')').unwrap_or(m.len())];
+    let unquote = |a: &[u8]| -> Vec<u8> { a.trim_ascii().iter().copied().filter(|&c| c != b'"' && c != b'`' && c != b'\'').collect() };
+    let last = inner.split(|&c| c == b',').last().map(unquote).unwrap_or_default();
+    let topic = match &name[..] {
+        b"JUMPID" | b"JI" | b"POPUPID" | b"PI" => wh.context(&last),
+        b"JUMPCONTEXT" | b"JC" | b"POPUPCONTEXT" | b"PC" => core::str::from_utf8(&last).ok().and_then(|n| n.parse::<u32>().ok()).and_then(|n| wh.map_number(n)),
+        b"JUMPCONTENTS" | b"CONTENTS" => Some(wh.contents_res),
+        b"SEARCH" => return Act::Index,
+        _ => None,
+    };
+    topic.map_or(Act::Nothing, Act::Show)
+}
+
 // ---- Panel lookup ----
 
 impl Instance {

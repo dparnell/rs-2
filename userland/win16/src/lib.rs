@@ -58,6 +58,7 @@ mod toolhelp;
 mod w16lock;
 mod user;
 mod ver;
+mod winhelp;
 
 use core::cell::UnsafeCell;
 use thunk16::Pascal;

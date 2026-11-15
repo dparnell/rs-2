@@ -351,8 +351,10 @@ struct Table {
 struct Writer<'c, 'h, 'a> {
     c: &'c Ctx<'h, 'a>,
     out: Vec<u8>,
-    /// The first words of the text (a title for untitled topics).
+    /// The first words of the text, up to its first break (a title for
+    /// untitled topics).
     plain: Vec<u8>,
+    plain_done: bool,
     font: Option<FontMap>,
     /// The IPF font, style and colour in effect.
     ipf_font: Option<(u8, u16)>,
@@ -397,6 +399,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
             c,
             out: Vec::new(),
             plain: Vec::new(),
+            plain_done: false,
             font: None,
             ipf_font: None,
             style: 0,
@@ -438,6 +441,9 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
 
     /// Write the pending paragraph gap before text.
     fn flush_gap(&mut self) {
+        if self.gap != Gap::None && !self.plain.trim_ascii().is_empty() {
+            self.plain_done = true;
+        }
         match self.gap {
             Gap::None => {}
             Gap::Break => {
@@ -509,7 +515,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                         self.put(b"&rbl.");
                     }
                 }
-                if self.plain.len() < 80 && self.plain.last().is_some_and(|&l| l != b' ') {
+                if !self.plain_done && self.plain.len() < 80 && self.plain.last().is_some_and(|&l| l != b' ') {
                     self.plain.push(b' ');
                 }
                 i += n;
@@ -530,7 +536,7 @@ impl<'c, 'h, 'a> Writer<'c, 'h, 'a> {
                 _ => cp::push(&mut buf, c),
             }
             for &b in &buf {
-                if self.plain.len() < 80 {
+                if !self.plain_done && self.plain.len() < 80 {
                     self.plain.push(b);
                 }
                 // Long words cut into pieces (glued again by the

@@ -1,5 +1,6 @@
 ; rs2-private exports
 Rs2ViewBook 200
+Rs2WinHelp 201
 WinCreateBookInstance 26
 IOLoadAllTOC 28
 IOLoadAllIndex 29

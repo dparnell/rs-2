@@ -1,0 +1,13 @@
+[package]
+name = "winhelp"
+description = "WINHELP.EXE: Windows Help for WIN16 programs, showing Windows .HLP files in the help manager's window"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "winhelp"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -120,6 +120,7 @@ dependencies = [
  "ipf",
  "os2",
  "thunk16",
+ "winhlp",
 ]
 
 [[package]]
@@ -991,6 +992,20 @@ name = "wincfg-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "winhelp"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "winhlp"
+version = "0.1.0"
+dependencies = [
+ "ipf",
 ]
 
 [[package]]
