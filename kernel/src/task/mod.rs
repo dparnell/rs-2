@@ -77,9 +77,11 @@ impl WaitQueue {
             if interruptible && (me.exit_requested() || me.interrupted()) {
                 return ready();
             }
-            if me.timed_out() && !ready() {
-                return false;
-            }
+            // Woken, timed out or not: the top of the loop looks at `ready`
+            // and then at the deadline. `ready` is called once per wake-up:
+            // it may take what it waits for (a mutex: a second call would
+            // take it again, recursively, and one release would leave it
+            // owned).
         }
     }
 
@@ -93,6 +95,11 @@ impl WaitQueue {
     /// Whether a thread matching `f` is waiting.
     pub fn has_waiter(&self, f: impl Fn(&Thread) -> bool) -> bool {
         self.waiters.lock().iter().any(|t| f(t))
+    }
+
+    /// The waiting threads' ids, if the queue is free (thread reports).
+    pub fn try_ids(&self) -> Option<alloc::vec::Vec<u32>> {
+        self.waiters.try_lock().map(|w| w.iter().map(|t| t.id).collect())
     }
 
     pub fn wake_one(&self) {
