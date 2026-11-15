@@ -196,10 +196,49 @@ crash report across a warm reboot (a RAM region the loader writes to
 ## Phase 2: wired network first
 
 Before WiFi, a USB Ethernet adapter gives a network for testing and for
-the syslog log. CDC-ECM/NCM (class drivers; Realtek RTL8153 adapters can
-switch to ECM) is the least work and also works in QEMU (`-device
-usb-net`). This needs bulk transfers in the xHCI driver used by a network
-driver, the same path USB mass storage takes.
+the syslog log. Done (2026-11-16) for adapters of the communications
+class, CDC ECM and CDC NCM (`drivers/usbnet.rs`, with the transfers in
+`drivers/xhci.rs`):
+
+- The function is found by its communications interface (subclass 6
+  ECM or 0x0d NCM) with its union descriptor naming the data interface,
+  whose alternate setting with two bulk endpoints is selected after the
+  setup; the MAC address is the Ethernet functional descriptor's
+  iMACAddress string (a made-up locally administered one if it is
+  missing). NCM: GET_NTB_PARAMETERS, then SET_NTB_INPUT_SIZE (up to
+  16 KB receive blocks); frames go out one per NTB16 and every datagram
+  of the NTB16s that arrive is taken. Both: SET_ETHERNET_PACKET_FILTER
+  (directed, broadcast, all multicast); link state from the
+  NETWORK_CONNECTION notifications on the interrupt endpoint (up until
+  the first says otherwise).
+- Unlike mass storage the transfers are asynchronous: 8 receive buffers
+  stay queued on bulk IN, completed ones are copied out by the network
+  thread and queued again; frames to send fill one of 16 page-sized
+  transmit buffers on bulk OUT, freed by their completion. A transfer of
+  whole packets gets a padding byte instead of a zero-length packet (as
+  Linux does).
+- A device whose first configuration has no driver has its other
+  configurations read and the first usable one is set. QEMU's `usb-net`
+  lists RNDIS first and CDC ECM second; Realtek RTL8153 (and RTL8152)
+  adapters have their vendor mode first and ECM in the second
+  configuration, so they should work through ECM as they are.
+  ASIX AX88179 and other vendor-protocol-only adapters do not.
+- A NIC that appears after the network started (a plugged-in adapter)
+  gets the next `ethN` interface and DHCP (or stays down with a static
+  configuration); one that is unplugged keeps its interface with the
+  link down, and comes back on it when plugged in again (same MAC).
+
+Tested in QEMU (`cargo xtask run --usb-net`, also `--net usb`): found as
+ECM, DHCP lease from the user network, NETTEST passes everything (ping,
+DNS, TCP to the host, 1 MB each way at about 2 MB/s out and 20 MB/s in
+under TCG, the listener reached through `hostfwd`); APITEST passes with
+the adapter, a USB keyboard and a tablet attached. Hot-plug through the
+monitor (`device_del usbnet`, `device_add usb-net,netdev=n0,bus=xhci.0`)
+during a PING: eth0's link goes down, the same adapter plugged in again
+brings it back and the pings continue, one with another MAC address
+becomes eth1 and gets its own lease. The NCM framing was
+checked on the host only: QEMU has no NCM device. Not yet tried with a
+real adapter on the Surface.
 
 ## Phase 3: touch
 
@@ -369,7 +408,7 @@ Type-A port. Most are soft-MAC (Realtek, MediaTek) and need rs2 to do the
 | Boot, NVMe, xHCI, keyboard on the Surface | unknown until tried | partly |
 | 2x display scaling, PAT write-combining | small | yes |
 | HID report protocol (Type Cover touchpad, USB tablets) | medium | yes (`usb-tablet`, `usb-kbd` use report protocol too) |
-| USB CDC-ECM/NCM Ethernet | medium | yes (`usb-net`) |
+| USB CDC-ECM/NCM Ethernet (done 2026-11-16, QEMU) | medium | yes (`usb-net`) |
 | MEI + IPTS single touch | medium | no |
 | 88W8897 WiFi + WPA2 | large | no (WPA2 part on the host) |
 | AML interpreter (battery, buttons, power/sleep) | large | yes |

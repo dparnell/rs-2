@@ -76,7 +76,8 @@
 //! virtio-net, QEMU's USB Ethernet adapter `usb-net` on the xHCI
 //! controller: CDC ECM) or `--net-model`
 //! names any QEMU device; `--virtio-net` is short for `--net virtio`,
-//! `--usb-net` for `--net usb`. Host port 5555 is forwarded to
+//! `--usb-net` for `--net usb` (id `usbnet` for `--monitor` device_del;
+//! `device_add usb-net,netdev=n0,bus=xhci.0` plugs one in again). Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule; `--guestfwd tcp:10.0.2.100:79-tcp:127.0.0.1:7979` sends the guest's
 //! connections to that address to a host port (servers on ports a user
@@ -1450,7 +1451,7 @@ fn net_devices(o: &Opts, c: &mut Command) {
     c.arg("-netdev").arg(netdev);
     let legacy = if o.virtio_legacy && model.starts_with("virtio") { ",disable-modern=on,disable-legacy=off" } else { "" };
     // QEMU's USB adapter goes on the xHCI controller (usb_devices).
-    let bus = if model == "usb-net" { ",bus=xhci.0" } else { "" };
+    let bus = if model == "usb-net" { ",bus=xhci.0,id=usbnet" } else { "" };
     c.arg("-device").arg(format!("{model},netdev=n0{legacy}{bus}"));
 }
 
