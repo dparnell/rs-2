@@ -505,6 +505,7 @@ pub fn send(hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
         crate::compat::call_hooks(4, 0, 1, far);
         thunk16::set_sp16(saved);
     }
+    crate::compat::forward(4, hwnd, msg, wp, lp, 0);
     let Some(p) = wnd(hwnd).map(|w| w.proc_) else { return 0 };
     call_proc(p, hwnd, msg, wp, lp)
 }
@@ -624,18 +625,26 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             unsafe { WinQueryWindowPos(f, &mut swp) };
             (swp.fl & if ord == 31 { SWP_MINIMIZE } else { SWP_MAXIMIZE } != 0) as u32
         }
-        // GetWindowRect(hwnd, lpRect): screen coordinates.
+        // GetWindowRect(hwnd, lpRect): screen coordinates. The desktop
+        // window (GetDesktopWindow's 0 here) is the screen: Open Watcom's
+        // Dialog Editor keeps its toolbox where it intersects it.
         32 => {
             let (h, r) = (a.w(), a.l());
             if let Some(f) = wnd(h).map(|w| w.frame) {
                 write_rect(r, screen_rect(f));
+            } else if h == 0 {
+                let (cx, cy) = screen_size();
+                write_rect(r, [0, 0, cx, cy]);
             }
             0
         }
         // GetClientRect(hwnd, lpRect)
         33 => {
             let (h, r) = (a.w(), a.l());
-            if wnd(h).is_some() {
+            if h == 0 {
+                let (cx, cy) = screen_size();
+                write_rect(r, [0, 0, cx, cy]);
+            } else if wnd(h).is_some() {
                 let (cx, cy) = client_size(h);
                 write_rect(r, [0, 0, cx, cy]);
                 if crate::tracing() {
@@ -1153,9 +1162,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             core::mem::replace(&mut u().event_hook, f)
         }
         // GetWindowTask(hwnd)
+        // (another task's window, a proxy: that task's handle).
         224 => {
-            a.w();
-            crate::toolhelp::current_task() as u32
+            let h = a.w();
+            match crate::dde::foreign(h) {
+                Some(pm) if wnd(h).is_none() => crate::toolhelp::task_of_pid(crate::dde::window_pid(pm)) as u32,
+                _ => crate::toolhelp::current_task() as u32,
+            }
         }
         // GetTopWindow(hwnd)
         229 => {
@@ -2026,7 +2039,10 @@ fn map_point(h: u16, p: *mut i16, to_screen: bool) {
 /// that window's client coordinates.
 fn hit_target(h: u16, lp: u32) -> (u16, u32) {
     let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
-    let mut t = h;
+    // Windows' hit testing passes over disabled child windows: the
+    // nearest enabled window they are in gets the mouse (FMEDIT's
+    // disabled selection windows lie over the controls it edits).
+    let mut t = enabled_ancestor(h).unwrap_or(h);
     for _ in 0..16 {
         let at = (sy as u16 as u32) << 16 | sx as u16 as u32;
         if send(t, W_NCHITTEST, 0, at) as i16 != -1 {
@@ -2954,6 +2970,7 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
         if crate::compat::has_hooks(3) {
             crate::compat::call_hooks(3, 0, 0, thunk16::far(p));
         }
+        crate::compat::forward(3, hwnd, msg, wp, lp, q.time);
         let sy = screen_size().1;
         u().msg_time = q.time;
         u().msg_pos = ((sy - 1 - q.y) as u32 & 0xffff) << 16 | q.x as u32 & 0xffff;
@@ -3109,6 +3126,9 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if (0x70..=0x79).contains(&msg) {
         if let Some(to) = enabled_ancestor(h).filter(|&a| a != h) {
             let Some(pm_to) = wnd(to).map(|w| w.client) else { return 0 };
+            if crate::tracing() && msg != 0x70 {
+                trace(format_args!("W16 mouse {msg:#x} over disabled {h:#x}: to {to:#x}"));
+            }
             let mut p = PointL { x: mp1 as i16 as i32, y: (mp1 >> 16) as i16 as i32 };
             unsafe {
                 WinMapWindowPoints(pmh, pm_to, &mut p, 1);

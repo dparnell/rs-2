@@ -175,6 +175,14 @@ pub fn caller16() -> (u16, u16, u16) {
 }
 
 pub fn set_sp16(v: u32) {
+    // Room given back (alloc16's) is cleared: the program's stack below
+    // its SP holds what Windows' own code left there, not our structures
+    // (Open Watcom's Dialog Editor reads an uninitialized local that was
+    // 0 on Windows and one of our pointers here).
+    let old = sp16();
+    if old != 0 && old >> 16 == v >> 16 && (v & 0xffff) > (old & 0xffff) && (v & 0xffff) - (old & 0xffff) <= 0x1000 {
+        unsafe { core::ptr::write_bytes(flat(old), 0, ((v & 0xffff) - (old & 0xffff)) as usize) };
+    }
     unsafe { core::arch::asm!("mov dword ptr fs:[0x30], {0}", in(reg) v, options(nostack)) };
 }
 
@@ -257,7 +265,16 @@ impl PascalCall {
         self
     }
     pub fn call(&self, target: u32) -> u32 {
-        call16(target, &self.buf[..self.len])
+        let r = call16(target, &self.buf[..self.len]);
+        // The arguments and return address left below the 16-bit SP are
+        // cleared (as set_sp16 clears what alloc16 gave).
+        let sp = sp16();
+        let n = self.len as u32 + 8;
+        if sp != 0 && (sp & 0xffff) >= n + 2 {
+            let lo = ((sp & 0xffff) - n) & 0xfffe;
+            unsafe { core::ptr::write_bytes(flat((sp & 0xffff_0000) | lo), 0, ((sp & 0xffff) - lo) as usize) };
+        }
+        r
     }
 }
 
@@ -493,6 +510,18 @@ macro_rules! common16 {
             "pop si\n",
             "pop es\n",
             "pop ds\n",
+            // What this kept below the caller's SP is cleared: Windows'
+            // code leaves other values there, and programs read stack
+            // they never wrote (Open Watcom's Dialog Editor reads an
+            // uninitialized pointer where our saved SI was).
+            "mov bp, sp\n",
+            "mov dword ptr [bp - 4], 0\n",
+            "mov dword ptr [bp - 8], 0\n",
+            "mov dword ptr [bp - 12], 0\n",
+            "mov dword ptr [bp - 16], 0\n",
+            "mov dword ptr [bp - 20], 0\n",
+            "mov dword ptr [bp - 24], 0\n",
+            "mov dword ptr [bp - 28], 0\n",
             "pop bp\n",
             ".byte ", $ret, "\n",
         )

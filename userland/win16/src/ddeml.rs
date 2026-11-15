@@ -388,7 +388,7 @@ fn htask_at(mf: u32) -> usize {
 /// Post one of DDEML's own messages to an instance window of any task,
 /// with `bytes` in a giveable block (lParam, a flat pointer) the receiver
 /// frees.
-fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) -> bool {
+pub fn give_post(pm: u32, m: u16, wp: u16, bytes: &[u8]) -> bool {
     unsafe extern "C" {
         #[link_name = "DOSCALLS.303"]
         fn DosGiveSharedMem(p: *const u8, pid: u32, flags: u32) -> u32;
@@ -744,6 +744,12 @@ fn create_window(hinst: u16) -> u16 {
     w
 }
 
+/// A hidden window of DDEML's class for WIN16's own messages between
+/// tasks (compat.rs: system-wide hooks).
+pub fn messenger_window() -> u16 {
+    create_window(crate::kernel::TASK.get().hinst)
+}
+
 /// The DDEML windows' procedure (entry 10).
 pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     let (lo, hi) = (lp as u16, (lp >> 16) as u16);
@@ -754,6 +760,11 @@ pub fn wnd_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
         }
         WM_DDEML_REGISTER => {
             registered(h, wp != 0, lp as *mut u8);
+            0
+        }
+        // Another task's message for this task's system-wide hooks.
+        0x03ed => {
+            crate::compat::remote(wp, lp as *mut u8);
             0
         }
         WM_DDE_INITIATE => {

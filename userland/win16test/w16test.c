@@ -699,6 +699,15 @@ static void stage2_tests(HINSTANCE hInst)
     window_tests(hwnd);
     DestroyWindow(hwnd);
     owner_menu_tests(hInst);
+    {
+        /* The desktop window's rectangle is the screen (Open Watcom's
+         * Dialog Editor places its toolbox inside it). */
+        RECT r;
+        memset(&r, 0, sizeof r);
+        GetWindowRect(GetDesktopWindow(), &r);
+        check(r.left == 0 && r.top == 0 && r.right == GetSystemMetrics(SM_CXSCREEN) && r.bottom == GetSystemMetrics(SM_CYSCREEN),
+              "GetWindowRect(GetDesktopWindow()): the screen");
+    }
 }
 
 
@@ -1218,6 +1227,41 @@ HDDEDATA CALLBACK _export CliCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, H
     return 0;
 }
 
+/* A system-wide hook (SetWindowsHookEx with no task, as Open Watcom's
+ * Spy's WSPYHK.DLL installs): another task's messages reach it. */
+static HHOOK sys_hook;
+static int sys_hook_foreign;
+
+LRESULT CALLBACK _export SysCallWndHook(int code, WPARAM wp, LPARAM lp)
+{
+    struct { LPARAM lParam; WPARAM wParam; UINT message; HWND hwnd; } FAR *c = (void FAR *)lp;
+    if (code >= 0 && c->hwnd && GetWindowTask(c->hwnd) != GetCurrentTask())
+        sys_hook_foreign++;
+    return CallNextHookEx(sys_hook, code, wp, lp);
+}
+
+static void system_hook_tests(void)
+{
+    HWND srv;
+    DWORD start;
+
+    sys_hook = SetWindowsHookEx(WH_CALLWNDPROC, (HOOKPROC)MakeProcInstance((FARPROC)SysCallWndHook, hInstance), hInstance, NULL);
+    check(sys_hook != NULL, "SetWindowsHookEx WH_CALLWNDPROC, system-wide");
+    if (WinExec("C:\\RS2\\DDESRV16.EXE", SW_SHOWMINNOACTIVE) <= 32) {
+        check(0, "WinExec DDESRV16 (system-wide hook)");
+        return;
+    }
+    start = GetTickCount();
+    while (!sys_hook_foreign && GetTickCount() - start < 10000)
+        pump_ms(100);
+    check(sys_hook_foreign > 0, "a system-wide WH_CALLWNDPROC hook sees another task's messages");
+    UnhookWindowsHookEx(sys_hook);
+    srv = FindWindow("DdeSrv16", NULL);
+    if (srv)
+        PostMessage(srv, WM_CLOSE, 0, 0);
+    pump_ms(500);
+}
+
 static void ddeml_tests(void)
 {
     HCONV conv;
@@ -1487,6 +1531,7 @@ static void stage3_tests(HINSTANCE hInst)
     print_tests();
     commdlg_tests(s3wnd);
     ddeml_tests();
+    system_hook_tests();
     raw_dde_tests(s3wnd);
     DestroyWindow(s3wnd);
 }

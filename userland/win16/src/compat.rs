@@ -14,6 +14,9 @@ pub struct Hook {
     pub h: u32,
     pub kind: i16,
     pub proc_: u32,
+    /// System-wide (SetWindowsHookEx with no task): other tasks' messages
+    /// come here too (`forward`).
+    pub global: bool,
 }
 
 pub static HOOKS: Global<Vec<Hook>> = Global::new(Vec::new());
@@ -531,7 +534,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             // A hook on another task (a process of its own) is not called
             // here: its handle is given, nothing is hooked.
             if task == 0 || crate::toolhelp::task_pid(task).is_none_or(|p| p == crate::toolhelp::own_pid()) {
-                HOOKS.get().push(Hook { h, kind, proc_: p });
+                HOOKS.get().push(Hook { h, kind, proc_: p, global: ord == 2291 && task == 0 });
+                publish_hooks();
             }
             if ord == 2291 { h } else { 0 }
         }
@@ -539,11 +543,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         2234 => {
             let (kind, p) = (a.w() as i16, a.l());
             HOOKS.get().retain(|x| !(x.kind == kind && x.proc_ == p));
+            publish_hooks();
             1
         }
         2292 => {
             let h = a.l();
             HOOKS.get().retain(|x| x.h != h);
+            publish_hooks();
             1
         }
         // DefHookProc(code, wp, lp, lplpfnNext): the next procedure is
@@ -626,4 +632,136 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         }
         _ => return None,
     })
+}
+
+// ---- System-wide hooks across tasks ----
+//
+// On Windows a system-wide WH_CALLWNDPROC or WH_GETMESSAGE hook (in a
+// DLL) runs in every task. Here each task is a process, and a hook DLL
+// usually only passes the message on to its program (Open Watcom's Spy:
+// WSPYHK calls a procedure of WSPY's), which cannot run in another
+// process. So the hook runs in the task that installed it: a named shared
+// block lists the tasks with system-wide hooks (a window of theirs, the
+// hook types, the process), and every other task posts each message its
+// hooks would see to that window (message 0x3ED of DDEML's windows, the
+// message in a giveable block); the hooking task calls its hooks with it
+// (`remote`), the windows being its proxies of the other task's.
+
+const HOOK_REG: &[u8] = b"\\SHAREMEM\\WIN16\\HOOKS\0";
+const HOOK_SLOTS: usize = 32;
+
+/// Each slot: the hooking task's window (PM), the hook types (bit n:
+/// WH type n), its process.
+struct HookReg {
+    slots: [[u32; 3]; HOOK_SLOTS],
+}
+
+fn hook_reg() -> Option<&'static mut HookReg> {
+    static P: Global<usize> = Global::new(0);
+    if *P.get() == 0 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        let rw = os2::PAG_READ | os2::PAG_WRITE;
+        let size = core::mem::size_of::<HookReg>() as u32;
+        unsafe {
+            if os2::DosGetNamedSharedMem(&mut p, HOOK_REG.as_ptr(), rw) != 0
+                && os2::DosAllocSharedMem(&mut p, HOOK_REG.as_ptr(), size, rw | os2::PAG_COMMIT) != 0
+                && os2::DosGetNamedSharedMem(&mut p, HOOK_REG.as_ptr(), rw) != 0
+            {
+                return None;
+            }
+        }
+        *P.get() = p as usize;
+    }
+    unsafe { (*P.get() as *mut HookReg).as_mut() }
+}
+
+/// This task's system-wide hook types into the list (with a window that
+/// gets the other tasks' messages).
+fn publish_hooks() {
+    static WIN: Global<u32> = Global::new(0);
+    let kinds = HOOKS.get().iter().filter(|h| h.global && (h.kind == 3 || h.kind == 4)).fold(0u32, |m, h| m | 1 << h.kind);
+    let me = crate::dde::pid();
+    if kinds != 0 && *WIN.get() == 0 {
+        let w = crate::ddeml::messenger_window();
+        *WIN.get() = crate::user::wnd(w).map_or(0, |x| x.client);
+    }
+    let pm = *WIN.get();
+    let Some(r) = hook_reg() else { return };
+    let mine = r.slots.iter().position(|s| s[2] == me && s[0] != 0);
+    match (mine, kinds) {
+        (Some(i), 0) => r.slots[i] = [0, 0, 0],
+        (Some(i), k) => r.slots[i] = [pm, k, me],
+        (None, 0) => {}
+        (None, k) => {
+            let hab = crate::kernel::TASK.get().hab;
+            if let Some(i) = r.slots.iter().position(|s| s[0] == 0 || unsafe { crate::pm::WinIsWindow(hab, s[0]) } == 0) {
+                r.slots[i] = [pm, k, me];
+            }
+        }
+    }
+}
+
+/// A message this task's hooks of `kind` (3 WH_GETMESSAGE, 4
+/// WH_CALLWNDPROC) see: to the other tasks with system-wide hooks of
+/// that kind.
+pub fn forward(kind: i16, hwnd: u16, msg: u16, wp: u16, lp: u32, time: u32) {
+    let Some(r) = hook_reg() else { return };
+    let bit = 1u32 << kind;
+    if !r.slots.iter().any(|s| s[0] != 0 && s[1] & bit != 0) {
+        return;
+    }
+    let me = crate::dde::pid();
+    let pm_win = |h: u16| crate::user::wnd(h).map(|w| w.client).or_else(|| crate::dde::foreign(h)).unwrap_or(0);
+    let mut b = Vec::with_capacity(16);
+    b.extend_from_slice(&pm_win(hwnd).to_le_bytes());
+    b.extend_from_slice(&msg.to_le_bytes());
+    b.extend_from_slice(&wp.to_le_bytes());
+    b.extend_from_slice(&lp.to_le_bytes());
+    b.extend_from_slice(&time.to_le_bytes());
+    for i in 0..HOOK_SLOTS {
+        let [pm, kinds, pid] = r.slots[i];
+        if pm == 0 || kinds & bit == 0 || pid == me {
+            continue;
+        }
+        if !crate::ddeml::give_post(pm, 0x03ed, kind as u16, &b) {
+            // Gone (its task ended).
+            r.slots[i] = [0, 0, 0];
+        }
+    }
+}
+
+/// Another task's message for this task's system-wide hooks of `kind`.
+pub fn remote(kind: u16, p: *mut u8) {
+    if p.is_null() {
+        return;
+    }
+    let rd16 = |o: usize| unsafe { (p.add(o) as *const u16).read_unaligned() };
+    let rd32 = |o: usize| unsafe { (p.add(o) as *const u32).read_unaligned() };
+    let (pm, msg, wp, lp, time) = (rd32(0), rd16(4), rd16(6), rd32(8), rd32(12));
+    unsafe { os2::DosFreeMem(p) };
+    let kind = kind as i16;
+    let Some(hook) = HOOKS.get().iter().rev().find(|h| h.global && h.kind == kind).map(|h| h.proc_) else { return };
+    let hwnd = crate::dde::proxy(pm);
+    let saved = thunk16::sp16();
+    let far = thunk16::alloc16(18);
+    let q = thunk16::flat(far);
+    let mut b = Vec::with_capacity(18);
+    if kind == 4 {
+        // CWPSTRUCT: lParam, wParam, message, hwnd.
+        b.extend_from_slice(&lp.to_le_bytes());
+        b.extend_from_slice(&wp.to_le_bytes());
+        b.extend_from_slice(&msg.to_le_bytes());
+        b.extend_from_slice(&hwnd.to_le_bytes());
+    } else {
+        // MSG: hwnd, message, wParam, lParam, time, pt.
+        b.extend_from_slice(&hwnd.to_le_bytes());
+        b.extend_from_slice(&msg.to_le_bytes());
+        b.extend_from_slice(&wp.to_le_bytes());
+        b.extend_from_slice(&lp.to_le_bytes());
+        b.extend_from_slice(&time.to_le_bytes());
+        b.extend_from_slice(&[0; 4]);
+    }
+    unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), q, b.len()) };
+    PascalCall::new().w(0).w(if kind == 4 { 1 } else { 0 }).l(far).call(hook);
+    thunk16::set_sp16(saved);
 }
