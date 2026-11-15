@@ -183,6 +183,11 @@ pub fn win_help(hwnd: u16, file: u32, cmd: u16, data: u32) -> u32 {
     let file = far_str(file).unwrap_or(b"").to_vec();
     if crate::tracing() {
         crate::trace(format_args!("W16 WinHelp {} cmd {cmd:#x} data {data:#x}", alloc::string::String::from_utf8_lossy(&file)));
+        if data >> 16 != 0 && cmd > 0x200 {
+            let b = unsafe { core::slice::from_raw_parts(flat(data), 48) };
+            let txt: alloc::string::String = b.iter().map(|&c| if (32..127).contains(&c) { c as char } else { '.' }).collect();
+            crate::trace(format_args!("W16 WinHelp data {b:02x?} {txt}"));
+        }
     }
     // Windows does not start WinHelp to quit it.
     let srv = server(cmd != HELP_QUIT);
@@ -192,7 +197,8 @@ pub fn win_help(hwnd: u16, file: u32, cmd: u16, data: u32) -> u32 {
     let path = if file.is_empty() { Vec::new() } else { help_file(&file) };
     // The command's string, or the number.
     let (num, text): (u32, Vec<u8>) = match cmd {
-        HELP_KEY | HELP_PARTIALKEY | HELP_COMMAND => (0, far_str(data).unwrap_or(b"").to_vec()),
+        // 1004h: Borland's MULTIHLP search (Delphi's F1), a keyword.
+        HELP_KEY | HELP_PARTIALKEY | HELP_COMMAND | 0x1004 => (0, far_str(data).unwrap_or(b"").to_vec()),
         // MULTIKEYHELP: mkSize, mkKeylist (the table's letter), the
         // phrase.
         HELP_MULTIKEY => {

@@ -3137,6 +3137,18 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
     }
     match msg {
+        // PM's accelerators make F1 WM_HELP; Windows has no such table
+        // and gives programs the key (Delphi calls WinHelp on its
+        // WM_KEYDOWN VK_F1). QMSG: hwnd, msg, mp1 (flags...), mp2
+        // (character, virtual key).
+        0x004b if mp1 != 0 => {
+            let m = unsafe { core::slice::from_raw_parts(mp1 as *const u32, 4) };
+            // WM_CHAR, KC_VIRTUALKEY, VK_F1
+            if m[1] == 0x7a && m[2] & 0x0002 != 0 && (m[3] >> 16) & 0xffff == 0x20 {
+                return 0;
+            }
+            unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) }
+        }
         WM_SIZE => {
             let (cx, cy) = (mp2 as u16, (mp2 >> 16) as u16);
             keep_children_at_top(h, (mp1 >> 16) as u16 as i32, cy as i32);
