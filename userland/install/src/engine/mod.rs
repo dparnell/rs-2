@@ -360,6 +360,31 @@ fn copy_tree(vol: &mut Vol, src: &str, dest: &str, files: &mut u32, update: bool
     Ok(())
 }
 
+/// The diagnostic words of the live medium's kernel command line
+/// (`bootlog`, `bootdiag`; not `bootdiag=N`, which stops the boot), each
+/// with a space before it: a system installed from a diagnostic stick
+/// keeps writing `\RS2\BOOT.LOG` to its EFI system partition. The live
+/// medium is the drive whose `\RS2\CMDLINE` names no root= partition.
+fn diag_words() -> String {
+    for d in b'D'..=b'Z' {
+        let Some(c) = read_file(&alloc::format!("{}:\\RS2\\CMDLINE", d as char)) else { continue };
+        let t: String = c.iter().map(|&b| b as char).collect();
+        if t.split_whitespace().any(|w| w.to_ascii_lowercase().starts_with("root=")) {
+            continue;
+        }
+        let mut out = String::new();
+        for w in t.split_whitespace() {
+            let l = w.to_ascii_lowercase();
+            if l == "bootlog" || l == "bootdiag" {
+                out.push(' ');
+                out.push_str(w);
+            }
+        }
+        return out;
+    }
+    String::new()
+}
+
 /// The boot loader and kernel where the firmware and the loader look.
 fn boot_files(esp: &mut Vol) -> Result<(), String> {
     for (src, dest) in [("C:\\RS2\\BOOT\\BOOTX64.EFI", "EFI\\BOOT\\BOOTX64.EFI"), ("C:\\RS2\\BOOT\\KERNEL", "RS2\\KERNEL")] {
@@ -444,11 +469,15 @@ pub fn install_fresh(d: &Disk, fs: Fs, packages: bool, p: &mut dyn Progress) -> 
     }
     p.step("Writing the boot files");
     boot_files(&mut esp)?;
+    let diag = diag_words();
     if let Some(sp) = &sys_part {
-        esp.put("RS2\\CMDLINE", alloc::format!("root={}\r\n", guid_text(&sp.guid)).as_bytes())?;
+        esp.put("RS2\\CMDLINE", alloc::format!("root={}{diag}\r\n", guid_text(&sp.guid)).as_bytes())?;
         if let Some(v) = read_file("C:\\RS2\\VERSION") {
             esp.put("RS2\\VERSION", &v)?;
         }
+    }
+    if sys_part.is_none() && !diag.is_empty() {
+        esp.put("RS2\\CMDLINE", alloc::format!("{}\r\n", diag.trim_start()).as_bytes())?;
     }
     if let Some(v) = sys {
         v.close()?;

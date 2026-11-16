@@ -131,6 +131,15 @@ The SP4 has no serial port. Done (2026-11-15):
   for such keyboards yet. Checked: the parser alone on a keyboard plus
   mouse descriptor (report IDs 1 and 2) and a bitmap keyboard; QEMU's
   boot keyboard and usb-tablet unchanged. Not yet on the Surface.
+- **Boot log on an installed system** (2026-11-16: the system installed
+  from the stick stopped during boot, and there was no BOOT.LOG to read):
+  the installer copies `bootlog` and `bootdiag` from the live stick's
+  `\RS2\CMDLINE` to the installed one, after `root=`. That system then
+  writes `\RS2\BOOT.LOG` on its EFI system partition (the small FAT
+  partition, a drive letter of its own when the live stick is booted).
+  On a system installed before that: boot the stick and
+  `ECHO bootlog>>X:\RS2\CMDLINE`, X: being the drive whose
+  `\RS2\CMDLINE` starts with `root=`.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.
