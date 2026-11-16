@@ -159,6 +159,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     fs::cache::start();
     bench::start(cmdline);
     klog::start_bootlog();
+    klog::start_boot_watch();
     crash::start_test();
     bootdiag::stage("kernel threads");
     // CONFIG.SYS and the first programs on a kernel thread of their own:

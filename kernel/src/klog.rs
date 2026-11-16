@@ -91,6 +91,27 @@ pub fn start_bootlog() {
     });
 }
 
+/// `bootdiag`: if no PM program has the display 60 s after boot (and
+/// the boot is not to a command prompt), log every thread's state, the
+/// Ctrl+Alt+F12 report, once: BOOT.LOG then shows what boot waits for on
+/// a machine without a serial port.
+pub fn start_boot_watch() {
+    let cmd = crate::boot_info().cmdline();
+    if !bootinfo::diag_on(cmd) || cmd.split_whitespace().any(|w| w.eq_ignore_ascii_case("textmode") || w.starts_with("init=")) {
+        return;
+    }
+    crate::task::kthread::spawn("bootwatch", || {
+        crate::task::sched::sleep_ms(60_000);
+        if crate::display::pm_started() {
+            return;
+        }
+        crate::println!("bootdiag: no desktop 60 s after boot; every thread:");
+        for l in crate::debug::thread_report().lines() {
+            crate::println!("{l}");
+        }
+    });
+}
+
 /// The volume the machine booted from, if it is a writable disk (drive
 /// number and file system): the drive holding `\RS2\KERNEL` that is not
 /// the loader's RAM image (C.IMG), a CD or a network drive.

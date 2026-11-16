@@ -140,6 +140,11 @@ The SP4 has no serial port. Done (2026-11-15):
   On a system installed before that: boot the stick and
   `ECHO bootlog>>X:\RS2\CMDLINE`, X: being the drive whose
   `\RS2\CMDLINE` starts with `root=`.
+- **Boot watch** (`bootdiag`): if no PM program has the display 60 s
+  after boot (and the boot is not `textmode` or `init=`), the kernel
+  logs the Ctrl+Alt+F12 thread report once, now with the kernel threads
+  (boot, wlan, network, hot-plug...) as well as the processes, so
+  BOOT.LOG shows what the boot waits for.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.

@@ -13,9 +13,25 @@ use alloc::sync::Arc;
 use super::sched;
 use super::thread::Thread;
 
+/// Kernel threads started so far (for the thread report; ended ones
+/// drop out).
+static ALL: crate::sync::SpinLock<alloc::vec::Vec<alloc::sync::Weak<Thread>>> = crate::sync::SpinLock::new(alloc::vec::Vec::new());
+
+/// The kernel threads still alive (None while the list is busy).
+pub fn try_all() -> Option<alloc::vec::Vec<Arc<Thread>>> {
+    let mut l = ALL.try_lock()?;
+    l.retain(|w| w.strong_count() > 0);
+    Some(l.iter().filter_map(|w| w.upgrade()).collect())
+}
+
 /// Start a kernel thread running `f`.
 pub fn spawn(name: &'static str, f: impl FnOnce() + Send + 'static) -> Arc<Thread> {
     let t = Thread::new_kernel(name, Box::new(f));
+    {
+        let mut l = ALL.lock();
+        l.retain(|w| w.strong_count() > 0);
+        l.push(Arc::downgrade(&t));
+    }
     sched::start(t.clone());
     t
 }

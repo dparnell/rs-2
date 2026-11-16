@@ -69,6 +69,11 @@ static PM_PIDS: SpinLock<alloc::vec::Vec<u32>> = SpinLock::new(alloc::vec::Vec::
 static WAITERS: WaitQueue = WaitQueue::new();
 static DISPLAY: Once<Mapped> = Once::new();
 
+/// Whether a PM program has mapped the display (the desktop started).
+pub fn pm_started() -> bool {
+    DISPLAY.get().is_some()
+}
+
 /// The memory PM processes draw into: a back buffer in RAM, large
 /// enough for every mode the display driver can switch to, or (without
 /// the memory for one) the display's framebuffer itself (VMware SVGA
