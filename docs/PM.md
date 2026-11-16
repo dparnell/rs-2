@@ -394,7 +394,7 @@ RS2API services for the host (32-bit, `_System`):
 |---------|------|
 | 10 | `Rs2VioWait(PULONG pulGen, ULONG ulTimeout)`: wait until the generation differs from *pulGen (ms, -1 forever) and store it; registers the caller as the host |
 | 11 | `Rs2VioQuerySessions(PRS2VIOSESSION a, ULONG cMax, PULONG pcFound, ULONG fAll)`: the windowable sessions (fAll: every session but PM's) as {sid, flags, screen change counter, leader pid, title[64]}; flags: 1 windowed now, 2 activate its window (reported once), 4 windowable, 8 PM, 0x10 foreground |
-| 12 | `Rs2VioReadScreen(ULONG sid, PRS2VIOSTATE p, PUSHORT pCells, ULONG cb)`: state (change counter, columns, rows, cursor row/column, first/last cursor scan line, cell height, code page, flags: cursor shown, blink, windowed, mouse open, user font; font generation; 16 colours 0x00RRGGBB) and the cells |
+| 12 | `Rs2VioReadScreen(ULONG sid, PRS2VIOSTATE p, PUSHORT pCells, ULONG cb)`: state (change counter, columns, rows, cursor row/column, first/last cursor scan line, cell height, code page, flags: cursor shown, blink, windowed, mouse open, user font, 0x100 row 0 is a status line; font generation; 16 colours 0x00RRGGBB) and the cells |
 | 13 | `Rs2VioQueryFont(ULONG sid, ULONG cy, PBYTE p, ULONG cb)`: the 256 glyphs at height 8, 14 or 16 for the session's code page (or its VioSetFont font) |
 | 14 | `Rs2VioKey(ULONG sid, PINPUTEVENT p)`: a key as Rs2ReadInput reports it (character, scan code, extended flag, shift state, make/break): through the session's keyboard monitors, then its input mode (Ctrl+C, Ctrl+Break, Ctrl+S, PrtSc), to its queue; Alt+Home switches it to the full screen |
 | 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)`: the pointer over a cell: events into the session's mouse queue (and monitors) if it opened the mouse |
@@ -432,8 +432,17 @@ for a session:
   CO80,43`); when it is smaller than the screen, the scroll bars scroll it;
 - the scroll back sits above the screen: the vertical scroll bar and
   Shift+PgUp / Shift+PgDn show it (PMWIN keeps those keys for the
-  window), the view follows new output while it shows the screen's last
-  row, and typing brings the screen back; marks can span it;
+  window), the view follows new output while it shows the screen (its
+  last row, or as far down as the cursor when that is higher, as after
+  CLS), and typing brings the screen back; marks can span it;
+- a status line stays at the window's top: when something draws across
+  row 0 while the cursor is on another row (CMD's `PROMPT $I` help line:
+  IBM's CMD with VioWrtCharStrAtt, rs2's between `ESC[s` and `ESC[u`),
+  the kernel makes TTY output scroll only the rows below it (on the full
+  screen too), so only those reach the scroll back, and reports it
+  (RS2VIOSTATE flag 0x100); PMVIOWIN then keeps row 0 in the window's
+  top row and scrolls the rest under it. Clearing the screen (CLS,
+  `ESC[2J`, a mode change) ends it until the line is drawn again;
 - the system menu adds Mark, Copy, Copy All, Paste, Fullscreen (Alt+Home)
   and Font 8 x 16 / 8 x 14 / 8 x 8. Dragging with mouse button 1 marks
   the text from cell to cell, line by line (with Alt held at the press, a

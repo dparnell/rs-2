@@ -46,6 +46,9 @@ const ST_DOS: u32 = 0x40;
 /// A DOS session showing a display surface in shared memory
 /// (Rs2VdmSurface): its size at offsets 116 and 120.
 const ST_SURFACE: u32 = 0x80;
+/// Row 0 is a status line that stays put while the rows below it scroll
+/// into the scroll back (Screen::status_line).
+const ST_STATUS: u32 = 0x100;
 
 /// Rs2VioControl commands.
 const CTL_FOCUS: u32 = 1;
@@ -187,6 +190,9 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         }
         if s.surface.is_some() {
             f |= ST_SURFACE;
+        }
+        if s.status_line {
+            f |= ST_STATUS;
         }
         let mut st = Vec::with_capacity(128);
         for v in [s.changes, s.cols as u32, s.rows as u32, cr as u32, cc as u32, a as u32, b as u32, s.cell_h as u32, s.codepage().number() as u32, f, s.font_gen] {

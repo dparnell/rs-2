@@ -448,7 +448,11 @@ pub fn vio_wrt_char_str_att(c: &mut Ctx) -> u32 {
     let (p, n, row, col, pa) = (c.ptr(0), c.arg(1), c.arg(2) as usize, c.arg(3) as usize, c.ptr(4));
     let Some(data) = c.read_vec(p, n) else { return err::INVALID_ADDRESS };
     let Some(attr) = c.read_u8(pa) else { return err::INVALID_ADDRESS };
-    modify_run(data.len(), row, col, |i, _| data[i] as u16 | (attr as u16) << 8)
+    let rc = modify_run(data.len(), row, col, |i, _| data[i] as u16 | (attr as u16) << 8);
+    if rc == 0 {
+        screen::with(|s| s.note_write(row, col, data.len()));
+    }
+    rc
 }
 
 pub fn vio_wrt_cell_str(c: &mut Ctx) -> u32 {
