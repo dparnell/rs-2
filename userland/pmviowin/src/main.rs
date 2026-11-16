@@ -19,7 +19,9 @@
 //!   font sizes; Close asks before it ends the session's programs;
 //! - lines that scroll off the screen stay above it (the kernel keeps the
 //!   last 1000, `Rs2VioReadHistory`): the scroll bar or Shift+PgUp and
-//!   Shift+PgDn show them, typing shows the screen again.
+//!   Shift+PgDn show them, typing shows the screen again;
+//! - a status line on row 0 (CMD's `$I` help line, `ST_STATUS`) stays
+//!   in the window's top row while the rest scrolls under it.
 //!
 //! Usage: `PMVIOWIN [/SHELL]`: with /SHELL it starts a command prompt in
 //! a window when there is none and keeps running when the last window
@@ -200,6 +202,9 @@ const ST_PIXELS: u32 = 0x20;
 const ST_DOS: u32 = 0x40;
 /// A DOS session with a display surface in shared memory (surface.rs).
 const ST_SURFACE: u32 = 0x80;
+/// Row 0 stays put while the rows below it scroll into the scroll back
+/// (rs2's CMD keeps its help line there): the window keeps it at its top.
+const ST_STATUS: u32 = 0x100;
 
 const CTL_FOCUS: u32 = 1;
 const CTL_WINDOWED: u32 = 2;
@@ -343,6 +348,9 @@ struct Win {
     /// What the font was loaded for: (height, code page, font generation).
     font_key: (usize, u32, u32),
     /// First visible column and row (rows count the scroll back first).
+    /// With a status line (`pinned`) the window's top row shows it and
+    /// `sy` is the first of the other rows (the scroll back and the rest
+    /// of the screen, the status line left out) under it.
     sx: usize,
     sy: usize,
     mark: Option<Block>,
@@ -418,6 +426,18 @@ impl Win {
         self.total().saturating_sub(self.visible().1)
     }
 
+    /// Where the window shows the screen: its bottom, or higher if the
+    /// cursor is above that (after CLS in a window smaller than the
+    /// screen the prompt is at the top): from the screen's top, as far
+    /// down as the cursor row needs.
+    fn home(&self) -> usize {
+        let b = self.bottom();
+        let Some((r, _)) = self.cur else { return b };
+        // A status line is always shown: the rows under it count.
+        let (c, vr) = if self.pinned() { (self.hist + r.saturating_sub(1), self.visible().1.saturating_sub(1).max(1)) } else { (self.hist + r, self.visible().1) };
+        b.min(self.hist.max((c + 1).saturating_sub(vr)))
+    }
+
     fn content_size(&self) -> (i32, i32) {
         if let Some(v) = &self.view {
             return (v.w as i32, v.h as i32);
@@ -440,14 +460,58 @@ impl Win {
         ((cw.max(0) as usize / viocell::CELL_W).max(1), (ch.max(0) as usize / self.font_h.max(1)).max(1))
     }
 
-    /// Client rectangle of cells rows r0..r1, columns c0..c1.
-    fn cell_rect(&self, r0: usize, r1: usize, c0: usize, c1: usize) -> RectL {
+    /// The screen's row 0 is a status line kept at the window's top.
+    fn pinned(&self) -> bool {
+        self.flags & ST_STATUS != 0 && self.pix.is_none() && self.view.is_none()
+    }
+
+    /// The grid row shown in window row `k`.
+    fn grid_row(&self, k: usize) -> usize {
+        if !self.pinned() {
+            return self.sy + k;
+        }
+        if k == 0 {
+            return self.hist;
+        }
+        let c = self.sy + k - 1;
+        if c < self.hist { c } else { c + 1 }
+    }
+
+    /// The window row that shows grid row `g` (negative: above the top).
+    fn win_row(&self, g: usize) -> i32 {
+        if !self.pinned() {
+            return g as i32 - self.sy as i32;
+        }
+        if g == self.hist {
+            return 0;
+        }
+        let c = if g < self.hist { g } else { g - 1 } as i32;
+        let k = c - self.sy as i32 + 1;
+        // Rows scrolled under the status line are not shown.
+        if k >= 1 { k } else { k - 1 }
+    }
+
+    /// Client rectangle of window rows k0..k1, cell columns c0..c1.
+    fn row_rect(&self, k0: i32, k1: i32, c0: usize, c1: usize) -> RectL {
         let (_, ch) = self.client_size();
         let x0 = (c0 as i32 - self.sx as i32) * viocell::CELL_W as i32;
         let x1 = (c1 as i32 - self.sx as i32) * viocell::CELL_W as i32;
-        let top = ch - (r0 as i32 - self.sy as i32) * self.font_h as i32;
-        let bot = ch - (r1 as i32 - self.sy as i32) * self.font_h as i32;
-        RectL { l: x0, b: bot, r: x1, t: top }
+        let fh = self.font_h as i32;
+        RectL { l: x0, b: ch - k1 * fh, r: x1, t: ch - k0 * fh }
+    }
+
+    /// Client rectangle around cells rows r0..r1, columns c0..c1 (empty
+    /// if none of the rows is shown).
+    fn cell_rect(&self, r0: usize, r1: usize, c0: usize, c1: usize) -> RectL {
+        if !self.pinned() {
+            return self.row_rect(self.win_row(r0), self.win_row(r1), c0, c1);
+        }
+        let ks = (r0..r1).map(|g| self.win_row(g)).filter(|&k| k >= 0);
+        let (lo, hi) = ks.fold((i32::MAX, i32::MIN), |(lo, hi), k| (lo.min(k), hi.max(k)));
+        if lo > hi {
+            return RectL::default();
+        }
+        self.row_rect(lo, hi + 1, c0, c1)
     }
 
     fn invalidate_cells(&self, r0: usize, r1: usize, c0: usize, c1: usize) {
@@ -462,7 +526,7 @@ impl Win {
     /// The cell under client point (x, y), clamped to the screen.
     fn cell_at(&self, x: i32, y: i32) -> (usize, usize) {
         let (_, ch) = self.client_size();
-        let row = ((ch - 1 - y).max(0) as usize / self.font_h.max(1) + self.sy).min(self.total().saturating_sub(1));
+        let row = self.grid_row((ch - 1 - y).max(0) as usize / self.font_h.max(1)).min(self.total().saturating_sub(1));
         let col = (x.max(0) as usize / viocell::CELL_W + self.sx).min(self.cols.saturating_sub(1));
         (row, col)
     }
@@ -574,7 +638,7 @@ fn refresh(i: usize) {
     let had_pix = w.pix.take().is_some() || core::mem::take(&mut w.pix_dims) != (0, 0);
     let (cols, rows) = (st[1] as usize, st[2] as usize);
     cells.truncate(cols * rows);
-    let was_bottom = w.sy >= w.bottom();
+    let was_bottom = w.sy >= w.home();
     // Lines that scrolled off since the last read.
     let (scrolled, keys) = (st[27], st[28]);
     let new = (scrolled.wrapping_sub(w.scrolled) as usize).min(HISTORY);
@@ -611,7 +675,7 @@ fn refresh(i: usize) {
     palette.copy_from_slice(&st[11..27]);
     w.changes = st[0];
     let mode_changed = cols != w.cols || rows != w.rows || cell_h != w.cell_h;
-    let mut all = mode_changed || had_pix || hist_changed || palette != w.palette || (st[9] ^ w.flags) & ST_BLINK != 0 || st[10] != w.font_gen || st[8] != w.codepage;
+    let mut all = mode_changed || had_pix || hist_changed || palette != w.palette || (st[9] ^ w.flags) & (ST_BLINK | ST_STATUS) != 0 || st[10] != w.font_gen || st[8] != w.codepage;
     let old_cur = w.cur;
     w.cols = cols;
     w.rows = rows;
@@ -652,8 +716,8 @@ fn refresh(i: usize) {
         fit_window(i);
         return;
     }
-    // Typing, or output while the screen's bottom is shown: the screen.
-    let b = w.bottom();
+    // Typing, or output while the screen is shown: the screen again.
+    let b = w.home();
     if (jump || was_bottom) && w.sy != b {
         w.sy = b;
         all = true;
@@ -711,7 +775,7 @@ fn fit_window(i: usize) {
     {
         let w = &mut wins()[i];
         w.sx = 0;
-        w.sy = if w.pix.is_some() { 0 } else { w.bottom() };
+        w.sy = if w.pix.is_some() { 0 } else { w.home() };
     }
     update_scrollbars(i);
     wins()[i].invalidate_all();
@@ -1004,13 +1068,26 @@ fn paint(i: usize) {
     if w.cols > 0 && w.rows > 0 && !w.font.is_empty() {
         let fh = w.font_h as i32;
         let cwid = viocell::CELL_W as i32;
-        // Cells under the update rectangle.
-        let r0 = (((ch - r.t).max(0)) / fh) as usize + w.sy;
-        let r1 = ((((ch - r.b).max(0)) + fh - 1) / fh) as usize + w.sy;
+        // Window rows and cell columns under the update rectangle.
+        let k0 = (((ch - r.t).max(0)) / fh) as usize;
+        let k1 = ((((ch - r.b).max(0)) + fh - 1) / fh) as usize;
         let c0 = (r.l.max(0) / cwid) as usize + w.sx;
         let c1 = ((r.r.max(0) + cwid - 1) / cwid) as usize + w.sx;
-        let (r1, c1) = (r1.min(w.total()), c1.min(w.cols));
-        if r0 < r1 && c0 < c1 {
+        let c1 = c1.min(w.cols);
+        // Runs of window rows that show consecutive grid rows (a status
+        // line breaks them).
+        let mut k = k0;
+        while k < k1 && c0 < c1 {
+            let r0 = w.grid_row(k);
+            let mut n = 1;
+            while k + n < k1 && w.grid_row(k + n) == r0 + n {
+                n += 1;
+            }
+            k += n;
+            let r1 = (r0 + n).min(w.total());
+            if r0 >= r1 {
+                continue;
+            }
             let width = (c1 - c0) * viocell::CELL_W;
             let height = (r1 - r0) * w.font_h;
             let stride = viocell::bgr24_stride(width);
@@ -1030,7 +1107,8 @@ fn paint(i: usize) {
             bmi[6..8].copy_from_slice(&(height as u16).to_le_bytes());
             bmi[8] = 1;
             bmi[10] = 24;
-            let rc = w.cell_rect(r0, r1, c0, c1);
+            let kr = w.win_row(r0);
+            let rc = w.row_rect(kr, kr + (r1 - r0) as i32, c0, c1);
             let pts = [PointL { x: rc.l, y: rc.b }, PointL { x: rc.r - 1, y: rc.t - 1 }, PointL { x: 0, y: 0 }];
             unsafe { GpiDrawBits(hps, buf.as_ptr(), bmi.as_ptr(), 3, pts.as_ptr(), 0xcc, 0) };
         }
@@ -1132,7 +1210,7 @@ fn command(i: usize, id: u32) {
             let w = &mut wins()[i];
             w.mark_mode = !w.mark_mode;
             w.register();
-            let start = w.cur.map_or((w.sy, 0), |(r, c)| (w.hist + r, c));
+            let start = w.cur.map_or((w.grid_row(0), 0), |(r, c)| (w.hist + r, c));
             let mm = w.mark_mode;
             set_mark(i, if mm { Some(Block::spanning(start, start)) } else { None });
         }

@@ -225,6 +225,13 @@ pub struct Screen {
     /// ever did.
     history: VecDeque<Vec<u16>>,
     pub scrolled: u32,
+    /// Row 0 is a status line: something drew it while the cursor was
+    /// elsewhere (CMD's `$I` help line, IBM's through VioWrtCharStrAtt,
+    /// rs2's between ESC[s and ESC[u). TTY output then scrolls only the
+    /// rows below it (they alone go to the scroll back), and the PM host
+    /// keeps the row at the top of the window. A clear of the screen ends
+    /// it.
+    pub status_line: bool,
     /// Keys typed into the session's window (the host shows the screen
     /// again rather than its scroll back).
     pub keys: u32,
@@ -303,6 +310,7 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).surface).write(None);
             core::ptr::addr_of_mut!((*s).history).write(VecDeque::new());
             core::ptr::addr_of_mut!((*s).scrolled).write(0);
+            core::ptr::addr_of_mut!((*s).status_line).write(false);
             core::ptr::addr_of_mut!((*s).keys).write(0);
         }
         let s = unsafe { &mut *s };
@@ -388,6 +396,15 @@ impl Screen {
             }
             self.history.push_back(self.cells[r][..self.cols].to_vec());
             self.scrolled = self.scrolled.wrapping_add(1);
+        }
+    }
+
+    /// Cells were written from (row, col) by a positional write (not TTY
+    /// output): a line drawn across row 0 while the cursor is on another
+    /// row makes row 0 a status line.
+    pub fn note_write(&mut self, row: usize, col: usize, n: usize) {
+        if row == 0 && col == 0 && self.cur_row > 0 && n * 2 >= self.cols {
+            self.status_line = true;
         }
     }
 
@@ -478,6 +495,7 @@ impl Screen {
     /// Change the text geometry, clamped to what fits the framebuffer; the
     /// font is the largest that fits the rows. Resets the cursor shape.
     pub fn set_mode(&mut self, cols: usize, rows: usize) {
+        self.status_line = false;
         let max_c = (self.fb.width as usize / CELL_W).min(MAX_COLS);
         let max_r = (self.fb.height as usize / FONT_HEIGHTS[2]).min(MAX_ROWS);
         self.cols = cols.min(max_c).max(1);
@@ -784,6 +802,9 @@ impl Screen {
         if top <= 1 && bottom == self.rows - 1 && self.watched && !self.graphics && self.pixmap.is_none() {
             self.keep_history(top, n);
         }
+        if top == 0 && bottom == self.rows - 1 && n == self.rows {
+            self.status_line = false;
+        }
         for r in top..=bottom {
             for c in 0..self.cols {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
@@ -933,7 +954,8 @@ impl Screen {
         if self.cur_row >= self.rows {
             let fill = 0x20 | (self.attr as u16) << 8;
             let n = self.cur_row + 1 - self.rows;
-            self.scroll_up(0, self.rows - 1, n, fill);
+            let top = (self.status_line && self.rows > 1) as usize;
+            self.scroll_up(top, self.rows - 1, n, fill);
             self.cur_row = self.rows - 1;
         }
     }

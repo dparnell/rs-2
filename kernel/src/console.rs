@@ -198,9 +198,14 @@ fn ansi(t: &mut Tty, s: &mut screen::Screen, seq: &[u8]) -> Option<alloc::string
             }
             s.cur_row = 0;
             s.cur_col = 0;
+            s.status_line = false;
         }
         b's' => t.saved = (s.cur_row, s.cur_col),
         b'u' => {
+            // Back from drawing on row 0 (a status line, rs2 CMD's `$I`).
+            if s.cur_row == 0 && s.cur_col > 0 && t.saved.0 > 0 {
+                s.status_line = true;
+            }
             s.cur_row = t.saved.0.min(s.rows - 1);
             s.cur_col = t.saved.1.min(s.cols - 1);
         }
