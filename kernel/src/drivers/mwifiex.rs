@@ -177,6 +177,8 @@ struct Data {
     rxbuf: Dma,
     tx_wr: u32,
     tx_rd: u32,
+    /// Frames handed to the firmware and not yet taken back.
+    tx_pending: usize,
     rx_rd: u32,
 }
 
@@ -191,7 +193,10 @@ impl Data {
             rxbd: Dma::new(TXRX_BD * PFU_DESC)?,
             rxbuf: Dma::new(TXRX_BD * RX_BUF)?,
             tx_wr: 0,
-            tx_rd: 0,
+            // As Linux: the firmware's read pointer starts at 0 with the
+            // rollover bit set (PFU chips).
+            tx_rd: TX_ROLLOVER,
+            tx_pending: 0,
             rx_rd: RX_ROLLOVER,
         };
         d.txbd.write(0, &[0; TXRX_BD * PFU_DESC]);
@@ -207,8 +212,12 @@ impl Data {
         self.rx_rd | (self.tx_wr & TX_WRAP_MASK)
     }
 
+    /// At most TXRX_BD - 1 frames in flight, so that the firmware's read
+    /// index alone says how many it has taken (whatever its rollover bit
+    /// means: on the 88W8897 it starts set, and comparing it the other
+    /// way made the ring look full forever, so nothing was ever sent).
     fn tx_full(&self) -> bool {
-        (self.tx_wr & TX_MASK) == (self.tx_rd & TX_MASK) && (self.tx_wr & TX_ROLLOVER) != (self.tx_rd & TX_ROLLOVER)
+        self.tx_pending >= TXRX_BD - 1
     }
 
     /// Take back the buffers the firmware has sent (its read pointer is in
@@ -218,10 +227,7 @@ impl Data {
         if rd == u32::MAX {
             return;
         }
-        for _ in 0..TXRX_BD {
-            if (self.tx_rd & TX_MASK) == (rd & TX_MASK) && (self.tx_rd & TX_ROLLOVER) == (rd & TX_ROLLOVER) {
-                break;
-            }
+        while self.tx_pending > 0 && (self.tx_rd & TX_MASK) != (rd & TX_MASK) {
             let i = ((self.tx_rd & TX_MASK) >> 16) as usize;
             if i < TXRX_BD {
                 self.txbd.write(i * PFU_DESC, &[0; PFU_DESC]);
@@ -230,11 +236,13 @@ impl Data {
             if (self.tx_rd & TX_MASK) >> 16 == TXRX_BD as u32 {
                 self.tx_rd = (self.tx_rd & TX_ROLLOVER) ^ TX_ROLLOVER;
             }
+            self.tx_pending -= 1;
+            TX_DONE.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     fn tx_empty(&self) -> bool {
-        (self.tx_wr & TX_MASK) == (self.tx_rd & TX_MASK) && (self.tx_wr & TX_ROLLOVER) == (self.tx_rd & TX_ROLLOVER)
+        self.tx_pending == 0
     }
 
     fn arm_rx(&self, i: usize) {
@@ -284,6 +292,8 @@ pub struct Card {
 
 /// MSI interrupts taken (the handler only wakes the wlan thread).
 static IRQS: AtomicU64 = AtomicU64::new(0);
+/// Transmitted frames the firmware has handed back.
+static TX_DONE: AtomicU64 = AtomicU64::new(0);
 
 fn interrupt(_ctx: usize) {
     IRQS.fetch_add(1, Ordering::Relaxed);
@@ -329,7 +339,7 @@ fn power_up(d: &pci::Device) {
         d.write(0x10 + i as u8 * 4, *b);
     }
     d.write(0x04, cmd);
-    crate::println!("mwifiex {}: was in D{}, now D0", d.bdf(), pmcsr & 3);
+    crate::wlog!("mwifiex {}: was in D{}, now D0", d.bdf(), pmcsr & 3);
 }
 
 /// Found while the PCI bus is probed: map the registers and register with
@@ -345,7 +355,7 @@ pub fn probe(d: &pci::Device) {
     d.set_intx_disabled(true);
     let base = d.bar(2);
     if base == 0 || d.read(0x18) & 1 != 0 {
-        crate::println!("{name}: BAR 2 is not memory ({:#x})", d.read(0x18));
+        crate::wlog!("{name}: BAR 2 is not memory ({:#x})", d.read(0x18));
         return;
     }
     let regs = Regs(mmio::map(base, BAR2_SIZE));
@@ -370,8 +380,8 @@ pub fn probe(d: &pci::Device) {
     // The interrupt only wakes the wlan thread, which reads the status;
     // without MSI that thread polls.
     match crate::msi::setup(d, false, interrupt, 0) {
-        Some((v, kind)) => crate::println!("{}: {kind} vector {v:#x}", card.name),
-        None => crate::println!("{}: no MSI; polled", card.name),
+        Some((v, kind)) => crate::wlog!("{}: {kind} vector {v:#x}", card.name),
+        None => crate::wlog!("{}: no MSI; polled", card.name),
     }
     crate::net::wlan::register(Arc::new(card));
 }
@@ -402,7 +412,7 @@ impl Card {
             // After a function reset the card wants only the WiFi part of
             // a combo image; PCIE8897.BIN is WiFi only (starts with a
             // download command 1), so it goes as it is.
-            crate::println!("{}: card was function-reset", self.name);
+            crate::wlog!("{}: card was function-reset", self.name);
         }
         let t0 = crate::irq::uptime_ms();
         let (mut offset, mut blocks, mut retries, mut sent) = (0usize, 0usize, 0, 0usize);
@@ -414,7 +424,7 @@ impl Card {
                 len != 0
             });
             if len == 0 {
-                crate::println!("{}: card stopped asking for firmware at {offset} of {}", self.name, fw.len());
+                crate::wlog!("{}: card stopped asking for firmware at {offset} of {}", self.name, fw.len());
                 break;
             }
             if len > UPLD_SIZE {
@@ -447,7 +457,7 @@ impl Card {
             offset += txlen;
             sent += 1;
         }
-        crate::println!("{}: firmware sent ({} bytes, {sent} blocks, {} ms)", self.name, offset, crate::irq::uptime_ms() - t0);
+        crate::wlog!("{}: firmware sent ({} bytes, {sent} blocks, {} ms)", self.name, offset, crate::irq::uptime_ms() - t0);
         Ok(())
     }
 
@@ -577,7 +587,7 @@ impl Card {
                 break;
             }
             if crate::irq::uptime_ms() - t0 > timeout_ms {
-                crate::println!("{}: {name} timed out (host int status {:#x}, fw status {:#x})", self.name, r.r(HOST_INT_STATUS), r.r(FW_STATUS));
+                crate::wlog!("{}: {name} timed out (host int status {:#x}, fw status {:#x})", self.name, r.r(HOST_INT_STATUS), r.r(FW_STATUS));
                 return Err(WlanError::Timeout(name));
             }
             crate::task::sched::sleep_ms(1);
@@ -597,7 +607,7 @@ impl Card {
         }
         if !g.up {
             // Start-up: every step in the log until the chip has worked once.
-            crate::println!("{}: {name} done ({} bytes, {} ms)", self.name, resp.body.len(), crate::irq::uptime_ms() - t0);
+            crate::wlog!("{}: {name} done ({} bytes, {} ms)", self.name, resp.body.len(), crate::irq::uptime_ms() - t0);
         }
         Ok(resp.body.to_vec())
     }
@@ -612,7 +622,7 @@ impl Card {
             0x1200 => "B0",
             _ => "?",
         };
-        crate::println!(
+        crate::wlog!(
             "{}: BAR 2 at {:#x}, revision {rev:#x} ({rev_name}), firmware status {:#x}, scratch 13 {:#x}, host interrupt status {:#x}",
             self.name,
             self.dev.bar(2),
@@ -628,19 +638,19 @@ impl Card {
             *self.data.lock() = Some(d);
         }
         if self.fw_ready(1) {
-            crate::println!("{}: firmware already running", self.name);
+            crate::wlog!("{}: firmware already running", self.name);
         } else {
             // Zero: this function downloads (the 8897's Bluetooth half on
             // USB could be doing it with a combo image).
             let winner = r.r(FW_STATUS) == 0;
             if winner {
                 if rev == 0x1100 {
-                    crate::println!("{}: revision A0 needs pcie8897_uapsta_a0.bin; trying the B0 image", self.name);
+                    crate::wlog!("{}: revision A0 needs pcie8897_uapsta_a0.bin; trying the B0 image", self.name);
                 }
                 let fw = crate::fs::read_file(FIRMWARE).ok_or_else(|| WlanError::NoFirmware(FIRMWARE.into()))?;
                 self.download(g.rings.as_ref().unwrap(), &fw)?;
             } else {
-                crate::println!("{}: firmware download by the other function (status {:#x}); waiting", self.name, r.r(FW_STATUS));
+                crate::wlog!("{}: firmware download by the other function (status {:#x}); waiting", self.name, r.r(FW_STATUS));
             }
             if !self.fw_ready(150) {
                 return Err(WlanError::Timeout("firmware start"));
@@ -659,7 +669,7 @@ impl Card {
         let spec = mw::HwSpec::parse(&spec_body).ok_or(WlanError::Failed("short GET_HW_SPEC response".into()))?;
         let (kmaj, kmin) = mw::key_api_version(&spec_body);
         self.key_api.store(kmaj as u32, Ordering::Relaxed);
-        crate::println!("{}: key API {kmaj}.{kmin}", self.name);
+        crate::wlog!("{}: key API {kmaj}.{kmin}", self.name);
         *self.mac.lock() = spec.mac;
         *self.fw_version.lock() = spec.fw_version();
         let mut txb = Vec::new();
@@ -667,7 +677,7 @@ impl Card {
             txb.extend(v.to_le_bytes());
         }
         if let Err(e) = self.command(g, mw::CMD_RECONFIGURE_TX_BUFF, &txb, 2000) {
-            crate::println!("{}: {e}", self.name);
+            crate::wlog!("{}: {e}", self.name);
         }
         let mac_ctl = mw::MAC_RX_ON | mw::MAC_TX_ON | mw::MAC_ETHERNETII;
         self.command(g, mw::CMD_MAC_CONTROL, &mac_ctl.to_le_bytes(), 2000)?;
@@ -694,7 +704,7 @@ impl Card {
                     return mw::parse_scan_response(&body).ok_or_else(|| WlanError::Failed(alloc::format!("unparsable scan response ({} bytes)", body.len())));
                 }
                 Err(WlanError::Refused(_, code)) => {
-                    crate::println!("{}: legacy scan refused ({code:#x}); using the extended scan", self.name);
+                    crate::wlog!("{}: legacy scan refused ({code:#x}); using the extended scan", self.name);
                     g.ext_scan = true;
                 }
                 Err(e) => return Err(e),
@@ -747,7 +757,7 @@ impl WlanDriver for Card {
         let mut g = self.inner.lock();
         let r = self.init(&mut g);
         if r.is_err() {
-            crate::println!(
+            crate::wlog!(
                 "{}: start failed: fw status {:#x}, host int status {:#x}, PCI command/status {:#x}",
                 self.name,
                 self.regs.r(FW_STATUS),
@@ -767,7 +777,7 @@ impl WlanDriver for Card {
         if found.is_empty() && !g.ext_scan {
             // Linux always uses the extended scan on this chip: if the
             // legacy one finds nothing, try that before believing it.
-            crate::println!("{}: the legacy scan found nothing; trying the extended scan", self.name);
+            crate::wlog!("{}: the legacy scan found nothing; trying the extended scan", self.name);
             g.ext_scan = true;
             return self.scan_all(&mut g);
         }
@@ -781,6 +791,7 @@ impl WlanDriver for Card {
             ("events".into(), alloc::format!("{}", self.events.load(Ordering::Relaxed))),
             ("rx_frames".into(), alloc::format!("{}", self.rx_frames.load(Ordering::Relaxed))),
             ("tx_frames".into(), alloc::format!("{}", self.tx_frames.load(Ordering::Relaxed))),
+            ("tx_done".into(), alloc::format!("{}", TX_DONE.load(Ordering::Relaxed))),
             ("tx_dropped".into(), alloc::format!("{}", self.tx_dropped.load(Ordering::Relaxed))),
             ("interrupts".into(), alloc::format!("{}", IRQS.load(Ordering::Relaxed))),
             ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
@@ -813,7 +824,7 @@ impl WlanDriver for Card {
         let Some(b) = self.bssid.lock().take() else { return };
         let mut g = self.inner.lock();
         if let Err(e) = self.command(&mut g, mw::CMD_802_11_DEAUTHENTICATE, &mw::deauth_body(b, 3), 3000) {
-            crate::println!("{}: deauthenticate: {e}", self.name);
+            crate::wlog!("{}: deauthenticate: {e}", self.name);
         }
     }
 
@@ -854,6 +865,7 @@ impl WlanDriver for Card {
         put64(&d.txbd, desc + 8, d.txbuf.addr(at));
         d.txbd.write(desc + 16, &[0; 4]);
         fence(Ordering::SeqCst);
+        d.tx_pending += 1;
         d.tx_wr += 1 << 16;
         if (d.tx_wr & TX_MASK) >> 16 == TXRX_BD as u32 {
             d.tx_wr = (d.tx_wr & TX_ROLLOVER) ^ TX_ROLLOVER;
@@ -933,12 +945,12 @@ impl Card {
             match self.scan_group(g, &chans[i..j]) {
                 Ok(v) => {
                     if first {
-                        crate::println!("{}: channels {}-{}{}: {} network(s)", self.name, chans[i].channel, chans[j - 1].channel, if chans[i].passive { " (passive)" } else { "" }, v.len());
+                        crate::wlog!("{}: channels {}-{}{}: {} network(s)", self.name, chans[i].channel, chans[j - 1].channel, if chans[i].passive { " (passive)" } else { "" }, v.len());
                     }
                     found.extend(v)
                 }
                 Err(e @ WlanError::Timeout(_)) => return Err(e),
-                Err(e) => crate::println!("{}: scan of channels {}-{}: {e}", self.name, chans[i].channel, chans[j - 1].channel),
+                Err(e) => crate::wlog!("{}: scan of channels {}-{}: {e}", self.name, chans[i].channel, chans[j - 1].channel),
             }
             i = j;
         }

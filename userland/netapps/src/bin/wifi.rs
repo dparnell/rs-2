@@ -83,9 +83,16 @@ fn status() -> u32 {
             if !t.lines().any(|l| l.starts_with("adapter=")) {
                 outln("No WiFi adapter found.");
             }
+            let mut logged = false;
             for l in t.lines() {
                 let Some((k, v)) = l.split_once('=') else { continue };
-                if k == "adapter" {
+                if k == "log" {
+                    if !logged {
+                        outln("Recent WiFi log (seconds since boot):");
+                        logged = true;
+                    }
+                    outln(&alloc::format!("  {v}"));
+                } else if k == "adapter" {
                     outln(&alloc::format!("Adapter {v}:"));
                 } else if k == "profiles" {
                     outln(&alloc::format!("Networks in \\MPTN\\ETC\\WIFI.CFG: {v}"));
@@ -221,6 +228,12 @@ fn connect(ssid: &str, pass: Option<&str>) -> u32 {
         }
         if state == "disconnected" && !err.is_empty() {
             outln(&alloc::format!("Not connected: {err}"));
+            let f = |k: &str| field(&t, k).unwrap_or("?").to_string();
+            outln(&alloc::format!("Frames: {} received, {} sent, {} sent back by the chip, {} dropped", f("rx_frames"), f("tx_frames"), f("tx_done"), f("tx_dropped")));
+            outln("What happened (seconds since boot):");
+            for l in t.lines().filter_map(|l| l.strip_prefix("log=")).filter(|l| l.contains("wlan") || l.contains("88W8897")).collect::<Vec<_>>().iter().rev().take(14).rev() {
+                outln(&alloc::format!("  {l}"));
+            }
             outln("(rs2 keeps trying; WIFI STATUS shows how it goes, WIFI DISCONNECT stops it)");
             return 2;
         }

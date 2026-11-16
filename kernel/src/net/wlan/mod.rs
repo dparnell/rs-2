@@ -38,6 +38,28 @@ use wlan::wpa::{Action, Supplicant};
 use wlan::MacFmt;
 
 use crate::sync::{Mutex, SpinLock};
+
+/// The last lines the WiFi layer and its drivers logged (shown by WIFI
+/// STATUS: the boot log is not always at hand).
+static LOG: SpinLock<VecDeque<String>> = SpinLock::new(VecDeque::new());
+const LOG_LINES: usize = 40;
+
+/// Log a line to the console/boot log and to [`LOG`].
+pub fn log(line: String) {
+    crate::println!("{line}");
+    let ms = crate::irq::uptime_ms();
+    let mut l = LOG.lock();
+    if l.len() >= LOG_LINES {
+        l.pop_front();
+    }
+    l.push_back(alloc::format!("{}.{:03} {line}", ms / 1000, ms % 1000));
+}
+
+/// `crate::println!` that also keeps the line for WIFI STATUS.
+#[macro_export]
+macro_rules! wlog {
+    ($($a:tt)*) => { $crate::net::wlan::log(alloc::format!($($a)*)) };
+}
 use crate::task::WaitQueue;
 
 pub use wlan::mwifiex::Key;
@@ -231,7 +253,7 @@ pub fn kick() {
 
 /// A driver found a chip.
 pub fn register(drv: Arc<dyn WlanDriver>) {
-    crate::println!("wlan: {} found", drv.name());
+    crate::wlog!("wlan: {} found", drv.name());
     let a = Adapter {
         drv,
         state: SpinLock::new(State { status: Status::Found, info: String::new(), results: Vec::new(), last_scan_ms: 0 }),
@@ -271,9 +293,9 @@ pub fn load_config() {
     let text: String = data.iter().map(|&b| b as char).collect();
     let c = wlan::config::parse(&text);
     for (line, why) in &c.errors {
-        crate::println!("wlan: {CONFIG_FILE} line {line}: {why}");
+        crate::wlog!("wlan: {CONFIG_FILE} line {line}: {why}");
     }
-    crate::println!("wlan: {} network(s) in {CONFIG_FILE}", c.profiles.len());
+    crate::wlog!("wlan: {} network(s) in {CONFIG_FILE}", c.profiles.len());
     // Passphrases written into WIFI.CFG (by hand, or by an older WIFI.EXE)
     // move into the system keychain, and the file is written without them.
     let mut moved = false;
@@ -282,11 +304,11 @@ pub fn load_config() {
         if let Some(k) = p.passphrase.take() {
             match crate::keychain::set(KEYCHAIN_SERVICE, &p.ssid, k.as_bytes(), false) {
                 Ok(()) => {
-                    crate::println!("wlan: the passphrase of {} moved from {CONFIG_FILE} into the keychain", wlan::ie::ssid_text(&p.ssid));
+                    crate::wlog!("wlan: the passphrase of {} moved from {CONFIG_FILE} into the keychain", wlan::ie::ssid_text(&p.ssid));
                     moved = true;
                 }
                 Err(e) => {
-                    crate::println!("wlan: the passphrase of {} stays in {CONFIG_FILE}: {e}", wlan::ie::ssid_text(&p.ssid));
+                    crate::wlog!("wlan: the passphrase of {} stays in {CONFIG_FILE}: {e}", wlan::ie::ssid_text(&p.ssid));
                     p.passphrase = Some(k);
                 }
             }
@@ -295,7 +317,7 @@ pub fn load_config() {
     if moved {
         let t: alloc::vec::Vec<u8> = wlan::config::write(&plain).chars().map(|c| c as u32 as u8).collect();
         if let Err(e) = crate::fs::write_file(CONFIG_FILE, &t) {
-            crate::println!("wlan: cannot rewrite {CONFIG_FILE} (error {e})");
+            crate::wlog!("wlan: cannot rewrite {CONFIG_FILE} (error {e})");
         }
     }
     *PROFILES.lock() = c.profiles;
@@ -374,13 +396,13 @@ pub fn start() {
             };
             match r {
                 Ok(info) => {
-                    crate::println!("wlan{i}: {} up in {} ms: {info}", a.drv.name(), crate::irq::uptime_ms() - t0);
+                    crate::wlog!("wlan{i}: {} up in {} ms: {info}", a.drv.name(), crate::irq::uptime_ms() - t0);
                     let mut s = a.state.lock();
                     s.status = Status::Up;
                     s.info = info;
                 }
                 Err(e) => {
-                    crate::println!("wlan{i}: {} failed to start: {e}", a.drv.name());
+                    crate::wlog!("wlan{i}: {} failed to start: {e}", a.drv.name());
                     a.state.lock().status = Status::Failed(alloc::format!("{e}"));
                     continue;
                 }
@@ -389,12 +411,12 @@ pub fn start() {
             super::register(Arc::new(nic));
             match scan(i, &ScanRequest::default()) {
                 Ok(v) => {
-                    crate::println!("wlan{i}: scan found {} network(s)", v.len());
+                    crate::wlog!("wlan{i}: scan found {} network(s)", v.len());
                     for b in &v {
-                        crate::println!("wlan{i}:   {}", describe(b));
+                        crate::wlog!("wlan{i}:   {}", describe(b));
                     }
                 }
-                Err(e) => crate::println!("wlan{i}: scan failed: {e}"),
+                Err(e) => crate::wlog!("wlan{i}: scan failed: {e}"),
             }
         }
         manage();
@@ -441,11 +463,11 @@ fn event(i: usize, a: &Arc<Adapter>, e: WlanEvent) {
         WlanEvent::Disconnected { why, reason } => {
             let mut c = a.conn.lock();
             if c.link != Link::Idle {
-                crate::println!("wlan{i}: {why} (reason {reason})");
+                crate::wlog!("wlan{i}: {why} (reason {reason})");
                 lost(a, &mut c, alloc::format!("{why} (reason {reason})"), 2000);
             }
         }
-        WlanEvent::Other(cause) => crate::println!("wlan{i}: firmware event {cause:#x}"),
+        WlanEvent::Other(cause) => crate::wlog!("wlan{i}: firmware event {cause:#x}"),
     }
 }
 
@@ -483,7 +505,7 @@ fn step(i: usize, a: &Arc<Adapter>) {
         let mut c = a.conn.lock();
         if let Link::Handshake(since) = c.link {
             if now - since > 10_000 {
-                crate::println!("wlan{i}: no WPA2 handshake in 10 s (wrong passphrase?)");
+                crate::wlog!("wlan{i}: no WPA2 handshake in 10 s (wrong passphrase?)");
                 lost(a, &mut c, "the WPA2 handshake did not finish (wrong passphrase?)".into(), 5000);
                 drop(c);
                 a.drv.disconnect();
@@ -510,7 +532,7 @@ fn step(i: usize, a: &Arc<Adapter>) {
     match r {
         Ok(()) => {}
         Err(e) => {
-            crate::println!("wlan{i}: cannot join {}: {e}", wlan::ie::ssid_text(&profile.ssid));
+            crate::wlog!("wlan{i}: cannot join {}: {e}", wlan::ie::ssid_text(&profile.ssid));
             lost(a, &mut c, e, 5000);
         }
     }
@@ -587,7 +609,7 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
         }
         s => return Err(alloc::format!("{} networks are not supported", s.name())),
     };
-    crate::println!("wlan{i}: joining {name} ({}, channel {}, {} dBm, {})", MacFmt(bss.bssid), bss.channel, bss.rssi, sec.name());
+    crate::wlog!("wlan{i}: joining {name} ({}, channel {}, {} dBm, {})", MacFmt(bss.bssid), bss.channel, bss.rssi, sec.name());
     let pass = if rsn.is_some() { passphrase(p)? } else { None };
     let pmk = match (&rsn, &pass) {
         (Some(_), Some(pass)) => {
@@ -609,7 +631,7 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
     c.gtk_set = false;
     match (rsn, pmk) {
         (Some(ie), Some(pmk)) => {
-            crate::println!("wlan{i}: associated (AID {aid}); WPA2 handshake");
+            crate::wlog!("wlan{i}: associated (AID {aid}); WPA2 handshake");
             let mut s = Supplicant::new(pmk, bss.bssid, a.drv.mac_address(), ie, random32());
             if let Some(ap) = ap_rsn_ie(&bss) {
                 s.set_ap_rsn_ie(ap);
@@ -618,7 +640,7 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
             c.link = Link::Handshake(crate::irq::uptime_ms());
         }
         _ => {
-            crate::println!("wlan{i}: connected to {name} (AID {aid}, open)");
+            crate::wlog!("wlan{i}: connected to {name} (AID {aid}, open)");
             c.link = Link::Connected;
             c.failures = 0;
             c.error.clear();
@@ -638,7 +660,15 @@ fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
         let Some(b) = c.bss.as_ref().map(|b| b.bssid) else { return };
         (s, b)
     };
+    let what = match wlan::wpa::KeyFrame::parse(pkt) {
+        Some(k) if k.info & 1 << 3 == 0 => ("group message 1", "group message 2"),
+        Some(k) if k.info & 1 << 8 == 0 => ("message 1", "message 2"),
+        Some(_) => ("message 3", "message 4"),
+        None => ("EAPOL frame (not an EAPOL-Key it knows)", "reply"),
+    };
+    let info = wlan::wpa::KeyFrame::parse(pkt).map_or(0, |k| k.info);
     let actions = s.rx_eapol(pkt);
+    crate::wlog!("wlan{i}: WPA2 {} in ({} bytes, key info {info:#06x}): {} action(s)", what.0, pkt.len(), actions.len());
     let mac = a.drv.mac_address();
     let mut failed = None;
     let mut complete = false;
@@ -650,8 +680,10 @@ fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
                 f.extend(mac);
                 f.extend(ETHERTYPE_EAPOL.to_be_bytes());
                 f.extend(&p);
-                if !a.drv.send(&f) {
-                    crate::println!("wlan{i}: EAPOL frame not sent (transmit ring full)");
+                if a.drv.send(&f) {
+                    crate::wlog!("wlan{i}: WPA2 {} sent ({} bytes)", what.1, p.len());
+                } else {
+                    crate::wlog!("wlan{i}: WPA2 {} not sent (transmit ring full)", what.1);
                 }
             }
             Action::InstallPtk { tk } => {
@@ -677,7 +709,7 @@ fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
     }
     let mut c = a.conn.lock();
     if let Some(why) = failed {
-        crate::println!("wlan{i}: WPA2 handshake failed: {why}");
+        crate::wlog!("wlan{i}: WPA2 handshake failed: {why}");
         lost(a, &mut c, alloc::format!("WPA2: {why}"), 5000);
         drop(c);
         a.drv.disconnect();
@@ -686,7 +718,7 @@ fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
     c.supp = Some(s);
     if complete && c.link != Link::Connected {
         let name = c.bss.as_ref().map(|b| b.ssid_text()).unwrap_or_default();
-        crate::println!("wlan{i}: connected to {name} (WPA2)");
+        crate::wlog!("wlan{i}: connected to {name} (WPA2)");
         c.link = Link::Connected;
         c.failures = 0;
         c.error.clear();
@@ -703,7 +735,7 @@ pub fn connect(i: usize, ssid: &[u8], passphrase: Option<&str>) -> Result<(), Wl
     if let Some(k) = passphrase {
         // Kept for the next boot in the keychain (not in WIFI.CFG).
         if let Err(e) = crate::keychain::set(KEYCHAIN_SERVICE, ssid, k.as_bytes(), false) {
-            crate::println!("wlan{i}: the passphrase is not saved: {e}");
+            crate::wlog!("wlan{i}: the passphrase is not saved: {e}");
         }
         p.passphrase = Some(k.into());
     }
@@ -813,6 +845,9 @@ pub fn status_text() -> String {
         }
     }
     let _ = write!(s, "profiles={}\n", PROFILES.lock().len());
+    for l in LOG.lock().iter() {
+        let _ = write!(s, "log={l}\n");
+    }
     s
 }
 
