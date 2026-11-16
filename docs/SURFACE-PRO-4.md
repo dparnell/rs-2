@@ -140,6 +140,12 @@ The SP4 has no serial port. Done (2026-11-15):
   On a system installed before that: boot the stick and
   `ECHO bootlog>>X:\RS2\CMDLINE`, X: being the drive whose
   `\RS2\CMDLINE` starts with `root=`.
+- **The previous boot's log** (2026-11-17): bootlog renames the last
+  boot's `\RS2\BOOT.LOG` to `\RS2\BOOTPREV.LOG` before writing this
+  one's, so a boot that went wrong (with the Surface Dock attached, USB
+  stopped working) can be read on the next boot. A boot volume left
+  dirty gets its log only after AUTOCHECK's CHKDSK (the installed
+  CONFIG.SYS checks every drive, the EFI partition too).
 - **Boot watch** (`bootdiag`): if no PM program has the display 60 s
   after boot (and the boot is not `textmode` or `init=`), the kernel
   logs the Ctrl+Alt+F12 thread report once, now with the kernel threads

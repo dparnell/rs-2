@@ -51,7 +51,8 @@ pub fn tail(out: &mut [u8]) -> usize {
 }
 
 /// `bootlog`: copy the log to `\RS2\BOOT.LOG` on the boot volume every
-/// few seconds while it grows (the first copy once the disks are up).
+/// few seconds while it grows (the first copy once the disks are up); the
+/// previous boot's becomes `\RS2\BOOTPREV.LOG`.
 pub fn start_bootlog() {
     if !crate::boot_info().cmdline().split_whitespace().any(|w| w.eq_ignore_ascii_case("bootlog")) {
         return;
@@ -74,6 +75,12 @@ pub fn start_bootlog() {
                         }
                     }
                     Some((_, fs)) => {
+                        if written == usize::MAX {
+                            // The last boot's log stays as BOOTPREV.LOG
+                            // (read it after a boot that went wrong).
+                            let _ = fs.delete("RS2\\BOOTPREV.LOG");
+                            let _ = fs.rename("RS2\\BOOT.LOG", "RS2\\BOOTPREV.LOG");
+                        }
                         let n = tail(&mut buf);
                         if save(&*fs, "\\RS2\\BOOT.LOG", &buf[..n]).is_ok() {
                             written = head;
