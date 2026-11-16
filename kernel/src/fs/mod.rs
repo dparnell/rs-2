@@ -760,6 +760,28 @@ fn load_file(path: &str) -> Result<Arc<[u8]>, u32> {
     Ok(Arc::from(v))
 }
 
+/// Create or replace a whole file given a fully qualified path.
+pub fn write_file(path: &str, data: &[u8]) -> Result<(), u32> {
+    let empty: [String; 26] = Default::default();
+    let p = path::canonical(path, 2, &empty)?;
+    let fs = fs_of(&p)?;
+    let f = match fs.open(&p.rel()) {
+        Ok(f) => {
+            f.set_size(0)?;
+            f
+        }
+        Err(_) => fs.create(&p.rel(), 0)?,
+    };
+    let mut at = 0;
+    while at < data.len() {
+        match f.write(at as u64, &data[at..])? {
+            0 => return Err(29), // ERROR_WRITE_FAULT
+            n => at += n,
+        }
+    }
+    Ok(())
+}
+
 /// Read up to `n` bytes at `off` of a file given a fully qualified path.
 pub fn read_range(path: &str, off: u64, n: usize) -> Option<Vec<u8>> {
     let empty: [String; 26] = Default::default();

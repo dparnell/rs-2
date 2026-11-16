@@ -769,6 +769,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("talkd", "OS2\\TALKD.EXE"),
         ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
         ("wifi", "OS2\\WIFI.EXE"),
+        ("keychain", "OS2\\KEYCHAIN.EXE"),
         ("net", "OS2\\NET.EXE"),
         ("lantest", "RS2\\LANTEST.EXE"),
         ("netapi32", "OS2\\DLL\\NETAPI32.DLL"),

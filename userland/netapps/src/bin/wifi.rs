@@ -6,10 +6,12 @@
 //! `WIFI LIST [n]`: the networks the last scan found.
 //! `WIFI RELOAD`: read `\MPTN\ETC\WIFI.CFG` again.
 //! `WIFI CONNECT ssid [passphrase]`: join a network (saved in WIFI.CFG,
-//! first, so it is joined again at the next boot) and wait until the link
-//! is up or it fails. Quote an SSID with blanks: `WIFI CONNECT "My Net" pw`.
+//! first, so it is joined again at the next boot; the passphrase goes into
+//! the system keychain, not the file) and wait until the link is up or it
+//! fails. Quote an SSID with blanks: `WIFI CONNECT "My Net" pw`.
 //! `WIFI DISCONNECT`: leave the network (until the next CONNECT or boot).
-//! `WIFI FORGET ssid`: remove a network from WIFI.CFG.
+//! `WIFI FORGET ssid`: remove a network from WIFI.CFG and its passphrase
+//! from the keychain.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -29,6 +31,10 @@ unsafe extern "C" {
     fn Rs2WlanConnect(adapter: u32, ssid: *const u8, passphrase: *const u8) -> u32;
     #[link_name = "RS2API.624"]
     fn Rs2WlanDisconnect(adapter: u32) -> u32;
+    #[link_name = "RS2API.630"]
+    fn Rs2KeyQuery(buf: *mut u8, cb: u32, pcb: *mut u32) -> u32;
+    #[link_name = "RS2API.633"]
+    fn Rs2KeyDelete(service: *const u8, account: *const u8) -> u32;
 }
 
 const ERROR_BUFFER_OVERFLOW: u32 = 111;
@@ -160,6 +166,13 @@ fn field<'a>(t: &'a str, k: &str) -> Option<&'a str> {
     t.lines().find_map(|l| l.strip_prefix(k).and_then(|r| r.strip_prefix('=')))
 }
 
+fn keychain_locked() -> bool {
+    let mut buf = [0u8; 256];
+    let mut n = 0u32;
+    let rc = unsafe { Rs2KeyQuery(buf.as_mut_ptr(), buf.len() as u32, &mut n) };
+    (rc == 0 || rc == ERROR_BUFFER_OVERFLOW) && buf.starts_with(b"state=locked")
+}
+
 fn connect(ssid: &str, pass: Option<&str>) -> u32 {
     if ssid.is_empty() || ssid.len() > 32 {
         eprint("WIFI: an SSID is 1 to 32 characters\r\n");
@@ -169,11 +182,13 @@ fn connect(ssid: &str, pass: Option<&str>) -> u32 {
         eprint("WIFI: a WPA2 passphrase is 8 to 63 characters\r\n");
         return 1;
     }
-    // Save it first in WIFI.CFG (keeping a passphrase given before).
+    // Save it first in WIFI.CFG. The passphrase is not written there: the
+    // kernel keeps it in the system keychain (a passphrase still in the
+    // file is moved there when it is read again).
     let mut ps = read_config();
     let mut p = ps.iter().position(|p| p.ssid == bytes(ssid)).map(|i| ps.remove(i)).unwrap_or_else(|| wlan::config::Profile::new(&bytes(ssid), None));
-    if let Some(k) = pass {
-        p.passphrase = Some(k.into());
+    if pass.is_some() {
+        p.passphrase = None;
     }
     p.autoconnect = true;
     ps.insert(0, p);
@@ -185,6 +200,9 @@ fn connect(ssid: &str, pass: Option<&str>) -> u32 {
     if rc != 0 {
         eprint(&alloc::format!("WIFI: {} (error {rc})\r\n", why(rc)));
         return 2;
+    }
+    if pass.is_some() && keychain_locked() {
+        outln("Note: the keychain is locked, so the passphrase is not saved (KEYCHAIN UNLOCK).");
     }
     outln(&alloc::format!("Connecting to {ssid}..."));
     let mut last = String::new();
@@ -243,7 +261,12 @@ fn main(s: &os2::Startup) -> u32 {
             let mut ps = read_config();
             let before = ps.len();
             ps.retain(|p| p.ssid != bytes(ssid));
+            let in_keychain = unsafe { Rs2KeyDelete(cstr("wifi").as_ptr(), cstr(ssid).as_ptr()) } == 0;
             if ps.len() == before {
+                if in_keychain {
+                    outln(&alloc::format!("The passphrase of {ssid} removed from the keychain."));
+                    return 0;
+                }
                 eprint(&alloc::format!("WIFI: {ssid} is not in {CONFIG}\r\n"));
                 return 1;
             }

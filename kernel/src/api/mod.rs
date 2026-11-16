@@ -52,6 +52,7 @@ pub mod vdm;
 pub mod viowin;
 pub mod win16;
 pub mod wlan;
+pub mod keychain;
 pub mod xproc;
 pub mod names;
 mod names_gen;

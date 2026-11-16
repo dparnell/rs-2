@@ -20,5 +20,7 @@ pathcache = { path = "../crates/pathcache" }
 jfs = { path = "../crates/jfs" }
 tcpip = { path = "../crates/tcpip" }
 wlan = { path = "../crates/wlan" }
+keychain = { path = "../crates/keychain" }
+rs2crypto = { path = "../crates/rs2crypto" }
 smb = { path = "../crates/smb" }
 ieee1284 = { package = "parport", path = "../crates/parport" }

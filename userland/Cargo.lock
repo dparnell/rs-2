@@ -741,6 +741,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs2crypto"
+version = "0.1.0"
+
+[[package]]
 name = "rs2shell"
 version = "0.1.0"
 dependencies = [
@@ -1012,6 +1016,9 @@ dependencies = [
 [[package]]
 name = "wlan"
 version = "0.1.0"
+dependencies = [
+ "rs2crypto",
+]
 
 [[package]]
 name = "wpconfig-dll"

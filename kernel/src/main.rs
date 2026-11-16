@@ -28,6 +28,7 @@ mod fs;
 mod infoseg;
 mod irq;
 mod kbd;
+mod keychain;
 mod klog;
 mod loader;
 mod lockdep;

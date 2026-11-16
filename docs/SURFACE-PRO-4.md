@@ -419,9 +419,11 @@ Written, not yet run on the chip:
 - RS2API 623/624 and `WIFI CONNECT ssid [passphrase]` (saves the
   network first in WIFI.CFG, then follows the state until connected or
   failed), `WIFI DISCONNECT`, `WIFI FORGET ssid`. The passphrase is kept
-  in WIFI.CFG in plain text, as wpa_supplicant keeps it. On the live
-  stick C: is a RAM disk, so WIFI.CFG does not survive a reboot there;
-  on an installed system it does.
+  in the system keychain (docs/KEYCHAIN.md), encrypted and out of
+  programs' reach, not in WIFI.CFG; a `PASSPHRASE=` line found in
+  WIFI.CFG is moved there. On the live stick C: is a RAM disk, so
+  WIFI.CFG and the keychain do not survive a reboot there; on an
+  installed system they do.
 - Not yet: 802.11n/ac (association offers legacy rates only, up to
   54 Mbit/s), power saving (kept off on purpose), hidden networks, roaming
   between access points of one network, a PM applet.

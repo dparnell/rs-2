@@ -274,8 +274,48 @@ pub fn load_config() {
         crate::println!("wlan: {CONFIG_FILE} line {line}: {why}");
     }
     crate::println!("wlan: {} network(s) in {CONFIG_FILE}", c.profiles.len());
+    // Passphrases written into WIFI.CFG (by hand, or by an older WIFI.EXE)
+    // move into the system keychain, and the file is written without them.
+    let mut moved = false;
+    let mut plain = c.profiles.clone();
+    for p in &mut plain {
+        if let Some(k) = p.passphrase.take() {
+            match crate::keychain::set(KEYCHAIN_SERVICE, &p.ssid, k.as_bytes(), false) {
+                Ok(()) => {
+                    crate::println!("wlan: the passphrase of {} moved from {CONFIG_FILE} into the keychain", wlan::ie::ssid_text(&p.ssid));
+                    moved = true;
+                }
+                Err(e) => {
+                    crate::println!("wlan: the passphrase of {} stays in {CONFIG_FILE}: {e}", wlan::ie::ssid_text(&p.ssid));
+                    p.passphrase = Some(k);
+                }
+            }
+        }
+    }
+    if moved {
+        let t: alloc::vec::Vec<u8> = wlan::config::write(&plain).chars().map(|c| c as u32 as u8).collect();
+        if let Err(e) = crate::fs::write_file(CONFIG_FILE, &t) {
+            crate::println!("wlan: cannot rewrite {CONFIG_FILE} (error {e})");
+        }
+    }
     *PROFILES.lock() = c.profiles;
     kick();
+}
+
+/// The keychain service of WiFi passphrases (account: the SSID).
+pub const KEYCHAIN_SERVICE: &str = "wifi";
+
+/// A network's passphrase: given with WIFI CONNECT or in WIFI.CFG, else
+/// from the keychain.
+fn passphrase(p: &Profile) -> Result<Option<String>, String> {
+    if let Some(k) = &p.passphrase {
+        return Ok(Some(k.clone()));
+    }
+    match crate::keychain::get(KEYCHAIN_SERVICE, &p.ssid) {
+        Some(k) => Ok(Some(k.iter().map(|&b| b as char).collect())),
+        None if crate::keychain::is_locked() => Err("the keychain is locked (KEYCHAIN UNLOCK)".into()),
+        None => Ok(None),
+    }
 }
 
 /// The network stack's view of an adapter.
@@ -540,7 +580,7 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
             if r.caps & 1 << 6 != 0 {
                 return Err("the network requires protected management frames".into());
             }
-            if p.passphrase.is_none() {
+            if passphrase(p)?.is_none() {
                 return Err(alloc::format!("{name} needs a passphrase (WIFI CONNECT \"{name}\" passphrase)"));
             }
             Some(own_rsn_ie(r.group))
@@ -548,7 +588,8 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
         s => return Err(alloc::format!("{} networks are not supported", s.name())),
     };
     crate::println!("wlan{i}: joining {name} ({}, channel {}, {} dBm, {})", MacFmt(bss.bssid), bss.channel, bss.rssi, sec.name());
-    let pmk = match (&rsn, &p.passphrase) {
+    let pass = if rsn.is_some() { passphrase(p)? } else { None };
+    let pmk = match (&rsn, &pass) {
         (Some(_), Some(pass)) => {
             let cached = a.conn.lock().pmk.as_ref().filter(|c| c.0 == p.ssid && &c.1 == pass).map(|c| c.2);
             Some(cached.unwrap_or_else(|| {
@@ -655,11 +696,15 @@ fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
 }
 
 /// Join `ssid` now (WIFI CONNECT): it replaces the current network.
-/// `passphrase` None takes the one in WIFI.CFG, if any.
+/// `passphrase` None takes the saved one (keychain), if any.
 pub fn connect(i: usize, ssid: &[u8], passphrase: Option<&str>) -> Result<(), WlanError> {
     let a = adapter(i).ok_or(WlanError::NotReady)?;
     let mut p = PROFILES.lock().iter().find(|p| p.ssid == ssid).cloned().unwrap_or_else(|| Profile::new(ssid, None));
     if let Some(k) = passphrase {
+        // Kept for the next boot in the keychain (not in WIFI.CFG).
+        if let Err(e) = crate::keychain::set(KEYCHAIN_SERVICE, ssid, k.as_bytes(), false) {
+            crate::println!("wlan{i}: the passphrase is not saved: {e}");
+        }
         p.passphrase = Some(k.into());
     }
     let was = {
