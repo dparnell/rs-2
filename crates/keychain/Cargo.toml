@@ -1,0 +1,9 @@
+[package]
+name = "keychain"
+description = "no_std rs2 system keychain file: entries, AES-128-CTR + HMAC-SHA1, optional master password (PBKDF2)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2crypto = { path = "../rs2crypto" }

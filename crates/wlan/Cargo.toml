@@ -6,3 +6,4 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+rs2crypto = { path = "../rs2crypto" }

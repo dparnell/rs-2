@@ -1,11 +1,39 @@
-//! The cryptography WPA2-Personal needs (IEEE 802.11-2020 12.7): SHA-1,
-//! HMAC-SHA1, PBKDF2 (passphrase to PSK), the 802.11 PRF (PMK to PTK),
-//! AES-128 and the RFC 3394 key wrap (key data in EAPOL-Key frames).
-//! CCMP itself runs in the chip's firmware, so only key management is
-//! here. Simple byte-at-a-time code, neither fast nor constant-time: fine
-//! for a few handshakes per association.
+//! rs2's small cryptography library, no_std. What WPA2-Personal needs
+//! (IEEE 802.11-2020 12.7): SHA-1, HMAC-SHA1, PBKDF2 (passphrase to PSK),
+//! the 802.11 PRF (PMK to PTK), AES-128 and the RFC 3394 key wrap (key
+//! data in EAPOL-Key frames); and for the system keychain (`keychain`
+//! crate) AES-128-CTR and a constant-time comparison. CCMP itself runs in
+//! the WiFi chip's firmware. Simple byte-at-a-time code, not fast and
+//! (apart from [`ct_eq`]) not constant-time: fine for a few handshakes
+//! and keychain saves.
+
+#![no_std]
+
+extern crate alloc;
 
 use alloc::vec::Vec;
+
+/// AES-128 in counter mode (NIST SP 800-38A): `data` is XORed with
+/// the encrypted counter blocks, the 128-bit big-endian counter starting at
+/// `iv`. The same call encrypts and decrypts.
+pub fn aes128_ctr(key: &[u8; 16], iv: &[u8; 16], data: &mut [u8]) {
+    let aes = Aes128::new(key);
+    let mut ctr = u128::from_be_bytes(*iv);
+    for chunk in data.chunks_mut(16) {
+        let mut ks = ctr.to_be_bytes();
+        aes.encrypt_block(&mut ks);
+        for (d, k) in chunk.iter_mut().zip(ks) {
+            *d ^= k;
+        }
+        ctr = ctr.wrapping_add(1);
+    }
+}
+
+/// Equal contents, compared in a time that does not depend on where they
+/// differ (for MACs).
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 
 /// Streaming SHA-1 (FIPS 180-4).
 #[derive(Clone)]
@@ -415,6 +443,19 @@ mod tests {
         let mut b: [u8; 16] = hex("3243f6a8885a308d313198a2e0370734").try_into().unwrap();
         aes.encrypt_block(&mut b);
         assert_eq!(b.to_vec(), hex("3925841d02dc09fbdc118597196a0b32"));
+    }
+
+    #[test]
+    fn ctr_sp800_38a() {
+        // NIST SP 800-38A F.5.1, CTR-AES128.Encrypt, first two blocks.
+        let key: [u8; 16] = hex("2b7e151628aed2a6abf7158809cf4f3c").try_into().unwrap();
+        let iv: [u8; 16] = hex("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff").try_into().unwrap();
+        let mut d = hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51");
+        aes128_ctr(&key, &iv, &mut d);
+        assert_eq!(d, hex("874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff"));
+        aes128_ctr(&key, &iv, &mut d[..20]);
+        assert_eq!(&d[..16], &hex("6bc1bee22e409f96e93d7e117393172a")[..]);
+        assert!(ct_eq(b"abc", b"abc") && !ct_eq(b"abc", b"abd") && !ct_eq(b"ab", b"abc"));
     }
 
     #[test]
