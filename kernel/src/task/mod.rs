@@ -282,6 +282,48 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
         p.exit(2, 0xffff);
         return true;
     }
-    let _ = gdt::USER_CS;
+    espfix(f, &p);
     false
+}
+
+/// `iretq` to a 16-bit stack segment loads only SP: bits 16..31 of ESP
+/// keep those of the kernel's stack pointer (Linux's "espfix"). 16-bit
+/// code that goes on to 32-bit code with that ESP (Borland's C runtime
+/// thunks, after a page fault in them: Resource Workshop) faulted on a
+/// garbage stack address. So such a return goes through a trampoline in
+/// the gate area: the iretd frame and an SS:ESP pointer are put below
+/// the program's SP; the trampoline (`lss esp, [esp]` ; `iretd`) loads all
+/// of ESP, then the program's CS:EIP and flags.
+fn espfix(f: &mut TrapFrame, p: &crate::task::process::Process) {
+    // Not V86 mode (DOS sessions).
+    if f.rflags & (1 << 17) != 0 {
+        return;
+    }
+    let mut space = p.space.lock();
+    let dss = space.descriptor(f.ss as u16);
+    if crate::vm::desc_big(dss) {
+        return;
+    }
+    let esp = f.rsp as u32;
+    let sp = esp & 0xffff;
+    if sp < 18 {
+        return;
+    }
+    let at = crate::vm::desc_base(dss).wrapping_add(sp - 18);
+    let mut b = [0u8; 18];
+    b[0..4].copy_from_slice(&(esp - 12).to_le_bytes());
+    b[4..6].copy_from_slice(&(f.ss as u16).to_le_bytes());
+    b[6..10].copy_from_slice(&(f.rip as u32).to_le_bytes());
+    b[10..14].copy_from_slice(&(f.cs as u32).to_le_bytes());
+    b[14..18].copy_from_slice(&(f.rflags as u32).to_le_bytes());
+    if !space.write_bytes(at, &b) {
+        return;
+    }
+    f.rip = crate::loader::gate::ESPFIX as u64;
+    f.cs = gdt::USER_CS as u64;
+    f.ss = gdt::USER_DS as u64;
+    f.rsp = at as u64;
+    // A single step (TF) applies to the program's instruction, not the
+    // trampoline's: iretd sets it.
+    f.rflags &= !(1 << 8);
 }

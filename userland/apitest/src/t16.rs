@@ -52,7 +52,47 @@ unsafe extern "C" {
     fn N16PeekNmPipe();
     static at16_create: u8;
     static at16_thread: u8;
+    static at16_esp: u8;
 }
+
+// at16_esp(pfnGetInfoSeg) (_pascal far, the pointer at bp+6): sets the
+// upper half of ESP to 1234h (a 16-bit stack uses SP only), calls
+// DosGetInfoSeg, returns the upper half of ESP after it in AX and puts
+// ESP back. The kernel's return to a 16-bit stack left bits 16..31 of
+// the kernel's stack pointer there (no espfix): Borland's C runtime then
+// faulted on its way back to 32-bit code (Resource Workshop).
+core::arch::global_asm!(
+    ".pushsection .text.at16esp,\"ax\"",
+    ".p2align 4",
+    ".code16",
+    ".globl at16_esp",
+    "at16_esp:",
+    "push bp",
+    "mov bp, sp",
+    "sub sp, 4",
+    "push esp",
+    "mov eax, esp",
+    "and eax, 0xffff",
+    "or eax, 0x12340000",
+    "mov esp, eax",
+    "push ss",
+    "lea ax, [bp - 2]",
+    "push ax",
+    "push ss",
+    "lea ax, [bp - 4]",
+    "push ax",
+    // call far [bp + 6]
+    ".byte 0xff, 0x5e, 6",
+    "mov eax, esp",
+    "shr eax, 16",
+    "mov esp, dword ptr [bp - 8]",
+    "mov sp, bp",
+    "pop bp",
+    "xor dx, dx",
+    ".byte 0xca, 4, 0",
+    ".code32",
+    ".popsection",
+);
 
 // at16_create(pfnCreateThread, pfnThread, pbStack, ptid, pbuf) (_pascal
 // far; after `push bp`: pbuf at bp+6, ptid bp+10, pbStack bp+14,
@@ -262,6 +302,8 @@ pub fn run() {
             t == 1
         });
     check("16-bit DosGetInfoSeg: tidCurrent of the main thread is 1", main_tid);
+    let high = PascalCall::new().l(gate(D16GetInfoSeg)).call(far(&raw const at16_esp)) & 0xffff;
+    check(&alloc::format!("a 16-bit API returns to a 16-bit stack with the upper half of ESP kept ({high:#x})"), high == 0x1234);
     // A 16-bit stack (in a tiled object) and the result buffer.
     let mut stack: *mut u8 = core::ptr::null_mut();
     const OBJ_TILE: u32 = 0x40;

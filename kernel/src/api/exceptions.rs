@@ -596,6 +596,8 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
 /// For debugging, to the serial log only: the top of the stack and the
 /// return addresses along the EBP chain (32-bit code), with their modules.
 fn dump_stack(f: &TrapFrame, p: &Arc<Process>) {
+    let mut chain = [0u32; 12];
+    let mut n = 0;
     if f.ss == 0x53 {
         let mut sp = p.space.lock();
         let esp = f.rsp as u32;
@@ -605,8 +607,6 @@ fn dump_stack(f: &TrapFrame, p: &Arc<Process>) {
         }
         crate::trace!("stack at {esp:08x}: {:08x?}", words);
         let mut ebp = f.rbp as u32;
-        let mut chain = [0u32; 12];
-        let mut n = 0;
         while n < chain.len() && ebp > esp.wrapping_sub(1) && ebp & 3 == 0 {
             let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
             chain[n] = ret;
@@ -619,17 +619,20 @@ fn dump_stack(f: &TrapFrame, p: &Arc<Process>) {
             ebp = next;
         }
         crate::trace!("callers: {:08x?}", &chain[..n]);
-        drop(sp);
-        // Which modules those are.
-        for a in core::iter::once(f.rip as u32).chain(chain[..n].iter().copied()) {
-            // This process's executable, then the DLLs (other processes'
-            // executables share its addresses).
-            let mods = crate::loader::all_modules();
-            for m in core::iter::once(&p.exe).chain(mods.iter().filter(|m| m.is_dll)) {
-                if let Some((i, o)) = m.objects.iter().enumerate().find(|(_, o)| a >= o.base && a < o.base + o.size) {
-                    crate::trace!("  {a:08x}: {} object {} + {:x}", m.name, i + 1, a - o.base);
-                    break;
-                }
+    }
+    // Which modules those are (the fault's address also on a 16-bit
+    // stack, flat code only).
+    if f.cs != 0x5b {
+        return;
+    }
+    for a in core::iter::once(f.rip as u32).chain(chain[..n].iter().copied()) {
+        // This process's executable, then the DLLs (other processes'
+        // executables share its addresses).
+        let mods = crate::loader::all_modules();
+        for m in core::iter::once(&p.exe).chain(mods.iter().filter(|m| m.is_dll)) {
+            if let Some((i, o)) = m.objects.iter().enumerate().find(|(_, o)| a >= o.base && a < o.base + o.size) {
+                crate::trace!("  {a:08x}: {} object {} + {:x}", m.name, i + 1, a - o.base);
+                break;
             }
         }
     }

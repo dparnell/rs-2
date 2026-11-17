@@ -13,6 +13,9 @@ use crate::vm::{self, PageState, SharedMem, GATE_BASE, GATE_SIZE, PAGE};
 pub const ORDINALS: u32 = 2048;
 pub const SLOT_SIZE: u32 = 4;
 
+/// The espfix trampoline's address (no module's slots reach it).
+pub const ESPFIX: u32 = GATE_BASE + GATE_SIZE - 8;
+
 /// Kernel-implemented modules, in gate slot order.
 pub const MODULES: &[&str] =
     &["DOSCALLS", "VIOCALLS", "KBDCALLS", "MOUCALLS", "MSG", "NLS", "SESMGR", "QUECALLS", "RS2API", "MONCALLS"];
@@ -54,6 +57,13 @@ pub fn init() {
             }
         }
         obj.pages.lock()[i] = PageState::Committed;
+    }
+    // The espfix trampoline (task::espfix), past the modules' slots:
+    // lss esp, [esp] ; iretd.
+    let last = obj.frame((GATE_SIZE / PAGE) as usize - 1).expect("gate memory");
+    unsafe {
+        let page = crate::mm::phys::phys_to_virt(last);
+        page.add((ESPFIX - GATE_BASE) as usize % PAGE as usize).copy_from_nonoverlapping([0x0f, 0xb2, 0x24, 0x24, 0xcf].as_ptr(), 5);
     }
     GATE.set(obj);
 }
