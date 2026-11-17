@@ -1,0 +1,5 @@
+#define RCSUB_VAL 8
+RCDATA 101
+BEGIN
+  2
+END
