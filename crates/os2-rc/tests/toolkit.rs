@@ -97,3 +97,26 @@ fn rebind_toolkit_modules() {
         }
     }
 }
+
+/// rs2's own test scripts (tests/rc) give the .RES files Warp's RC.EXE
+/// wrote for them (tests/rc/ibm, made under rs2). They include the
+/// Toolkit's os2.h, so they are skipped without it.
+#[test]
+fn test_scripts_match_ibm() {
+    if !Path::new(&format!("{TK}/h/os2.h")).exists() {
+        return;
+    }
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rc"));
+    for t in ["DIALOGS", "WINDOWS", "MENUS", "INCL", "NAMES"] {
+        let mut files = HostFiles { dir: dir.clone() };
+        let opts = Options { include: vec![format!("{TK}/h")], codepage: 850, ..Default::default() };
+        let out = os2_rc::compile(&mut files, &format!("{t}.RC"), &opts);
+        assert!(!out.failed(), "{t}: {:?}", out.diags);
+        let ibm = std::fs::read(dir.join("ibm").join(format!("{t}.RES"))).unwrap();
+        assert!(os2_rc::res::write(&out.resources) == ibm, "{t}.RC differs from IBM's .RES");
+    }
+    // Named resources numbered as IBM's RC numbers them.
+    assert_eq!(os2_rc::bind::name_id(b"NAMED"), 0xf44d);
+    assert_eq!(os2_rc::bind::name_id(b"LONGERNAME1"), 0x1956);
+    assert_eq!(os2_rc::bind::name_id(b"ZZZZZZZZ"), 0x8000);
+}

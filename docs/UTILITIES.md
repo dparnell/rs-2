@@ -109,24 +109,37 @@ What the output follows (IBM's, where the Toolkit book says otherwise):
   with 0; a HELPSUBTABLE starts with its item size in words.
 
 Binding: LX modules lose their trailing resource objects and pages; the
-resources go into new objects (PRELOAD first, one per kind of loading),
-sorted by type and ID, 4-byte aligned, pages in whole page-shift units,
-and the loader and fixup sections, non-resident names and debug
-information move behind them. NE modules get the resources as their last
-segments on sector boundaries (flags = load/memory bits | 0x0C81). `-x`
-writes iterated (EXEPACK 1) resource pages for both methods; `-p` keeps
-resources from crossing 64K. Named resources get ID 0 in NE modules (as
-IBM's) and a number with an RT_RESNAMES table in LX modules.
+resources go into new objects (PRELOAD ones, other MOVEABLE ones, FIXED
+ones), sorted by type and ID, 4-byte aligned, pages in whole page-shift
+units after the module's own pages; the loader and fixup sections are
+rebuilt and the data pages, non-resident names and debug information
+follow them. Named resources get ID 0 in NE modules (as IBM's) and in LX
+modules IBM's number: the upper-cased name's bytes in pairs, alternately
+added as little-endian and subtracted as big-endian 16-bit words (0
+becomes 0x8000, a taken number moves up by one, the last resource is
+numbered first), listed per type in an RT_RESNAMES (255) resource: the
+count, the IDs and the NUL-ended names. NE modules get the resources as
+their last segments on sector boundaries (flags = load/memory bits |
+0x0C81). `-x` writes iterated (EXEPACK 1) resource pages for both methods
+when that is smaller; `-p` keeps resources from crossing 64K. Icon 1 (or
+DEFAULTICON) also becomes the module's `.ICON` extended attribute, the
+last ASSOCTABLE its `.ASSOC`.
 
-Checked (`cargo test -p os2-rc`, `examples/rccheck.rs` with IBM's output
-from a run under rs2): the 92 Toolkit sample scripts and the 18 Borland
+Checked (`cargo test -p os2-rc`; `examples/rccheck.rs` and IBM's output
+from runs under rs2): the 92 Toolkit sample scripts and the 18 Borland
 C++ example scripts IBM's RC compiles give byte-identical `.RES` files,
 332 resources equal those bound into the samples' modules, the test
-scripts in `crates/os2-rc/tests/rc` match where IBM's RC accepts them, and
-a `.RES` bound into an LX DLL is byte-identical to IBM's binding (an NE
-DLL too, except the non-resident table offset IBM writes 64K too high).
-Not the same as IBM's: the numbers given to named LX resources, the
-compressed pages, and `NOT` on a combo box's or spin button's style.
+scripts in `crates/os2-rc/tests/rc` give the `.RES` files IBM's RC wrote
+for them (`tests/rc/ibm`), and binding is byte-identical to IBM's for
+LX modules with and without resources (HELLO.EXE, IPFCNTRL.DLL with debug
+information, OREXXWPS.DLL, REXXC.EXE with 30 named resources) and NE
+modules (APMDAEMN.EXE; PMFORMAT.DLL except the non-resident table
+offset, which IBM's RC writes 64K too high). The 52 `.RES` files Borland's
+BRCC wrote for its examples bind. Not like IBM's: compressed pages
+(IBM's `-x2 -p` ended abnormally under rs2, its `-x1` left HELLO's pages uncompressed),
+`NOT` on a combo box's or spin button's style, and IBM's RC rejects some
+expressions (`%`, `<<`, character constants) rs2's takes. FONT copies
+the font file without a font directory.
 
 ## LVM drive letter tables (`crates/lvm`)
 
