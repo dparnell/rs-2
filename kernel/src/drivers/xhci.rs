@@ -364,6 +364,9 @@ enum Step {
     Settle(u64),
     EnableSlot,
     Address,
+    /// SET_ADDRESS recovery before the first request at the new address
+    /// (USB 2.0 9.2.6.3 allows 2 ms; Linux waits 10).
+    Addressed(u64),
     DevDesc8,
     Evaluate,
     DevDesc,
@@ -1292,7 +1295,9 @@ impl Ctrl {
         });
         if let Some(d) = self.devs[i].as_mut() {
             let again = retry.map_or(String::new(), |(p, _)| alloc::format!("; trying again ({} of {ENUM_RETRIES})", self.retries[p] + 1));
-            crate::println!("{name}: port {}: {why} (step {:?}){again}", d.path(), d.step);
+            // The root port's state: speed, link state, enabled.
+            let sc = if d.parent.is_none() { alloc::format!(", PORTSC {:#x}", rd32(self.op, PORTSC + (d.root_port as usize - 1) * 0x10)) } else { String::new() };
+            crate::println!("{name}: port {}: {why} (step {:?}{sc}){again}", d.path(), d.step);
             d.step = Step::Failed;
             if let Some(n) = &d.net {
                 n.state.alive.store(false, Ordering::Release);
@@ -1350,6 +1355,8 @@ impl Ctrl {
                 }
                 Step::Settle(t) if now >= t && FAIL_ARMED.swap(false, Ordering::Relaxed) => self.fail(i, "failed on purpose (xhcifail)"),
                 Step::Settle(t) if now >= t => self.enable_slot(i),
+                Step::Addressed(t) if now >= t => self.get_device_desc8(i),
+                Step::Addressed(_) => {}
                 Step::Running if hub_waiting && now >= deadline => self.fail(i, "hub request timed out"),
                 Step::Debounce(_) | Step::Settle(_) | Step::Running | Step::Unused | Step::Failed => {}
                 _ => {
@@ -1645,7 +1652,10 @@ impl Ctrl {
         }
         match step {
             Step::EnableSlot => self.address_device(i, ev.slot()),
-            Step::Address => self.get_device_desc8(i),
+            Step::Address => {
+                let now = self.now();
+                self.dev(i).step = Step::Addressed(now + 10);
+            }
             Step::Evaluate => self.get_device_desc(i),
             Step::Configure => self.start_running(i),
             Step::Ep0Reset => {

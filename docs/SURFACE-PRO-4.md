@@ -249,6 +249,15 @@ The SP4 has no serial port. Done (2026-11-15):
     while it stays connected (not on a port left alone). `xhcifail`
     fails the first device once in QEMU: port 3's stick enumerates on
     the second try.
+  - With the retry (096dfd0e) on the Surface: the Type Cover works, the
+    mouse behind the dock does not. Port 2 failed `GET_DESCRIPTOR(8)`
+    with a transaction error on all 3 tries, then came back later
+    (disconnected and connected) and failed 3 more times. rs2 sent that
+    first request at once after Address Device. USB 2.0 gives a device
+    2 ms after SET_ADDRESS, and Linux waits 10 ms ("some device
+    hardware wants it"); QEMU does not care. Now the first request
+    waits 10 ms (step Addressed). A root-port failure line also carries
+    PORTSC (speed, link state, enabled), for the next log.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
