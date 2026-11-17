@@ -692,6 +692,27 @@ command fails, the frame is dropped) instead of being read; and the
 first sleeps and wakes are logged ("the chip sleeps", "woke the chip",
 "the chip woke up (interrupt)").
 
+Third try (bb4f48ad): no freeze. WPA2, transmit block ack and a DHCP
+lease (192.168.1.78) all worked, and the chip slept and woke 52 times
+in the first minute or so, mostly woken by its own interrupt. But it
+lost many packets: the firmware often ignored the host's wake request
+("the firmware did not wake up", about 460 ms of retries each time, and
+the frame or command was dropped), the AP later deauthenticated it
+(reason 6), and turning power saving off from the window failed too
+("timeout (waking the chip)"). With power saving off the same network
+worked well. This is the firmware's fault, not rs2's: Linux's
+`mwifiex_pm_wakeup_card` has the same retry loop for the same reason,
+and the Surface Linux patches turn power saving off by default on the
+88W8897 because it is unusable. So rs2 now gives up on it at the first
+missed wake request: it confirms no further sleep, and once the chip
+answers again (it wakes by itself for beacons and frames), it turns
+power saving off for the rest of that start ("power saving goes off
+once the chip answers", then "power saving off"). `WIFI STATUS` and
+the window show "off: the firmware missed a wake request". Turning
+it off while the chip cannot be woken now waits for the chip the same
+way instead of failing. `POWERSAVE=` in WIFI.CFG is unchanged, so the
+next start tries again.
+
 Not done: A-MSDUs from rs2, roaming, hidden networks, recovering the card
 after a firmware crash.
 
