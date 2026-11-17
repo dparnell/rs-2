@@ -393,6 +393,13 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "os2-rc"
+version = "0.1.0"
+dependencies = [
+ "os2-exe",
+]
+
+[[package]]
 name = "os2chess"
 version = "0.1.0"
 dependencies = [
@@ -939,6 +946,7 @@ dependencies = [
  "os2",
  "os2-backup",
  "os2-pack",
+ "os2-rc",
 ]
 
 [[package]]

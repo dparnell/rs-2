@@ -722,6 +722,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("replace", "OS2\\REPLACE.EXE"),
         ("backup", "OS2\\BACKUP.EXE"),
         ("restore", "OS2\\RESTORE.EXE"),
+        ("rc", "OS2\\RC.EXE"),
         ("pstat", "OS2\\PSTAT.EXE"),
         ("rmview", "OS2\\RMVIEW.EXE"),
         ("eautil", "OS2\\EAUTIL.EXE"),
