@@ -96,7 +96,7 @@ pub fn bind(exe: &[u8], res: &[Resource], o: BindOptions) -> Result<Vec<u8>, Bin
         tables.push((*ty, t));
     }
     for (ty, t) in &tables {
-        list.push((crate::rt::RESNAMES, *ty, flags::MOVEABLE | flags::PURE, t));
+        list.push((crate::rt::RESNAMES, *ty, flags::PURE, t));
     }
     match os2_exe::detect(exe) {
         Ok(os2_exe::Format::Lx { header }) => lx(exe, header, &mut list, o),
@@ -139,19 +139,18 @@ const OBJ_SHARED: u32 = 0x0020;
 const OBJ_PRELOAD: u32 = 0x0040;
 const OBJ_BIG: u32 = 0x2000;
 
-/// The LX object flags for resources with load/memory `f`.
+/// The LX object for resources with load/memory flags `f`, as IBM's RC
+/// groups them: PRELOAD ones, the other MOVEABLE ones (both readable,
+/// shared, discardable), and FIXED ones (not discardable).
 fn lx_obj_flags(f: u16) -> u32 {
-    let mut o = OBJ_READ | OBJ_RESOURCE | OBJ_BIG;
-    if f & flags::DISCARDABLE != 0 {
-        o |= OBJ_DISCARD;
-    }
-    if f & flags::PURE != 0 {
-        o |= OBJ_SHARED;
-    }
+    let base = OBJ_READ | OBJ_RESOURCE | OBJ_SHARED | OBJ_BIG;
     if f & flags::PRELOAD != 0 {
-        o |= OBJ_PRELOAD;
+        base | OBJ_DISCARD | OBJ_PRELOAD
+    } else if f & flags::MOVEABLE != 0 {
+        base | OBJ_DISCARD
+    } else {
+        base
     }
-    o
 }
 
 fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions) -> Result<Vec<u8>, BindError> {
@@ -309,8 +308,13 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
         ldr.extend_from_slice(&e);
     }
     let delta = (new_objtab + ldr.len()) as isize - resnames as isize;
-    // Resident names .. end of the loader section, moved.
+    // Resident names .. the fixup section, moved. A loader section size
+    // that reaches into the fixup section (some of IBM's DLLs) is kept,
+    // the extra bytes zero, as IBM's RC writes it.
+    let old_ldr_size = r32(d, h + H_LDRSIZE)? as usize;
     ldr.extend_from_slice(d.get(h + resnames..h + fpt).ok_or(BindError::Layout("loader"))?);
+    ldr.resize(ldr.len() + (objtab + old_ldr_size).saturating_sub(fpt), 0);
+    let new_fpt = new_objtab + ldr.len();
     // Fixup page table: one entry per page and one more.
     let mut fix = Vec::new();
     let old_fpt_n = npages + 1;
@@ -322,13 +326,21 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
         fix.extend_from_slice(&end_val.to_le_bytes());
     }
     let delta2 = (new_npages + 1) as isize * 4 - old_fpt_n as isize * 4;
-    // Fixup records, import tables and whatever precedes the data pages.
-    let rest_end = data_pages.checked_sub(h).ok_or(BindError::Layout("data pages"))?;
+    let fix_shift = new_fpt as isize - fpt as isize + delta2;
+    // Fixup records and import tables, to the end of the import procedure
+    // table (a 0 byte, then names up to an empty one); padding is dropped.
+    let iproc = r32(d, h + H_IPROC)? as usize;
+    let limit = data_pages.checked_sub(h).ok_or(BindError::Layout("data pages"))?;
+    let mut iproc_end = iproc + 1;
+    while iproc_end < limit && d[h + iproc_end] != 0 {
+        iproc_end += 1 + d[h + iproc_end] as usize;
+    }
+    let iproc_end = iproc_end.min(limit);
     let rest_from = fpt + old_fpt_n * 4;
-    if rest_from > rest_end {
+    if rest_from > iproc_end {
         return Err(BindError::Layout("fixup section"));
     }
-    fix.extend_from_slice(d.get(h + rest_from..h + rest_end).ok_or(BindError::Layout("fixups"))?);
+    fix.extend_from_slice(d.get(h + rest_from..h + iproc_end).ok_or(BindError::Layout("fixups"))?);
 
     // The new header.
     let mut hdr = d[h..h + objtab].to_vec();
@@ -345,19 +357,26 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
             w32(&mut hdr, f, sh(v, resnames, delta));
         }
     }
-    w32(&mut hdr, H_FPT, (fpt as isize + delta) as u32);
+    w32(&mut hdr, H_FPT, new_fpt as u32);
     for f in [H_FRT, H_IMOD, H_IPROC] {
         let v = r32(d, h + f)? as usize;
-        w32(&mut hdr, f, (v as isize + delta + delta2) as u32);
+        w32(&mut hdr, f, (v as isize + fix_shift) as u32);
     }
-    let ldr_size = r32(d, h + H_LDRSIZE)? as isize + delta + (ldr.len() as isize - (fpt - objtab) as isize - delta);
-    w32(&mut hdr, H_LDRSIZE, ldr_size as u32);
+    w32(&mut hdr, H_LDRSIZE, (old_ldr_size as isize + delta) as u32);
     w32(&mut hdr, H_FIXSIZE, (r32(d, h + H_FIXSIZE)? as isize + delta2) as u32);
-    // The data pages start on a page-shift boundary.
-    let unaligned = (data_pages as isize + delta + delta2) as usize;
+    // The data pages start on a page-shift boundary after the tables.
+    let unaligned = h + new_fpt + fix.len();
     let new_data_pages = unaligned.div_ceil(align) * align;
+    // Preload pages: the old resource objects' go, the new ones' count.
+    let mut old_preload = 0u32;
+    for i in keep..nobj {
+        let e = h + objtab + i * 24;
+        if r32(d, e + 8)? & OBJ_PRELOAD != 0 {
+            old_preload += r32(d, e + 16)?;
+        }
+    }
     let preload_pages: usize = objs.iter().filter(|ob| ob.flags & OBJ_PRELOAD != 0).map(|ob| ob.data.len().div_ceil(page_size)).sum();
-    w32(&mut hdr, 0x84, r32(d, h + 0x84)? + preload_pages as u32);
+    w32(&mut hdr, 0x84, r32(d, h + 0x84)?.saturating_sub(old_preload) + preload_pages as u32);
     w32(&mut hdr, H_DATA, new_data_pages as u32);
     if r32(d, h + H_ITER)? as usize == data_pages {
         w32(&mut hdr, H_ITER, new_data_pages as u32);

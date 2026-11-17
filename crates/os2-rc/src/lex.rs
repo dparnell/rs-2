@@ -274,7 +274,8 @@ fn escape(s: &[u8], bad: &mut bool) -> (u8, usize) {
     }
     let c = s[1];
     let v = match c {
-        b'a' => 7,
+        // `\a` is PM's right-alignment character in menus (0x08), as IBM's RC.
+        b'a' => 8,
         b'b' => 8,
         b'f' => 12,
         b'n' => 10,

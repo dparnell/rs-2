@@ -43,6 +43,7 @@ const DEFAULT_FLAGS: u16 = flags::MOVEABLE | flags::PURE | flags::DISCARDABLE;
 const MIS_TEXT: u16 = 0x0001;
 const MIS_SEPARATOR: u16 = 0x0004;
 const MIS_SUBMENU: u16 = 0x0010;
+const MIS_OWNERDRAW: u16 = 0x0008;
 
 /// Words that start statements or blocks (they end an optional field).
 const KEYWORDS: &[&str] = &[
@@ -601,7 +602,7 @@ impl<F: Files> C<'_, '_, '_, F> {
                         self.diag(2140, "");
                         return None;
                     }
-                    ((c - b'@') as u16, true, true)
+                    (c as u16, true, true)
                 } else if s.len() == 1 {
                     (s[0] as u16, true, false)
                 } else {
@@ -964,7 +965,8 @@ impl<F: Files> C<'_, '_, '_, F> {
                     break;
                 }
             }
-            if vals.len() > size as usize {
+            // Every item has SUBITEMSIZE values (IBM's RC insists).
+            if vals.len() != size as usize {
                 self.diag(2162, "");
             }
             vals.resize(size as usize, 0);
@@ -1275,32 +1277,49 @@ impl<F: Files> C<'_, '_, '_, F> {
 /// the code page word), count, [presentation parameters], items.
 fn menu_template(m: &Menu, cp: u16) -> Vec<u8> {
     let mut d = Vec::new();
-    le16(&mut d, 0);
-    le16(&mut d, if m.pres.is_empty() { 0 } else { 1 });
-    le16(&mut d, cp);
-    le16(&mut d, 4);
-    le16(&mut d, m.items.len() as u16);
-    if !m.pres.is_empty() {
-        let p = presparams(&m.pres);
+    let mut pps: Vec<(usize, Vec<u8>)> = Vec::new();
+    menu_rec(m, cp, &mut d, &mut pps);
+    // Presentation parameters of the menu and its submenus follow the
+    // whole template, each pointed to by its template's last header word.
+    for (at, p) in pps {
+        let off = d.len() as u16;
+        d[at..at + 2].copy_from_slice(&off.to_le_bytes());
         d.extend_from_slice(&p);
-    }
-    for i in &m.items {
-        le16(&mut d, i.style);
-        le16(&mut d, i.attr);
-        le16(&mut d, i.id);
-        if i.style & (MIS_SEPARATOR) == 0 || i.style & 0x0003 != 0 {
-            if i.style & MIS_SEPARATOR == 0 {
-                d.extend_from_slice(&i.text);
-                d.push(0);
-            }
-        }
-        if let Some(s) = &i.sub {
-            d.extend_from_slice(&menu_template(s, cp));
-        }
     }
     let n = d.len() as u16;
     d[0..2].copy_from_slice(&n.to_le_bytes());
     d
+}
+
+/// One menu template (size, version, code page, offset of the items,
+/// count, [offset of the presentation parameters]) and its items.
+fn menu_rec(m: &Menu, cp: u16, d: &mut Vec<u8>, pps: &mut Vec<(usize, Vec<u8>)>) {
+    let start = d.len();
+    let pres = !m.pres.is_empty();
+    le16(d, 0);
+    le16(d, pres as u16);
+    le16(d, cp);
+    le16(d, if pres { 12 } else { 4 });
+    le16(d, m.items.len() as u16);
+    if pres {
+        pps.push((d.len(), presparams(&m.pres)));
+        le16(d, 0);
+    }
+    for i in &m.items {
+        le16(d, i.style);
+        le16(d, i.attr);
+        le16(d, i.id);
+        // Separators and owner-drawn items without MIS_TEXT have no text.
+        if i.style & (MIS_SEPARATOR | MIS_OWNERDRAW) == 0 || i.style & 0x0003 != 0 {
+            d.extend_from_slice(&i.text);
+            d.push(0);
+        }
+        if let Some(s) = &i.sub {
+            menu_rec(s, cp, d, pps);
+        }
+    }
+    let n = (d.len() - start) as u16;
+    d[start..start + 2].copy_from_slice(&n.to_le_bytes());
 }
 
 /// PRESPARAMS: total size, then (id, size, data) per parameter.
