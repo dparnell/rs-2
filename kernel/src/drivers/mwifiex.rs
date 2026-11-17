@@ -76,6 +76,8 @@ const BAR2_SIZE: u64 = 0x10000;
 
 const CPU_INTR_DNLD_RDY: u32 = 1 << 0;
 const CPU_INTR_DOOR_BELL: u32 = 1 << 1;
+/// The host took the firmware's sleep confirmation response.
+const CPU_INTR_SLEEP_CFM_DONE: u32 = 1 << 2;
 const CPU_INTR_EVENT_DONE: u32 = 1 << 5;
 const HOST_INTR_DNLD_DONE: u32 = 1 << 0;
 const HOST_INTR_UPLD_RDY: u32 = 1 << 1;
@@ -301,7 +303,26 @@ pub struct Card {
     /// Block-ack sessions with the AP: received frames back in order
     /// (each entry: the frames of one MPDU, several for an A-MSDU).
     reorder: SpinLock<Reorder<Vec<Vec<u8>>>>,
+    /// Power saving is on in the firmware.
+    ps_on: core::sync::atomic::AtomicBool,
+    /// PS_AWAKE, PS_PRE_SLEEP, PS_SLEEP_CFM or PS_ASLEEP.
+    ps: AtomicU32,
+    /// Times the chip went to sleep, and was woken by the host.
+    sleeps: AtomicU64,
+    wakes: AtomicU64,
+    /// When to ask the AP for a transmit block-ack session (uptime ms;
+    /// 0: not to).
+    ba_tx_at: AtomicU64,
+    ba_token: AtomicU32,
 }
+
+/// Power-save states (Linux `PS_STATE_*`): awake; the firmware asked to
+/// sleep and the host has not confirmed yet; the confirmation is on its
+/// way; asleep (the host must wake it before a command or a frame).
+const PS_AWAKE: u32 = 0;
+const PS_PRE_SLEEP: u32 = 1;
+const PS_SLEEP_CFM: u32 = 2;
+const PS_ASLEEP: u32 = 3;
 
 /// MSI interrupts taken (the handler only wakes the wlan thread).
 static IRQS: AtomicU64 = AtomicU64::new(0);
@@ -397,6 +418,12 @@ pub fn probe(d: &pci::Device) {
         caps: SpinLock::new(None),
         mode: SpinLock::new(""),
         reorder: SpinLock::new(Reorder::new()),
+        ps_on: core::sync::atomic::AtomicBool::new(false),
+        ps: AtomicU32::new(PS_AWAKE),
+        sleeps: AtomicU64::new(0),
+        wakes: AtomicU64::new(0),
+        ba_tx_at: AtomicU64::new(0),
+        ba_token: AtomicU32::new(0),
     };
     // The interrupt only wakes the wlan thread, which reads the status;
     // without MSI that thread polls.
@@ -491,6 +518,8 @@ impl Card {
             return 0;
         }
         r.w(HOST_INT_STATUS, !ireg);
+        // The chip woke up (for a frame, an event, or our wake request).
+        let _ = self.ps.compare_exchange(PS_ASLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed);
         if ireg & HOST_INTR_UPLD_RDY != 0 {
             UPLD_RDY.fetch_add(1, Ordering::Relaxed);
             self.drain_rx();
@@ -569,6 +598,14 @@ impl Card {
             }
         }
         self.queue_rx(out);
+    }
+
+    /// Once the link carries data (after the pairwise key, or at once on
+    /// an open network), ask for transmit block ack, on 802.11n/ac.
+    fn schedule_tx_ba(&self) {
+        if matches!(*self.mode.lock(), "802.11n" | "802.11ac") {
+            self.ba_tx_at.store(crate::irq::uptime_ms() + 1000, Ordering::Relaxed);
+        }
     }
 
     /// One ASSOCIATE (802.11n/ac offered with `caps`): the AID, or the
@@ -658,7 +695,86 @@ impl Card {
     }
 
     /// Send a command and wait for its response body.
+    /// A command, waking the chip first if it sleeps.
     fn command(&self, g: &mut Inner, cmd: u16, body: &[u8], timeout_ms: u64) -> Result<Vec<u8>, WlanError> {
+        self.wake();
+        self.command_raw(g, cmd, body, timeout_ms)
+    }
+
+    /// Wake the chip if it sleeps (Linux `mwifiex_pm_wakeup_card`): write
+    /// FIRMWARE_READY to the firmware status register until it raises an
+    /// interrupt. The 88W8897's firmware sometimes misses the first
+    /// requests, so they are repeated, every 0.5 ms for a while, then
+    /// every 10 ms.
+    fn wake(&self) {
+        // A sleep confirmation under way finishes first.
+        let t0 = crate::irq::uptime_ms();
+        while self.ps.load(Ordering::Acquire) == PS_SLEEP_CFM && crate::irq::uptime_ms() - t0 < 200 {
+            crate::task::sched::sleep_ms(1);
+        }
+        if self.ps.load(Ordering::Acquire) != PS_ASLEEP {
+            return;
+        }
+        let r = &self.regs;
+        let woke = (0..60).any(|i| {
+            r.w(FW_STATUS, FIRMWARE_READY);
+            spin_until(if i < 15 { 500 } else { 10_000 }, || {
+                let s = r.r(HOST_INT_STATUS);
+                s != 0 && s != u32::MAX
+            })
+        });
+        if !woke {
+            crate::wlog!("{}: the firmware did not wake up", self.name);
+        }
+        self.ps.store(PS_AWAKE, Ordering::Release);
+        self.wakes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The firmware asked to sleep (EVENT_PS_SLEEP): confirm when the host
+    /// has nothing for it (no frame in the transmit ring, none received
+    /// and not yet taken), else try again at the next poll.
+    fn try_sleep(&self) {
+        // No command between the check and the confirmation (the
+        // controller lock), no frame either (the ring's lock, which a
+        // sender takes and then finds the state not awake).
+        let mut g = self.inner.lock();
+        {
+            let dg = self.data.lock();
+            let idle = dg.as_ref().is_none_or(|d| d.tx_empty()) && self.rxq.lock().is_empty() && g.events.is_empty();
+            if !idle || self.ps.compare_exchange(PS_PRE_SLEEP, PS_SLEEP_CFM, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+                return;
+            }
+        }
+        match self.command_raw(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::sleep_confirm_body(), 1000) {
+            Ok(_) => {
+                self.regs.w(CPU_INT_EVENT, CPU_INTR_SLEEP_CFM_DONE);
+                self.ps.store(PS_ASLEEP, Ordering::Release);
+                self.sleeps.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(e) => {
+                self.ps.store(PS_AWAKE, Ordering::Release);
+                if self.sleeps.load(Ordering::Relaxed) == 0 {
+                    crate::wlog!("{}: sleep confirmation: {e}", self.name);
+                }
+            }
+        }
+    }
+
+    /// Ask the AP for a transmit block-ack session on TID 0 (what rs2
+    /// sends: best effort). The firmware then aggregates.
+    fn request_tx_ba(&self) {
+        let Some(peer) = *self.bssid.lock() else { return };
+        let token = (self.ba_token.fetch_add(1, Ordering::Relaxed) % 255 + 1) as u8;
+        let body = mw::addba_req_body(peer, token, 0, mw::BA_TX_WINDOW);
+        let mut g = self.inner.lock();
+        match self.command(&mut g, mw::CMD_11N_ADDBA_REQ, &body, 3000).map(|r| mw::addba_req_result(&r)) {
+            Ok(Ok((tid, win))) => crate::wlog!("{}: transmit block ack on TID {tid} (window {win}): frames go out aggregated", self.name),
+            Ok(Err(status)) => crate::wlog!("{}: the access point declined transmit block ack (status {status})", self.name),
+            Err(e) => crate::wlog!("{}: transmit block ack: {e}", self.name),
+        }
+    }
+
+    fn command_raw(&self, g: &mut Inner, cmd: u16, body: &[u8], timeout_ms: u64) -> Result<Vec<u8>, WlanError> {
         let name = mw::command_name(cmd);
         g.seq = g.seq.wrapping_add(1);
         let c = mw::command(cmd, g.seq, body);
@@ -912,6 +1028,14 @@ impl WlanDriver for Card {
             ("upload_ready".into(), alloc::format!("{}", UPLD_RDY.load(Ordering::Relaxed))),
             ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
             ("standard".into(), String::from(*self.mode.lock())),
+            ("power_save".into(), String::from(if self.ps_on.load(Ordering::Relaxed) { "on" } else { "off" })),
+            ("power_state".into(), String::from(match self.ps.load(Ordering::Relaxed) {
+                PS_ASLEEP => "asleep",
+                PS_SLEEP_CFM | PS_PRE_SLEEP => "going to sleep",
+                _ => "awake",
+            })),
+            ("sleeps".into(), alloc::format!("{}", self.sleeps.load(Ordering::Relaxed))),
+            ("wakes".into(), alloc::format!("{}", self.wakes.load(Ordering::Relaxed))),
         ]
     }
 
@@ -941,6 +1065,10 @@ impl WlanDriver for Card {
         *self.bssid.lock() = Some(bss.bssid);
         *self.mode.lock() = mode;
         crate::wlog!("{}: associated as {mode}", self.name);
+        self.ba_tx_at.store(0, Ordering::Relaxed);
+        if rsn_ie.is_none() {
+            self.schedule_tx_ba();
+        }
         let mut held = Vec::new();
         self.reorder.lock().clear(&mut held);
         Ok(aid)
@@ -957,7 +1085,25 @@ impl WlanDriver for Card {
     fn set_key(&self, key: &mw::Key) -> Result<(), WlanError> {
         let mut g = self.inner.lock();
         let body = mw::key_material_body(key, self.key_api.load(Ordering::Relaxed) as u8);
-        self.command(&mut g, mw::CMD_802_11_KEY_MATERIAL, &body, 3000).map(|_| ())
+        self.command(&mut g, mw::CMD_802_11_KEY_MATERIAL, &body, 3000)?;
+        if key.pairwise {
+            self.schedule_tx_ba();
+        }
+        Ok(())
+    }
+
+    fn set_power_save(&self, on: bool) -> Result<(), WlanError> {
+        let mut g = self.inner.lock();
+        if !g.up {
+            return Err(WlanError::NotReady);
+        }
+        self.command(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::ps_mode_body(on), 2000)?;
+        self.ps_on.store(on, Ordering::Release);
+        if !on {
+            self.ps.store(PS_AWAKE, Ordering::Release);
+        }
+        crate::wlog!("{}: power saving {}", self.name, if on { "on" } else { "off" });
+        Ok(())
     }
 
     fn send(&self, frame: &[u8]) -> bool {
@@ -966,7 +1112,15 @@ impl WlanDriver for Card {
             return false;
         }
         let r = &self.regs;
-        let mut dg = self.data.lock();
+        // The chip must be awake to take a frame; a sleep confirmation
+        // starts only with the ring empty and under this lock.
+        let mut dg = loop {
+            self.wake();
+            let dg = self.data.lock();
+            if matches!(self.ps.load(Ordering::Acquire), PS_AWAKE | PS_PRE_SLEEP) {
+                break dg;
+            }
+        };
         let Some(d) = dg.as_mut() else { return false };
         if d.tx_full() {
             d.reclaim(r);
@@ -1041,8 +1195,23 @@ impl WlanDriver for Card {
         if !held.is_empty() {
             self.queue_rx(held);
         }
+        if self.ba_tx_at.load(Ordering::Relaxed) != 0 && crate::irq::uptime_ms() >= self.ba_tx_at.load(Ordering::Relaxed) {
+            self.ba_tx_at.store(0, Ordering::Relaxed);
+            self.request_tx_ba();
+        }
         for (cause, body) in events {
             match cause {
+                mw::EVENT_PS_SLEEP => {
+                    if self.ps_on.load(Ordering::Acquire) {
+                        let _ = self.ps.compare_exchange(PS_AWAKE, PS_PRE_SLEEP, Ordering::AcqRel, Ordering::Relaxed);
+                    }
+                    continue;
+                }
+                mw::EVENT_PS_AWAKE => {
+                    let _ = self.ps.compare_exchange(PS_ASLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed);
+                    let _ = self.ps.compare_exchange(PS_PRE_SLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed);
+                    continue;
+                }
                 mw::EVENT_ADDBA => {
                     self.addba(&body);
                     continue;
@@ -1070,6 +1239,7 @@ impl WlanDriver for Card {
             };
             if matches!(ev, WlanEvent::Disconnected { .. }) {
                 *self.bssid.lock() = None;
+                self.ba_tx_at.store(0, Ordering::Relaxed);
                 *self.mode.lock() = "";
                 let mut held = Vec::new();
                 self.reorder.lock().clear(&mut held);
@@ -1079,6 +1249,9 @@ impl WlanDriver for Card {
         loop {
             let Some(fr) = self.rxq.lock().pop_front() else { break };
             f(WlanEvent::Frame(fr));
+        }
+        if self.ps.load(Ordering::Acquire) == PS_PRE_SLEEP {
+            self.try_sleep();
         }
     }
 }
