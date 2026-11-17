@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"15";
+const DESKTOP_VERSION: &[u8] = b"16";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -166,6 +166,15 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         let s = [&b"EXENAME="[..], &path, b";PROGTYPE=", ty, b";OBJECTID=", id].concat();
         out.push((k, s));
     }
+    // 4OS2 (version 16): a window and a full screen prompt beside CMD's,
+    // and its book beside the Command Reference.
+    if file_exists(&boot(b"?:\\OS2\\4OS2.EXE")) {
+        out.push((b"4OS2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD".to_vec(), b"EXENAME=?:\\OS2\\4OS2.EXE;PROGTYPE=WINDOWABLEVIO;OBJECTID=<RS2_4OS2WIN>".to_vec()));
+        out.push((b"4OS2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD".to_vec(), b"EXENAME=?:\\OS2\\4OS2.EXE;PROGTYPE=FULLSCREEN;OBJECTID=<RS2_4OS2FS>".to_vec()));
+        if file_exists(&boot(b"?:\\OS2\\BOOK\\4OS2.INF")) {
+            out.push((b"4OS2 Reference;WPProgram;<WP_REFCMDFOLDER>;PRESERVEOLD".to_vec(), b"EXENAME=?:\\OS2\\VIEW.EXE;PARAMETERS=4OS2.INF;PROGTYPE=PM;OBJECTID=<RS2_4OS2REF>".to_vec()));
+        }
+    }
     // The Multimedia folder in Programs (version 13), with IBM's object
     // IDs where IBM's MMPM/2 has the object: the media player, the
     // Digital Audio editor, the CD Player and Volume Control objects,
@@ -292,7 +301,8 @@ pub fn run() {
     // version 11 the Command Reference and Start Here books;
     // version 12 the applets (Utilities, Games, Locale, Mahjongg's folder);
     // version 13 the TCP/IP and Multimedia folders and the multimedia
-    // classes;
+    // classes; version 15 the Hardware Manager; version 16 4OS2's
+    // prompts and book;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         // rs2's multimedia classes (mm.rs) in the class table, unless

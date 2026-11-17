@@ -228,4 +228,5 @@ dependencies = [
  "ipf",
  "msgf",
  "pmwin",
+ "smb",
 ]

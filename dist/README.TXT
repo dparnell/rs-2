@@ -10,7 +10,10 @@ The desktop
 Double click an icon (or select it and press Enter) to open it:
 
   Command Prompts   OS/2 Window (a command prompt in a window) and
-                    OS/2 Full Screen
+                    OS/2 Full Screen, DOS Window and DOS Full Screen,
+                    and 4OS2 Window and 4OS2 Full Screen (4OS2, JP
+                    Software's command processor; its license is in
+                    \OS2\4OS2\LICENSE.TXT)
   Programs          installed programs: the System Editor and
                     "Install rs2"
   Drives            one icon per drive; a drive opens its root folder,

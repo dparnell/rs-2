@@ -13,5 +13,6 @@ ipf = { path = "../crates/ipf" }
 gpi = { path = "../crates/gpi" }
 pmwin = { path = "../crates/pmwin" }
 msgf = { path = "../crates/msgf" }
+smb = { path = "../crates/smb" }
 inifile = { path = "../crates/inifile" }
 hpfs = { path = "../crates/hpfs" }

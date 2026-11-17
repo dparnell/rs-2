@@ -593,6 +593,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
         files.extend(image::manifest(&root(), &text));
         files.extend(userland);
         files.extend(win16_tests());
+        files.extend(four_os2(o.dist)?);
         if !o.dist {
             files.extend(dos_tests());
         }
@@ -1249,6 +1250,92 @@ fn win16_tests() -> image::FileList {
         }
     }
     v
+}
+
+/// 4OS2 (JP Software's command processor, open source since 2002) as
+/// built by github.com/dparnell/4os2's CI with Open Watcom v2: its
+/// release zip is downloaded once into work/cache, checked against its
+/// SHA-256 and unpacked into target/4os2.
+const FOUR_OS2_URL: &str = "https://github.com/dparnell/4os2/releases/download/v5.00.0/4os2.zip";
+const FOUR_OS2_SHA256: &str = "f45b7dde921e9e409773c79aadcc0ea2c7201b62dd77cf58afefc8b3531c60a2";
+/// Its files and their names on the boot volume (8.3 names: C: is FAT).
+/// The programs go where CMD's are, so CONFIG.SYS needs no PATH, LIBPATH
+/// or DPATH of their own; the license, the fork's changes, the readme and
+/// the samples in \OS2\4OS2, as the license asks.
+const FOUR_OS2_FILES: &[(&str, &str)] = &[
+    ("4OS2.EXE", "OS2\\4OS2.EXE"),
+    ("JPOS2DLL.DLL", "OS2\\DLL\\JPOS2DLL.DLL"),
+    ("KEYSTACK.EXE", "OS2\\KEYSTACK.EXE"),
+    ("SHRALIAS.EXE", "OS2\\SHRALIAS.EXE"),
+    ("OPTION2.EXE", "OS2\\OPTION2.EXE"),
+    ("4OS2.INF", "OS2\\BOOK\\4OS2.INF"),
+    ("license.txt", "OS2\\4OS2\\LICENSE.TXT"),
+    ("CHANGES.md", "OS2\\4OS2\\CHANGES.TXT"),
+    ("readme.1st", "OS2\\4OS2\\README.1ST"),
+    ("4os2.ini.sample", "OS2\\4OS2\\4OS2INI.SMP"),
+    ("4os2Alias.sample", "OS2\\4OS2\\ALIASES.SMP"),
+    ("4start.cmd.sample", "OS2\\4OS2\\4START.SMP"),
+    ("examples.btm", "OS2\\4OS2\\EXAMPLES.BTM"),
+];
+
+/// 4OS2's files, and its help message file (OS2\\SYSTEM\\4OS2H.MSG,
+/// compiled here from the zip's 4os2h.txt: Open Watcom has no MKMSGF).
+/// Without the zip (offline, no curl or unzip) a distribution build
+/// stops; a development build goes on without 4OS2.
+fn four_os2(dist: bool) -> Option<image::FileList> {
+    match four_os2_files() {
+        Ok(v) => Some(v),
+        Err(e) if dist => {
+            eprintln!("4OS2: {e}");
+            None
+        }
+        Err(e) => {
+            eprintln!("4OS2: {e} (left out)");
+            Some(Vec::new())
+        }
+    }
+}
+
+fn four_os2_files() -> Result<image::FileList, String> {
+    let hex = |d: &[u8]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let cache = root().join("work/cache");
+    let zip = cache.join(format!("4os2-{FOUR_OS2_SHA256}.zip"));
+    let good = |p: &Path| std::fs::read(p).is_ok_and(|d| hex(&smb::crypto::sha256(&d)) == FOUR_OS2_SHA256);
+    if !good(&zip) {
+        std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+        let part = zip.with_extension("part");
+        let ok = Command::new("curl").args(["-fsSL", "-o"]).arg(&part).arg(FOUR_OS2_URL).status().is_ok_and(|s| s.success());
+        if !ok {
+            return Err(format!("could not download {FOUR_OS2_URL}"));
+        }
+        if !good(&part) {
+            let _ = std::fs::remove_file(&part);
+            return Err(format!("{FOUR_OS2_URL} does not have SHA-256 {FOUR_OS2_SHA256}"));
+        }
+        std::fs::rename(&part, &zip).map_err(|e| e.to_string())?;
+    }
+    let dir = root().join("target/4os2");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let ok = Command::new("unzip").args(["-q", "-o"]).arg(&zip).arg("-d").arg(&dir).status().is_ok_and(|s| s.success());
+    if !ok {
+        return Err(format!("could not unpack {}", zip.display()));
+    }
+    let mut v = Vec::new();
+    for (src, dest) in FOUR_OS2_FILES {
+        let p = dir.join(src);
+        if !p.exists() {
+            return Err(format!("{src} is not in {}", zip.display()));
+        }
+        v.push((p, dest.to_string()));
+    }
+    let text = std::fs::read(dir.join("4os2h.txt")).map_err(|e| format!("4os2h.txt: {e}"))?;
+    let opts = msgf::Options { code_pages: vec![850, 437], language: (9, 1), dbcs: Vec::new(), name: b"4os2h.msg".to_vec() };
+    let msg = msgf::compile(&text, &opts).map_err(|e| format!("4os2h.txt: {e}"))?;
+    let out = dir.join("4OS2H.MSG");
+    std::fs::write(&out, msg).map_err(|e| e.to_string())?;
+    v.push((out, "OS2\\SYSTEM\\4OS2H.MSG".to_string()));
+    Ok(v)
 }
 
 /// Remove debug information (keeps the boot image small).
