@@ -889,11 +889,19 @@ pub fn link(l: &mut Linker) -> Option<Linked> {
     for s in 0..l.syms.len() {
         let r = l.resolve(s);
         if l.syms[s].referenced && matches!(l.syms[r].def, SymDef::Undefined) {
-            let file = l.syms[s].refby.map(|m| l.mods[m].file.clone()).unwrap_or_default();
+            // As IBM's: a blank line around the list, the object module
+            // with its source name.
+            if errors == 0 {
+                l.host.out("\r\n");
+            }
+            let file = l.syms[s].refby.map(|m| format!("{}({})", l.mods[m].file, l.mods[m].obj.name)).unwrap_or_default();
             let n = l.syms[s].name.clone();
-            l.msgs.error(l.host, &file, 2029, &format!("'{n}' : unresolved external"));
+            l.msgs.unresolved(l.host, &file, &n);
             errors += 1;
         }
+    }
+    if errors > 0 {
+        l.host.out("\r\n");
     }
     let order = segment_order(l);
     if order.is_empty() {

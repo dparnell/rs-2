@@ -45,6 +45,15 @@ impl Msgs {
         self.errors += 1;
     }
 
+    /// L2029, which IBM's linkers show with a blank before the colon.
+    pub fn unresolved(&mut self, host: &mut dyn Host, file: &str, name: &str) {
+        let at = if file.is_empty() { self.prog } else { file };
+        let s = format!("{at} : error L2029 : '{name}' : unresolved external\r\n");
+        host.out(&s);
+        self.log.push_str(&s);
+        self.errors += 1;
+    }
+
     pub fn warn(&mut self, host: &mut dyn Host, file: &str, num: u32, text: &str) {
         if self.quiet_warnings {
             return;
@@ -57,8 +66,8 @@ impl Msgs {
     pub fn summary(&self) -> Option<String> {
         match self.errors {
             0 => None,
-            1 => Some(String::from("The link found 1 error.\r\n")),
-            n => Some(format!("The link found {n} errors.\r\n")),
+            1 => Some(String::from("\r\nThe link found 1 error.\r\n")),
+            n => Some(format!("\r\nThe link found {n} errors.\r\n")),
         }
     }
 }
