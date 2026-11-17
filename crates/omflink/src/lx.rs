@@ -158,7 +158,10 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         fix: Vec<u8>,
         /// Records: source type, flags, target bytes, source offsets.
         recs: Vec<(u8, u8, Vec<u8>, Vec<i16>)>,
+        /// Page table flags: 0 data as is, 1 iterated, 5 compressed.
+        kind: u16,
     }
+    let exepack = l.opt.exepack;
     let mut pages: Vec<Pg> = Vec::new();
     let mut first_page: Vec<u32> = Vec::new();
     let mut npages: Vec<u32> = Vec::new();
@@ -177,8 +180,29 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             let s = (p * PAGE) as usize;
             let e = (s + PAGE as usize).min(init);
             let mut d = datas[ui][s..e].to_vec();
-            d.resize(d.len().next_multiple_of(align).min(PAGE as usize), 0);
-            pages.push(Pg { data: d, fix: Vec::new(), recs: Vec::new() });
+            // /EXEPACK: the packed form when it is smaller.
+            let mut kind = 0;
+            if exepack > 0 {
+                let mut raw = d.clone();
+                while raw.last() == Some(&0) {
+                    raw.pop();
+                }
+                let it = crate::pack::iterate(&raw);
+                let (k, p) = if exepack >= 2 {
+                    let c = crate::pack::exepack2(&raw);
+                    if c.len() < it.len() { (5, c) } else { (1, it) }
+                } else {
+                    (1, it)
+                };
+                if p.len() < d.len().next_multiple_of(align).min(PAGE as usize) {
+                    kind = k;
+                    d = p;
+                }
+            }
+            if kind == 0 {
+                d.resize(d.len().next_multiple_of(align).min(PAGE as usize), 0);
+            }
+            pages.push(Pg { data: d, fix: Vec::new(), recs: Vec::new(), kind });
         }
     }
     let mut bad = 0;
@@ -584,6 +608,10 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     w32(&mut h, 0x40, obj_table as u32);
     w32(&mut h, 0x44, units.len() as u32);
     w32(&mut h, 0x48, page_table as u32);
+    // Iterated (EXEPACK) pages are among the data pages.
+    if pages.iter().any(|p| p.kind != 0) {
+        w32(&mut h, 0x4c, data_off as u32);
+    }
     w32(&mut h, 0x50, 0);
     w32(&mut h, 0x58, resname as u32);
     w32(&mut h, 0x5c, entry_off as u32);
@@ -611,7 +639,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     for (i, p) in pages.iter().enumerate() {
         put32(&mut f, page_off[i]);
         put16(&mut f, p.data.len() as u16);
-        put16(&mut f, 0);
+        put16(&mut f, p.kind);
     }
     f.extend_from_slice(&resident);
     f.extend_from_slice(&entry);

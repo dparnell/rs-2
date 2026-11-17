@@ -118,6 +118,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     }
     // Relocations per segment, chained as the loader expects.
     let mut seg_relocs: Vec<Vec<[u8; 8]>> = Vec::new();
+    let mut iterated: Vec<bool> = Vec::new();
     let mut seg_data: Vec<Vec<u8>> = Vec::new();
     for u in units {
         let mut data = u.data.clone();
@@ -187,6 +188,16 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         }
         // Internal references first, then imports.
         recs.sort_by_key(|r| (r[1] & 3) != 0);
+        // /EXEPACK: iterated data when it is smaller.
+        let mut it = false;
+        if l.opt.exepack > 0 && !data.is_empty() {
+            let p = crate::pack::iterate(&data);
+            if p.len() < data.len() {
+                data = p;
+                it = true;
+            }
+        }
+        iterated.push(it);
         seg_data.push(data);
         seg_relocs.push(recs);
     }
@@ -307,6 +318,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         }
         if u.use32 {
             f |= sf::BIG;
+        }
+        if iterated[i] {
+            f |= sf::ITERATED;
         }
         segflags.push(f);
     }
