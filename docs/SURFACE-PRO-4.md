@@ -668,6 +668,18 @@ status code, or the firmware refusing the command) falls back.
   `WIFI STATUS` shows `power_save`, `power_state`, `sleeps` and `wakes`;
   `WIFI POWERSAVE` alone shows the setting and what each adapter does.
 
+First try on the Surface (1880599b, power saving on): the join reached
+WPA2 message 2, then the whole machine froze (the log stopped there).
+With nothing pending the firmware went to sleep, and rs2 kept reading
+the card's interrupt status every 5 ms (the wlan thread's poll, and
+`wake()` waited by reading it too). Linux never reads the card while
+it sleeps: it waits for the card's interrupt, and only writes the wake
+request. A read sent to the sleeping 88W8897 most likely stalled the
+CPU. Now no register is read while the chip is asleep: the poll skips
+the chip until an MSI arrives after it went to sleep, `wake()` writes
+FIRMWARE_READY and waits for that interrupt, and power saving is
+refused without MSI.
+
 Not done: A-MSDUs from rs2, roaming, hidden networks, recovering the card
 after a firmware crash.
 

@@ -314,6 +314,11 @@ pub struct Card {
     /// 0: not to).
     ba_tx_at: AtomicU64,
     ba_token: AtomicU32,
+    /// MSI works: the chip's interrupt says it is awake (power saving
+    /// needs it).
+    msi: core::sync::atomic::AtomicBool,
+    /// IRQS when the chip went to sleep: an interrupt since means it woke.
+    sleep_irqs: AtomicU64,
 }
 
 /// Power-save states (Linux `PS_STATE_*`): awake; the firmware asked to
@@ -424,11 +429,16 @@ pub fn probe(d: &pci::Device) {
         wakes: AtomicU64::new(0),
         ba_tx_at: AtomicU64::new(0),
         ba_token: AtomicU32::new(0),
+        msi: core::sync::atomic::AtomicBool::new(false),
+        sleep_irqs: AtomicU64::new(0),
     };
     // The interrupt only wakes the wlan thread, which reads the status;
     // without MSI that thread polls.
     match crate::msi::setup(d, false, interrupt, 0) {
-        Some((v, kind)) => crate::wlog!("{}: {kind} vector {v:#x}", card.name),
+        Some((v, kind)) => {
+            crate::wlog!("{}: {kind} vector {v:#x}", card.name);
+            card.msi.store(true, Ordering::Relaxed);
+        }
         None => crate::wlog!("{}: no MSI; polled", card.name),
     }
     crate::net::wlan::register(Arc::new(card));
@@ -706,28 +716,45 @@ impl Card {
     /// interrupt. The 88W8897's firmware sometimes misses the first
     /// requests, so they are repeated, every 0.5 ms for a while, then
     /// every 10 ms.
+    ///
+    /// No register is read while the chip sleeps: a read sent to the
+    /// sleeping 88W8897 stalled the Surface for good (Linux only reads the
+    /// card after its interrupt). Its MSI says it is awake.
     fn wake(&self) {
         // A sleep confirmation under way finishes first.
         let t0 = crate::irq::uptime_ms();
         while self.ps.load(Ordering::Acquire) == PS_SLEEP_CFM && crate::irq::uptime_ms() - t0 < 200 {
             crate::task::sched::sleep_ms(1);
         }
-        if self.ps.load(Ordering::Acquire) != PS_ASLEEP {
+        if self.hw_ok() {
             return;
         }
         let r = &self.regs;
+        let mark = self.sleep_irqs.load(Ordering::Acquire);
         let woke = (0..60).any(|i| {
+            // A posted write: safe while the chip sleeps.
             r.w(FW_STATUS, FIRMWARE_READY);
-            spin_until(if i < 15 { 500 } else { 10_000 }, || {
-                let s = r.r(HOST_INT_STATUS);
-                s != 0 && s != u32::MAX
-            })
+            spin_until(if i < 15 { 500 } else { 10_000 }, || IRQS.load(Ordering::Acquire) != mark)
         });
         if !woke {
             crate::wlog!("{}: the firmware did not wake up", self.name);
         }
         self.ps.store(PS_AWAKE, Ordering::Release);
         self.wakes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The chip's registers may be read: it is not asleep, or it raised
+    /// an interrupt since it went to sleep (it woke for a frame or an
+    /// event, or because the host asked).
+    fn hw_ok(&self) -> bool {
+        if self.ps.load(Ordering::Acquire) != PS_ASLEEP {
+            return true;
+        }
+        if IRQS.load(Ordering::Acquire) != self.sleep_irqs.load(Ordering::Acquire) {
+            let _ = self.ps.compare_exchange(PS_ASLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed);
+            return true;
+        }
+        false
     }
 
     /// The firmware asked to sleep (EVENT_PS_SLEEP): confirm when the host
@@ -748,6 +775,8 @@ impl Card {
         match self.command_raw(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::sleep_confirm_body(), 1000) {
             Ok(_) => {
                 self.regs.w(CPU_INT_EVENT, CPU_INTR_SLEEP_CFM_DONE);
+                // From here on no register is read until an interrupt.
+                self.sleep_irqs.store(IRQS.load(Ordering::Acquire), Ordering::Release);
                 self.ps.store(PS_ASLEEP, Ordering::Release);
                 self.sleeps.fetch_add(1, Ordering::Relaxed);
             }
@@ -1093,6 +1122,9 @@ impl WlanDriver for Card {
     }
 
     fn set_power_save(&self, on: bool) -> Result<(), WlanError> {
+        if on && !self.msi.load(Ordering::Relaxed) {
+            return Err(WlanError::Failed("power saving needs MSI (the interrupt says when the chip is awake)".into()));
+        }
         let mut g = self.inner.lock();
         if !g.up {
             return Err(WlanError::NotReady);
@@ -1160,6 +1192,9 @@ impl WlanDriver for Card {
     }
 
     fn flush_tx(&self, ms: u64) {
+        if !self.hw_ok() {
+            return; // asleep: it only sleeps with the ring empty
+        }
         let t0 = crate::irq::uptime_ms();
         loop {
             {
@@ -1178,16 +1213,21 @@ impl WlanDriver for Card {
     }
 
     fn poll(&self, f: &mut dyn FnMut(WlanEvent)) {
+        let awake = self.hw_ok();
         let events = {
             let mut g = self.inner.lock();
             if !g.up {
                 return;
             }
-            self.service(&mut g);
+            if awake {
+                self.service(&mut g);
+            }
             core::mem::take(&mut g.events)
         };
-        if let Some(d) = self.data.lock().as_mut() {
-            d.reclaim(&self.regs);
+        if awake {
+            if let Some(d) = self.data.lock().as_mut() {
+                d.reclaim(&self.regs);
+            }
         }
         // Gaps in a reorder window that the AP gave up on.
         let mut held = Vec::new();
