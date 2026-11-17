@@ -177,3 +177,91 @@ pub fn save(plan: u32) -> u32 {
         0
     }
 }
+
+/// The power status `APM$` reports (category 0xC function 0x60, the
+/// packet of IBM's APM.SYS): the AC line and the batteries, which rs2's
+/// kernel reads from the ACPI namespace.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct ApmStatus {
+    /// 0 off line, 1 on line, 2 backup power, 0xFF unknown.
+    pub ac: u8,
+    /// 0 high, 1 low, 2 critical, 3 charging, 0xFF unknown.
+    pub status: u8,
+    /// Percent, 0xFF unknown.
+    pub life: u8,
+    /// 0 seconds, 1 minutes, 0xFF unknown.
+    pub time_unit: u8,
+    pub time: u16,
+    /// Bit 0 high, 1 low, 2 critical, 3 charging, 7 no system battery.
+    pub flags: u8,
+    pub batteries: u8,
+}
+
+/// Ask `APM$` for the power status of battery `unit` (0: all of them).
+pub fn apm_status(unit: u8) -> Option<ApmStatus> {
+    use crate::dos::{DosClose, DosDevIOCtl, DosOpen};
+    let (mut h, mut act) = (0u32, 0u32);
+    if unsafe { DosOpen(b"APM$\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x42, core::ptr::null_mut()) } != 0 {
+        return None;
+    }
+    let mut p = [0u8; 13];
+    p[0] = 13;
+    p[11] = unit;
+    let mut d = [0u8; 2];
+    let (mut cbp, mut cbd) = (13u32, 2u32);
+    let rc = unsafe { DosDevIOCtl(h, 0xc, 0x60, p.as_mut_ptr(), 13, &mut cbp, d.as_mut_ptr(), 2, &mut cbd) };
+    unsafe { DosClose(h) };
+    (rc == 0).then(|| ApmStatus {
+        ac: p[4],
+        status: p[5],
+        life: p[6],
+        time_unit: p[7],
+        time: u16::from_le_bytes([p[8], p[9]]),
+        flags: p[10],
+        batteries: p[12],
+    })
+}
+
+impl ApmStatus {
+    pub fn has_battery(&self) -> bool {
+        self.flags != 0xff && self.flags & 0x80 == 0
+    }
+
+    pub fn charging(&self) -> bool {
+        self.status == 3 || (self.flags != 0xff && self.flags & 8 != 0)
+    }
+
+    /// "AC line", "battery" or "unknown".
+    pub fn source_text(&self) -> &'static str {
+        match self.ac {
+            0 => "battery",
+            1 => "AC line",
+            2 => "backup power",
+            _ => "unknown",
+        }
+    }
+
+    /// "72%, charging", "35%, 1 h 24 min left", "none found".
+    pub fn battery_text(&self) -> alloc::string::String {
+        use alloc::format;
+        if !self.has_battery() {
+            return alloc::string::String::from("none found");
+        }
+        let mut s = if self.life <= 100 { format!("{}%", self.life) } else { alloc::string::String::from("charge unknown") };
+        if self.charging() {
+            s += ", charging";
+        } else if self.ac == 1 {
+            s += ", not charging";
+        }
+        if self.time_unit <= 1 {
+            let mins = if self.time_unit == 1 { self.time as u32 } else { self.time as u32 / 60 };
+            s += &format!(", {} h {:02} min left", mins / 60, mins % 60);
+        }
+        match self.status {
+            2 => s += " (critical)",
+            1 => s += " (low)",
+            _ => {}
+        }
+        s
+    }
+}

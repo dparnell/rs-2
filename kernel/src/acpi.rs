@@ -40,6 +40,21 @@ pub struct Info {
     /// AML definition blocks (DSDT first, then SSDTs): physical address
     /// of the AML (after the header) and its length.
     pub aml: Vec<(u64, usize)>,
+    /// The DSDT's revision (below 2: AML integers are 32-bit).
+    pub dsdt_revision: u8,
+    /// The embedded controller the ECDT describes, if any.
+    pub ecdt: Option<Ecdt>,
+}
+
+/// ECDT: the embedded controller's ports, GPE and namespace path, for
+/// use before the namespace is searched.
+#[derive(Debug, Clone)]
+pub struct Ecdt {
+    pub command: u16,
+    pub data: u16,
+    pub gpe: u8,
+    /// Path of its device ("\\_SB.PCI0.LPCB.EC0").
+    pub id: alloc::string::String,
 }
 
 static INFO: Once<Info> = Once::new();
@@ -197,6 +212,7 @@ fn parse_fadt(t: u64, info: &mut Info) {
         let dsdt = if len >= 148 && u64_at(t + 140) != 0 { u64_at(t + 140) } else { u32_at(t + 40) as u64 };
         if dsdt != 0 && &sig(dsdt) == b"DSDT" {
             parse_s5(dsdt, info);
+            info.dsdt_revision = u8_at(dsdt + 8);
             let n = u32_at(dsdt + 4) as usize;
             if n > 36 {
                 info.aml.insert(0, (dsdt + 36, n - 36));
@@ -219,6 +235,20 @@ pub fn init(rsdp: u64) {
                 let n = u32_at(t + 4) as usize;
                 if n > 36 {
                     info.aml.push((t + 36, n - 36));
+                }
+            },
+            // EC_CONTROL and EC_DATA are I/O-space Generic Address
+            // Structures at 36 and 48; GPE bit at 64, the path from 65.
+            b"ECDT" => unsafe {
+                let n = u32_at(t + 4) as u64;
+                if n > 65 && u8_at(t + 36) == 1 && u8_at(t + 48) == 1 {
+                    let mut id = alloc::string::String::new();
+                    let mut o = t + 65;
+                    while o < t + n && u8_at(o) != 0 {
+                        id.push(u8_at(o) as char);
+                        o += 1;
+                    }
+                    info.ecdt = Some(Ecdt { command: u64_at(t + 40) as u16, data: u64_at(t + 52) as u16, gpe: u8_at(t + 64), id });
                 }
             },
             b"MCFG" => unsafe {

@@ -346,8 +346,13 @@ fn hab() -> u32 {
 }
 
 fn fill_view(h: u32, o: usize) {
-    set_item_text(h, ID_SOURCE as u32, b"Power source: AC line");
-    set_item_text(h, ID_BATTERY as u32, b"Battery: none found");
+    // As IBM's Power object, from APM$'s power status.
+    let (source, battery) = match os2::power::apm_status(0) {
+        Some(a) => (alloc::format!("Power source: {}", a.source_text()), alloc::format!("Battery: {}", a.battery_text())),
+        None => (alloc::string::String::from("Power source: unknown"), alloc::string::String::from("Battery: unknown")),
+    };
+    set_item_text(h, ID_SOURCE as u32, source.as_bytes());
+    set_item_text(h, ID_BATTERY as u32, battery.as_bytes());
     set_item_text(h, ID_STATE as u32, if pd(o).os2_pm != 0 { b"Power management: on" } else { b"Power management: off" });
     set_item_text(h, ID_CAN as u32, b"Can turn the computer off (ACPI); cannot suspend");
     let (plan, draw) = match os2::power::query() {

@@ -163,6 +163,7 @@ dependencies = [
 name = "rs2-kernel"
 version = "0.1.0"
 dependencies = [
+ "aml",
  "bootinfo",
  "crashqr",
  "fat",

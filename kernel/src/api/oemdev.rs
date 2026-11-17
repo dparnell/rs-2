@@ -13,7 +13,8 @@
 //!   by a driver in the resource manager are refused, as IBM's driver's
 //!   exclusive RMAllocResource refuses them.
 //! * `APM$` (category 0xC, IBM's APM.SYS interface) on rs2's ACPI power
-//!   code: power status (AC power, no battery), the power-off event, and
+//!   code: power status (the ACPI batteries and AC adapters that
+//!   [`crate::acpipm`] reads), the power-off event, and
 //!   power events for programs (event semaphores and queues, broadcasts,
 //!   the daemon's confirmation). Suspend and standby are refused.
 //!
@@ -442,17 +443,23 @@ pub fn apm(c: &Ctx, r: &Req) -> u32 {
             let n = if len >= 0x0d { 0x0d } else if len >= 0x0b { 0x0b } else { 7 };
             set(&mut p, 0, n);
             set(&mut p, 2, APM_STATE.load(Ordering::Relaxed));
-            // On line, battery status unknown, life unknown, time unknown.
-            p[4..7].copy_from_slice(&[1, 0xff, 0xff]);
-            if n >= 0x0b {
-                p[7] = 0xff;
-                set(&mut p, 8, 0xffff);
-                p[10] = 0x80; // no system battery
+            // Byte 11 selects a battery (APM 1.2: 0 all of them).
+            let unit = if n >= 0x0d { p[11] } else { 0 };
+            match apm_power(unit) {
+                Some(a) => {
+                    p[4..7].copy_from_slice(&[a.ac, a.status, a.life]);
+                    if n >= 0x0b {
+                        p[7] = a.time_unit;
+                        set(&mut p, 8, a.time);
+                        p[10] = a.flags;
+                    }
+                    if n >= 0x0d {
+                        p[12] = a.count;
+                    }
+                    0
+                }
+                None => rc::BAD_DEVICE,
             }
-            if n >= 0x0d {
-                p[12] = 0; // batteries
-            }
-            0
         }
         0x61 if len < 0x0c => {
             set(&mut p, 0, 0x0c);
@@ -500,6 +507,86 @@ pub fn apm(c: &Ctx, r: &Req) -> u32 {
     }
     c.write_u16(r.data, result);
     if result != 0 { bad } else { 0 }
+}
+
+/// The power status as an APM 1.2 BIOS reports it (INT 15h 530Ah).
+struct ApmPower {
+    /// 0 off line, 1 on line, 0xFF unknown.
+    ac: u8,
+    /// 0 high, 1 low, 2 critical, 3 charging, 0xFF unknown.
+    status: u8,
+    /// Percent, 0xFF unknown.
+    life: u8,
+    /// 0 seconds, 1 minutes, 0xFF unknown.
+    time_unit: u8,
+    time: u16,
+    /// Bit 0 high, 1 low, 2 critical, 3 charging, 7 no system battery.
+    flags: u8,
+    count: u8,
+}
+
+/// APM's answer for battery `unit` (0: all of them together) from the
+/// ACPI batteries and adapters ([`crate::acpipm`]); None: no such
+/// battery. Without either: on line, no system battery.
+fn apm_power(unit: u8) -> Option<ApmPower> {
+    let st = crate::acpipm::status().unwrap_or_default();
+    let present: alloc::vec::Vec<&crate::acpipm::Battery> = st.batteries.iter().filter(|b| b.present).collect();
+    let count = st.batteries.len() as u8;
+    if unit as usize > st.batteries.len() {
+        return None;
+    }
+    let chosen: alloc::vec::Vec<&crate::acpipm::Battery> = if unit == 0 {
+        present
+    } else {
+        st.batteries.get(unit as usize - 1).filter(|b| b.present).into_iter().collect()
+    };
+    // All of them as one: capacities and rates added.
+    let mut all = crate::acpipm::Battery { present: !chosen.is_empty(), ..Default::default() };
+    for b in &chosen {
+        let add = |a: u32, x: u32| if a == u32::MAX || x == u32::MAX { u32::MAX } else { a.saturating_add(x) };
+        let full = if b.full != 0 && b.full != u32::MAX { b.full } else { b.design };
+        all.full = add(all.full, full);
+        all.design = add(all.design, b.design);
+        all.remaining = add(all.remaining, b.remaining);
+        all.warning = add(all.warning, b.warning);
+        all.low = add(all.low, b.low);
+        if b.discharging() {
+            all.rate = add(all.rate, b.rate);
+        }
+        all.state |= b.state & 7;
+    }
+    if all.state & 2 != 0 {
+        all.state &= !1;
+    }
+    let ac = match st.ac {
+        Some(true) => 1,
+        Some(false) => 0,
+        // No adapter in the namespace: on battery when one discharges.
+        None if all.discharging() => 0,
+        None => 1,
+    };
+    if !all.present {
+        return Some(ApmPower { ac, status: 0xff, life: 0xff, time_unit: 0xff, time: 0xffff, flags: 0x80, count });
+    }
+    let life = all.percent().map_or(0xff, |p| p as u8);
+    let (status, mut flags) = if all.critical() {
+        (2, 4)
+    } else if all.low() {
+        (1, 2)
+    } else {
+        (0, 1)
+    };
+    let status = if all.charging() {
+        flags |= 8;
+        3
+    } else {
+        status
+    };
+    let (time_unit, time) = match all.minutes_left() {
+        Some(m) => (1, m as u16),
+        None => (0xff, 0xffff),
+    };
+    Some(ApmPower { ac, status, life, time_unit, time, flags, count })
 }
 
 /// APM device IDs: 0 the BIOS, 1 all devices it manages, 0x01xx display,

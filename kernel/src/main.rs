@@ -8,6 +8,7 @@
 extern crate alloc;
 
 mod acpi;
+mod acpipm;
 mod aml;
 mod api;
 mod apic;
@@ -25,6 +26,7 @@ mod cpupower;
 mod debug;
 mod display;
 mod drivers;
+mod ec;
 mod fs;
 mod infoseg;
 mod irq;
@@ -157,6 +159,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     msi::start();
     drivers::hotplug::start();
     session::start();
+    acpipm::start(cmdline);
     fs::cache::start();
     bench::start(cmdline);
     klog::start_bootlog();

@@ -1,6 +1,7 @@
 //! POWERCFG: show and change the processor power plan (rs2's own).
 //!
-//!   POWERCFG                       the plan and what power management does
+//!   POWERCFG                       the plan, what power management does, the
+//!                                  power source and battery
 //!   POWERCFG /SET:plan [/SAVE]     change the plan now (/SAVE: also at boot)
 //!   POWERCFG /SAVE                 keep the current plan for the next boot
 //!   POWERCFG /WATCH[:n]            readings every second, n times (10)
@@ -62,7 +63,19 @@ fn show(i: &PowerInfo, saved: Option<u32>) {
     readings(i);
 }
 
+/// The power source and battery lines (from APM$).
+fn battery() {
+    let Some(a) = power::apm_status(0) else { return };
+    outln(&format!("Power source:   {}", a.source_text()));
+    let mut s = format!("Battery:        {}", a.battery_text());
+    if a.batteries > 1 {
+        s += &format!(" ({} batteries)", a.batteries);
+    }
+    outln(&s);
+}
+
 fn readings(i: &PowerInfo) {
+    battery();
     let f = i.flags;
     let mut s = format!("CPUs: {} ({} idle without a tick)", i.cpus, i.tickless_now);
     s += &format!(", timer interrupts: {}/s", i.timer_irqs);
