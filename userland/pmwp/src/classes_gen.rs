@@ -988,6 +988,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "WPLaunchPad",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPLaunchPad"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddLaunchPadPage1", "wpQueryCloseDrawer", "wpQueryDisplayVertical", "wpQueryDisplayText", "wpQueryDisplaySmallIcons", "wpQueryHideLaunchPadFrameCtls", "wpQueryFloatOnTop", "wpSetCloseDrawer", "wpSetDisplayVertical", "wpSetDisplayText", "wpSetDisplaySmallIcons", "wpSetHideLaunchPadFrameCtls", "wpSetFloatOnTop", "wpQueryActionButtons", "wpQueryObjectList", "wpSetObjectListFromStrings", "wpSetObjectListFromObjects", "wpSetObjectListFromHObjects", "wpSetDrawerHWND", "wpQueryDrawerHWND", "wpRefreshDrawer", "wpSetDisplayTextInDrawers", "wpQueryDisplayTextInDrawers", "wpQueryActionButtonStyle", "wpSetActionButtonStyle", "wpAddLaunchPadPage2"],
+        ords: (468, 467, 469),
+    },
+    ClassDef {
+        name: "SmartCenter",
+        parents: &["WPLaunchPad"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPBitmap",
         parents: &["WPImageFile"],
         meta: Some("M_WPBitmap"),
@@ -1283,15 +1301,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &["wpAddKeyboardMappingsPage", "wpAddKeyboardTimingPage", "wpAddKeyboardSpecialNeedsPage", "wpAddKeyboardLayoutPage"],
         ords: (0, 0, 0),
-    },
-    ClassDef {
-        name: "WPLaunchPad",
-        parents: &["WPAbstract"],
-        meta: Some("M_WPLaunchPad"),
-        major: 1,
-        minor: 2,
-        methods: &["wpAddLaunchPadPage1", "wpQueryCloseDrawer", "wpQueryDisplayVertical", "wpQueryDisplayText", "wpQueryDisplaySmallIcons", "wpQueryHideLaunchPadFrameCtls", "wpQueryFloatOnTop", "wpSetCloseDrawer", "wpSetDisplayVertical", "wpSetDisplayText", "wpSetDisplaySmallIcons", "wpSetHideLaunchPadFrameCtls", "wpSetFloatOnTop", "wpQueryActionButtons", "wpQueryObjectList", "wpSetObjectListFromStrings", "wpSetObjectListFromObjects", "wpSetObjectListFromHObjects", "wpSetDrawerHWND", "wpQueryDrawerHWND", "wpRefreshDrawer", "wpSetDisplayTextInDrawers", "wpQueryDisplayTextInDrawers", "wpQueryActionButtonStyle", "wpSetActionButtonStyle", "wpAddLaunchPadPage2"],
-        ords: (468, 467, 469),
     },
     ClassDef {
         name: "WPMet",
@@ -2210,6 +2219,36 @@ pub mod m {
     }
     pub mod RS2WindowList {
     }
+    pub mod WPLaunchPad {
+        pub const wpAddLaunchPadPage1: usize = 0;
+        pub const wpQueryCloseDrawer: usize = 1;
+        pub const wpQueryDisplayVertical: usize = 2;
+        pub const wpQueryDisplayText: usize = 3;
+        pub const wpQueryDisplaySmallIcons: usize = 4;
+        pub const wpQueryHideLaunchPadFrameCtls: usize = 5;
+        pub const wpQueryFloatOnTop: usize = 6;
+        pub const wpSetCloseDrawer: usize = 7;
+        pub const wpSetDisplayVertical: usize = 8;
+        pub const wpSetDisplayText: usize = 9;
+        pub const wpSetDisplaySmallIcons: usize = 10;
+        pub const wpSetHideLaunchPadFrameCtls: usize = 11;
+        pub const wpSetFloatOnTop: usize = 12;
+        pub const wpQueryActionButtons: usize = 13;
+        pub const wpQueryObjectList: usize = 14;
+        pub const wpSetObjectListFromStrings: usize = 15;
+        pub const wpSetObjectListFromObjects: usize = 16;
+        pub const wpSetObjectListFromHObjects: usize = 17;
+        pub const wpSetDrawerHWND: usize = 18;
+        pub const wpQueryDrawerHWND: usize = 19;
+        pub const wpRefreshDrawer: usize = 20;
+        pub const wpSetDisplayTextInDrawers: usize = 21;
+        pub const wpQueryDisplayTextInDrawers: usize = 22;
+        pub const wpQueryActionButtonStyle: usize = 23;
+        pub const wpSetActionButtonStyle: usize = 24;
+        pub const wpAddLaunchPadPage2: usize = 25;
+    }
+    pub mod SmartCenter {
+    }
     pub mod WPBitmap {
     }
     pub mod WPClassManager {
@@ -2459,34 +2498,6 @@ pub mod m {
         pub const wpAddKeyboardTimingPage: usize = 1;
         pub const wpAddKeyboardSpecialNeedsPage: usize = 2;
         pub const wpAddKeyboardLayoutPage: usize = 3;
-    }
-    pub mod WPLaunchPad {
-        pub const wpAddLaunchPadPage1: usize = 0;
-        pub const wpQueryCloseDrawer: usize = 1;
-        pub const wpQueryDisplayVertical: usize = 2;
-        pub const wpQueryDisplayText: usize = 3;
-        pub const wpQueryDisplaySmallIcons: usize = 4;
-        pub const wpQueryHideLaunchPadFrameCtls: usize = 5;
-        pub const wpQueryFloatOnTop: usize = 6;
-        pub const wpSetCloseDrawer: usize = 7;
-        pub const wpSetDisplayVertical: usize = 8;
-        pub const wpSetDisplayText: usize = 9;
-        pub const wpSetDisplaySmallIcons: usize = 10;
-        pub const wpSetHideLaunchPadFrameCtls: usize = 11;
-        pub const wpSetFloatOnTop: usize = 12;
-        pub const wpQueryActionButtons: usize = 13;
-        pub const wpQueryObjectList: usize = 14;
-        pub const wpSetObjectListFromStrings: usize = 15;
-        pub const wpSetObjectListFromObjects: usize = 16;
-        pub const wpSetObjectListFromHObjects: usize = 17;
-        pub const wpSetDrawerHWND: usize = 18;
-        pub const wpQueryDrawerHWND: usize = 19;
-        pub const wpRefreshDrawer: usize = 20;
-        pub const wpSetDisplayTextInDrawers: usize = 21;
-        pub const wpQueryDisplayTextInDrawers: usize = 22;
-        pub const wpQueryActionButtonStyle: usize = 23;
-        pub const wpSetActionButtonStyle: usize = 24;
-        pub const wpAddLaunchPadPage2: usize = 25;
     }
     pub mod WPMet {
     }

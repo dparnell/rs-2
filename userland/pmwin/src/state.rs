@@ -185,6 +185,10 @@ pub struct State {
     /// Rs2SetMinButtonType: minimizing hides the window (the System
     /// object's "Hide window" minimize button behavior).
     pub min_hides: bool,
+    /// WinSetDesktopWorkArea: the part of the screen maximized windows
+    /// fill (left, bottom, right, top; None: all of it). The WarpCenter
+    /// keeps its bar out of it.
+    pub work: Option<(i32, i32, i32, i32)>,
     /// When the last keyboard or mouse input came (ms, `now()`).
     pub last_input: u32,
     /// Type-ahead: keys held while a started program comes up.
@@ -332,6 +336,7 @@ pub fn init(surface: Surface, colors256: bool) {
         min_viewer: 0,
         hide_buttons: false,
         min_hides: false,
+        work: None,
         last_input: 0,
         start_lock: None,
         pp: BTreeMap::new(),
