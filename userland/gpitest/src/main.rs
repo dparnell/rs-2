@@ -277,6 +277,8 @@ unsafe extern "C" {
     fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32;
     #[link_name = "PMGPI.480"]
     fn GpiQueryRealColors(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32;
+    #[link_name = "PMGPI.597"]
+    fn GpiQueryPaletteInfo(hpal: u32, hps: u32, opts: u32, start: u32, n: u32, out: *mut u32) -> i32;
     #[link_name = "PMGPI.577"]
     fn GpiDeletePalette(h: u32) -> u32;
     #[link_name = "PMWIN.941"]
@@ -600,8 +602,16 @@ fn self_checks(hab: u32) {
         check("LCOLF_CONSECRGB", GpiQueryRGBColor(m.hps, 0, 1) == 0x123456 && GpiQueryColorIndex(m.hps, 0, 0x123456) == 1);
         GpiCreateLogColorTable(m.hps, 0, 3, 0, 0, null());
         check("LCOLF_RGB", GpiQueryRGBColor(m.hps, 0, 0x00abcdef) == 0xabcdef);
+        // No palette handle, none selected: the default palette (Borland's
+        // OWL reads its colours so).
+        let mut dp = [0u32; 16];
+        let ndef = GpiQueryPaletteInfo(0, m.hps, 0, 0, 0, null_mut());
+        let got = GpiQueryPaletteInfo(0, m.hps, 0, 0, 16, dp.as_mut_ptr());
+        check("GpiQueryPaletteInfo of a PS without a palette: the default palette", ndef == 256 && got == 16 && dp[0] == 0 && dp[15] != 0);
         let pal = GpiCreatePalette(hab, 0, 2, 3, [0x010203u32, 0x040506, 0x070809].as_ptr());
         check("GpiCreatePalette/SelectPalette", pal != 0 && GpiSelectPalette(m.hps, pal) == 0);
+        let mut sp = [0u32; 3];
+        check("GpiQueryPaletteInfo of a PS: its palette", GpiQueryPaletteInfo(0, m.hps, 0, 0, 3, sp.as_mut_ptr()) == 3 && sp == [0x010203, 0x040506, 0x070809]);
 
         free(m);
         let m = mem(hab, 8, 8, PU_PELS);

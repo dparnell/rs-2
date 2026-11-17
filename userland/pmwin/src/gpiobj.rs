@@ -1860,8 +1860,19 @@ pub extern "C" fn GpiSetPaletteEntries(h: u32, fmt: u32, start: u32, n: u32, t: 
 
 /// GpiQueryPaletteInfo(hpal, hps, flOptions, ulStart, ulCount, aulArray)
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryPaletteInfo(h: u32, _hps: u32, _opts: u32, start: u32, n: u32, out: *mut u32) -> i32 {
-    let Some(p) = get(&mut objects().palettes, h, HPAL_BASE) else { return -1 };
+pub extern "C" fn GpiQueryPaletteInfo(h: u32, hps: u32, _opts: u32, start: u32, n: u32, out: *mut u32) -> i32 {
+    // No palette handle: the one selected in the PS, else the default
+    // palette (as IBM's). Borland's OWL asks so for the colours of its
+    // bitmaps and palettes (PAINT ended in "GDI failure").
+    let h = if h == 0 { entry(st(), hps).map_or(0, |e| e.gpi.palette) } else { h };
+    let default;
+    let p = if h == 0 && hps != 0 && entry(st(), hps).is_some() {
+        default = gpi::bitmap::standard_table(8);
+        &default
+    } else {
+        let Some(p) = get(&mut objects().palettes, h, HPAL_BASE) else { return -1 };
+        &*p
+    };
     if n == 0 || out.is_null() {
         return p.len() as i32;
     }
