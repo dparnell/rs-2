@@ -285,6 +285,9 @@ pub struct Ps {
     pub page: Matrix,
     pub page_units: u32,
     pub page_size: (i32, i32),
+    /// The page size as GpiCreatePS / GpiSetPS asked for it: a 0 width or
+    /// height means the device's default size (`device_size`).
+    pub page_asked: (i32, i32),
     /// Y inversion (GpiEnableYInversion): device y = yinv - y after all
     /// the other transforms; 0 = off.
     pub yinv: i32,
@@ -315,6 +318,9 @@ pub struct Ps {
     pub device_font: Option<&'static Font>,
     /// The device's resolution (pels per metre) for page units.
     pub device_ppm: i32,
+    /// The device's default rectangle in pels (the screen, the printer's
+    /// page): the page size a PS gets when it asks for 0.
+    pub device_size: (i32, i32),
 }
 
 impl Ps {
@@ -340,6 +346,7 @@ impl Ps {
             page: Matrix::IDENTITY,
             page_units: xform::PU_PELS,
             page_size: (0, 0),
+            page_asked: (0, 0),
             yinv: 0,
             xf: Matrix::IDENTITY,
             clip_region: None,
@@ -357,6 +364,7 @@ impl Ps {
             sink: core::cell::RefCell::new(None),
             device_font: None,
             device_ppm: xform::PELS_PER_METRE,
+            device_size: (0, 0),
         }
     }
 
@@ -648,11 +656,21 @@ impl Ps {
         self.update_xf();
     }
 
-    /// Page units and size (GpiCreatePS / GpiSetPS).
+    /// Page units and size (GpiCreatePS / GpiSetPS). A 0 width or height
+    /// gives the page the device's default size in those units (pels for
+    /// PU_ARBITRARY), as IBM's: the default page viewport then covers the
+    /// device's default rectangle (cached PSs have such a page; Borland's
+    /// OWL divides by its page viewport).
     pub fn set_page(&mut self, units: u32, size: (i32, i32)) {
         self.page_units = units;
-        self.page_size = size;
+        self.page_asked = size;
         let k = xform::page_unit_scale_at(units, self.device_ppm);
+        self.page_size = if (size.0 == 0 || size.1 == 0) && self.device_size.0 > 0 && self.device_size.1 > 0 {
+            let (w, h) = (self.device_size.0 as f64 / k, self.device_size.1 as f64 / k);
+            (round(w), round(h))
+        } else {
+            size
+        };
         self.page = Matrix::scale(k, k);
         self.update_xf();
     }
@@ -798,7 +816,7 @@ impl Ps {
             self.view = Matrix::IDENTITY;
             self.defaults = Attrs::default();
             self.attrs = Attrs::default();
-            let (u, sz) = (self.page_units, self.page_size);
+            let (u, sz) = (self.page_units, self.page_asked);
             self.set_page(u, sz);
             self.clip_region = None;
             self.clip_path = None;

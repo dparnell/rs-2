@@ -256,7 +256,8 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
         e.gpi.seg.meta_dc = 0;
         // The printer's resolution for page units, its default font.
         e.ps.device_ppm = crate::printer::DPI * 10000 / 254;
-        let (u, sz) = (e.ps.page_units, e.ps.page_size);
+        e.ps.device_size = (page.width(), page.height());
+        let (u, sz) = (e.ps.page_units, e.ps.page_asked);
         e.ps.set_page(u, sz);
         if let Some(f) = crate::printer::default_font() {
             e.ps.set_device_font(f, true);
@@ -313,12 +314,18 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
     true
 }
 
+fn screen_size() -> (i32, i32) {
+    let s = st();
+    (s.surface.width, s.surface.height)
+}
+
 /// A PS leaves a printer DC: back to the display's resolution and font.
 pub fn leave_printer(e: &mut crate::state::PsEntry) {
     if e.ps.device_font.is_some() || e.ps.device_ppm != gpi::xform::PELS_PER_METRE {
         e.ps.device_font = None;
         e.ps.device_ppm = gpi::xform::PELS_PER_METRE;
-        let (u, sz) = (e.ps.page_units, e.ps.page_size);
+        e.ps.device_size = screen_size();
+        let (u, sz) = (e.ps.page_units, e.ps.page_asked);
         e.ps.set_page(u, sz);
         if e.ps.attrs.char_set == 0 {
             e.ps.font = gpi::font::system();

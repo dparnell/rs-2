@@ -283,6 +283,12 @@ unsafe extern "C" {
     fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
     #[link_name = "PMWIN.757"]
     fn WinGetPS(h: u32) -> u32;
+    #[link_name = "PMGPI.471"]
+    fn GpiQueryPS(hps: u32, size: *mut i32) -> u32;
+    #[link_name = "PMGPI.472"]
+    fn GpiQueryPageViewport(hps: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMGPI.539"]
+    fn GpiSetPS(hps: u32, size: *const i32, opts: u32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -719,6 +725,27 @@ fn display_checks(hab: u32) {
         // SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ACTIVATE
         WinSetWindowPos(frame, 0, 10, 10, 200, 100, 0x1 | 0x2 | 0x8 | 0x80);
         let hps = WinGetPS(client);
+        // A cached PS's page is the device's default size (the screen) in
+        // pels, and its page viewport covers it; Borland's OWL sets its
+        // mapping modes from them (GpiQueryPS, GpiSetPS with PS_NORESET,
+        // GpiQueryPageViewport) and divides by the viewport's size.
+        let (sw, sh) = (WinQuerySysValue(1, 20), WinQuerySysValue(1, 21));
+        let mut size = [0i32; 2];
+        let opts = GpiQueryPS(hps, size.as_mut_ptr());
+        check("cached PS: GpiQueryPS is the screen in pels", size == [sw, sh] && opts & 0xfc == 8);
+        let mut vp = RectL::default();
+        check("cached PS: GpiQueryPageViewport covers the screen", GpiQueryPageViewport(hps, &mut vp) != 0 && vp == rect(0, 0, sw, sh));
+        let ok = GpiSetPS(hps, size.as_ptr(), 8 | 0x8000) != 0;
+        let mut vp = RectL::default();
+        GpiQueryPageViewport(hps, &mut vp);
+        check("GpiSetPS PU_PELS | PS_NORESET keeps the page viewport", ok && vp == rect(0, 0, sw, sh));
+        let zero = [0i32; 2];
+        let ok = GpiSetPS(hps, zero.as_ptr(), 0x0c) != 0;
+        GpiQueryPS(hps, size.as_mut_ptr());
+        let mut vp = RectL::default();
+        GpiQueryPageViewport(hps, &mut vp);
+        check("GpiSetPS 0 x 0 PU_LOMETRIC: the screen's size in 0.1 mm", ok && size[0] > sw && size[1] > sh && vp.r - vp.l >= sw - 1 && vp.t - vp.b >= sh - 1);
+        GpiSetPS(hps, zero.as_ptr(), 8);
         GpiCreateLogColorTable(hps, 0, 3, 0, 0, null());
         GpiSetColor(hps, 0x123456);
         GpiMove(hps, &pt(0, 0));

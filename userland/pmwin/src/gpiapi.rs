@@ -94,8 +94,11 @@ pub struct PsExtra {
 
 const HPS_BASE: u32 = 0x100;
 
-fn new_ps(origin: Point, clip: Vec<Rect>) -> Ps {
+/// A new PS on the display: its default page is the screen's size.
+fn new_ps(origin: Point, clip: Vec<Rect>, screen: (i32, i32)) -> Ps {
     let mut ps = Ps::new(origin, clip);
+    ps.device_size = screen;
+    ps.set_page(gpi::xform::PU_PELS, (0, 0));
     ps.colors.sys = color::sys;
     ps.sync_simple();
     ps
@@ -117,7 +120,7 @@ fn insert(s: &mut State, e: PsEntry) -> u32 {
 /// Create a cached presentation space for a window, clipped to `clip`
 /// (device rectangles).
 pub fn create(s: &mut State, hwnd: u32, origin: Point, clip: Vec<Rect>) -> u32 {
-    let mut ps = new_ps(origin, clip);
+    let mut ps = new_ps(origin, clip, (s.surface.width, s.surface.height));
     // The window's font (PP_FONTNAMESIZE, its own or an owner's) is the
     // PS's font, as IBM's cache entries select it (GetCe).
     if hwnd != 0 {
@@ -431,7 +434,7 @@ pub extern "C" fn GpiCreatePS(_hab: u32, hdc: u32, size: *const i32, opts: u32) 
 /// DC keeps for `hdc | 1`).
 pub fn create_ps(hdc: u32, size: *const i32, opts: u32) -> u32 {
     let s = st();
-    let mut ps = new_ps(Point::new(0, 0), Vec::new());
+    let mut ps = new_ps(Point::new(0, 0), Vec::new(), (s.surface.width, s.surface.height));
     let units = match opts & 0x1c {
         0 => gpi::xform::PU_PELS,
         u => u,
