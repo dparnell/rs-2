@@ -681,12 +681,31 @@ pub fn delba_tid(ev: &[u8]) -> Option<u8> {
 }
 
 /// The 802_11_ASSOCIATE response: (capability, status code, association
-/// ID). Status 0 is success; the firmware puts its own reason in the
-/// capability field when the status is not 0 (1: authentication failed,
-/// 2: the AP did not answer the authentication, 3: association timeout,
-/// 4: association refused, 5: station failure).
+/// ID). Status 0 is success; see [`assoc_failure`] for the rest.
 pub fn associate_result(body: &[u8]) -> Option<(u16, u16, u16)> {
     (body.len() >= 6).then(|| (le16(body, 0), le16(body, 2), le16(body, 4) & 0x3fff))
+}
+
+/// Why an association failed, from the response's capability and status
+/// fields (Linux `mwifiex_ret_802_11_associate`): the reason, and whether
+/// the access point itself refused (rather than the firmware giving up
+/// waiting for it). The firmware puts its own error in the capability
+/// field: 0xfffc no answer (status 1: to the association, 2: to the
+/// authentication, 3: joining), 0xfffd authentication refused, 0xfffe
+/// an authentication frame it could not handle, 0xfffb or 0xffff a
+/// failure of its own. Otherwise the status is the AP's 802.11 status
+/// code.
+pub fn assoc_failure(cap: u16, status: u16) -> (String, bool) {
+    let why = match (cap, status) {
+        (0xfffc, 1) => "no answer to the association request",
+        (0xfffc, 2) => "no answer to authentication",
+        (0xfffc, _) => "no answer from the access point",
+        (0xfffd, _) => return (alloc::format!("authentication refused (status {status})"), true),
+        (0xfffe, _) => "an authentication frame the firmware could not handle",
+        (0xfffb | 0xffff, _) => "station failure in the firmware",
+        _ => return (alloc::format!("refused by the access point (status {status})"), true),
+    };
+    (String::from(why), false)
 }
 
 /// 802_11_DEAUTHENTICATE: leave `bssid` with `reason` (3: leaving).
@@ -1222,6 +1241,14 @@ mod tests {
         b[6..8].copy_from_slice(&PKT_TYPE_BAR.to_le_bytes());
         let (pd, f) = rx_packet(&b).unwrap();
         assert_eq!((pd.kind, f.len()), (PKT_TYPE_BAR, 0));
+    }
+
+    #[test]
+    fn association_failures() {
+        assert_eq!(assoc_failure(0xfffc, 1), (String::from("no answer to the association request"), false));
+        assert_eq!(assoc_failure(0xfffc, 2), (String::from("no answer to authentication"), false));
+        assert_eq!(assoc_failure(0x0411, 17), (String::from("refused by the access point (status 17)"), true));
+        assert!(assoc_failure(0xfffd, 13).1);
     }
 
     #[test]

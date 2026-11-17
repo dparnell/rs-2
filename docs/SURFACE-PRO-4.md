@@ -608,7 +608,7 @@ Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 on lines starting `wlan0` and `88W8897` (key API version, association
 result, handshake failures).
 
-### Round 3: 802.11n and 802.11ac (written 2026-11-17, not yet run on the chip)
+### Round 3: 802.11n and 802.11ac (2026-11-17)
 
 Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
 `11n_rxreorder.c`, `11n_aggr.c`):
@@ -632,6 +632,17 @@ Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
   Request moves the window, DELBA or a timeout ends it.
 - A-MSDUs (RxPD type 0xe6) are split into their frames; BARs are 0xe7.
 - Host tests use the Surface's own capability words.
+
+On the Surface (2026-11-17, 0380dfd0): **joins as 802.11n** (the
+2.4 GHz network on channel 6; 802.11ac is 5 GHz only), WPA2 and DHCP as
+before, and the AP starts a block-ack session on TID 0, which rs2
+accepts. The window (WIFIPM) works. The first join after boot timed
+out twice (firmware code 0xfffc: no answer to the association, then to
+the authentication) and the retry a few seconds later worked. rs2 had
+called that "refused by the access point" and fallen back to legacy
+rates; the firmware's codes are now named as Linux names them
+(`wlan::mwifiex::assoc_failure`), and only a real refusal (the AP's
+status code, or the firmware refusing the command) falls back.
 
 Not done: transmit aggregation (A-MPDU/A-MSDU from rs2), power saving,
 roaming, hidden networks.
