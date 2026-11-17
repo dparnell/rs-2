@@ -152,6 +152,11 @@ const PORT_PR: u32 = 1 << 4;
 const PORT_PP: u32 = 1 << 9;
 const PORT_CSC: u32 = 1 << 17;
 const PORT_PRC: u32 = 1 << 21;
+/// Warm Port Reset (USB 3 ports).
+const PORT_WPR: u32 = 1 << 31;
+/// Port Link State: Inactive, Compliance.
+const PLS_INACTIVE: u32 = 6;
+const PLS_COMPLIANCE: u32 = 10;
 /// All RW1C change bits (CSC PEC WRC OCC PRC PLC CEC).
 const PORT_CHANGES: u32 = 0x7f << 17;
 /// Bits written back unchanged: PP, port indicator, wake enables.
@@ -171,6 +176,7 @@ const TRB_EVALUATE: u32 = 13;
 const TRB_RESET_EP: u32 = 14;
 const TRB_STOP_EP: u32 = 15;
 const TRB_SET_DEQ: u32 = 16;
+const TRB_NOOP_CMD: u32 = 23;
 const EV_TRANSFER: u32 = 32;
 const EV_COMMAND: u32 = 33;
 const EV_PORT: u32 = 34;
@@ -1208,16 +1214,19 @@ impl Ctrl {
             let hub_waiting = d.hub.is_some() && d.ctl_busy;
             match step {
                 Step::Debounce(t) if now >= t => {
+                    // Reset every port, USB 3 ports too (they enable
+                    // themselves): a device the firmware configured keeps
+                    // its address and configuration until a reset, and the
+                    // Surface Dock's USB 3 hub then never completed Address
+                    // Device. A USB 3 link that is not usable gets a warm
+                    // reset.
                     let sc = self.portsc(p);
+                    let pls = sc >> 5 & 0xf;
+                    let warm = sc & PORT_PED == 0 && matches!(pls, PLS_INACTIVE | PLS_COMPLIANCE);
                     let d = self.dev(i);
-                    if sc & PORT_PED != 0 {
-                        // USB 3 ports enable themselves.
-                        d.step = Step::Settle(now + 10);
-                    } else {
-                        d.step = Step::Reset;
-                        d.deadline = now + 500;
-                        self.port_write(p, PORT_PR);
-                    }
+                    d.step = Step::Reset;
+                    d.deadline = now + 500;
+                    self.port_write(p, if warm { PORT_WPR } else { PORT_PR });
                 }
                 Step::Reset => {
                     let sc = self.portsc(p);
@@ -1309,7 +1318,8 @@ impl Ctrl {
         }
         let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
         let who = self.devs.get(i).and_then(|d| d.as_ref()).map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
-        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms; aborting it", self.name);
+        let sc = self.devs.get(i).and_then(|d| d.as_ref()).map_or(0, |d| self.portsc(d.root_port as usize - 1));
+        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}); aborting it", self.name);
         self.aborting = now;
         // The low half only: its pointer bits are ignored while the ring
         // runs.
@@ -1392,9 +1402,32 @@ impl Ctrl {
 
     fn command_done(&mut self, ev: Event) {
         if ev.code() == CC_CMD_RING_STOPPED {
-            // After an abort: start the ring again on what is left.
+            // After an abort: start the ring again on what is left. A ring
+            // that stopped on the command it was told to abort did not run
+            // it: that command becomes a no-op and fails as aborted, or the
+            // ring would start on it again.
+            crate::println!("{}: command ring stopped", self.name);
             self.aborting = 0;
-            if !self.cmds.is_empty() {
+            let mut noop = false;
+            if let Some(n) = self.cmds.iter().position(|c| c.0 == ev.param) {
+                if n == 0 {
+                    noop = true;
+                    let p = phys::phys_to_virt(ev.param) as *mut u32;
+                    unsafe {
+                        let cycle = read_volatile(p.add(3)) & TRB_CYCLE;
+                        write_volatile(p, 0);
+                        write_volatile(p.add(1), 0);
+                        write_volatile(p.add(2), 0);
+                        write_volatile(p.add(3), TRB_NOOP_CMD << 10 | cycle);
+                    }
+                    fence(Ordering::SeqCst);
+                    let status = (CC_CMD_ABORTED as u32) << 24;
+                    let ev = Event { param: ev.param, status, control: EV_COMMAND << 10 | ev.control & 0xff00_0000 };
+                    self.command_done(ev);
+                    // The no-op's own completion finds no command.
+                }
+            }
+            if noop || !self.cmds.is_empty() {
                 self.ring_doorbell(0, 0);
             }
             return;

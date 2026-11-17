@@ -170,8 +170,21 @@ The SP4 has no serial port. Done (2026-11-15):
   head of the ring is aborted (CRCR Command Abort; it completes as
   "command aborted", the ring is restarted on what is left), with a line
   naming the command type, port and slot; steps waiting behind another
-  command are not timed out. Which command hangs, and why, still needs
-  that line from the Surface.
+  command are not timed out.
+  - The dock boot's LIVEBOOT.LOG named it: Address Device (TRB type 11)
+    for root port 14 (a USB 3 port: the dock's USB 3 hub). rs2 did not
+    reset USB 3 ports ("they enable themselves"), so the hub the
+    firmware had already addressed and configured was still in that
+    state. It probably held the SET_ADDRESS off with NRDY, which USB 3
+    allows forever. Every port is now reset before its device is
+    addressed, as Linux does (a hot reset; a warm reset for a USB 3 link
+    left Inactive or in Compliance).
+  - After the abort that boot logged nothing more, and its log stopped
+    at the kernel threads. The ring had also not been handled right if
+    it stopped on the aborted command without running it: it was
+    started again on the same command. That command is now made a
+    No Op and fails as aborted. "command ring stopped" is logged, and
+    the abort line has the root port's PORTSC.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
