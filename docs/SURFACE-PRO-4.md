@@ -680,6 +680,17 @@ the chip until an MSI arrives after it went to sleep, `wake()` writes
 FIRMWARE_READY and waits for that interrupt, and power saving is
 refused without MSI.
 
+Second try (fdaaff0a): WPA2 completed, the AP accepted transmit block
+ack, a few frames came in, then no DHCP lease and the machine froze
+again. A race was left: the sleep confirmation's response is seen by
+polling, and its MSI could arrive just after the chip was marked asleep
+and count as "it woke", so the registers were read while it slept. Now
+the driver waits for that interrupt before marking the chip asleep; a
+chip that does not answer the wake request stays marked asleep (its
+command fails, the frame is dropped) instead of being read; and the
+first sleeps and wakes are logged ("the chip sleeps", "woke the chip",
+"the chip woke up (interrupt)").
+
 Not done: A-MSDUs from rs2, roaming, hidden networks, recovering the card
 after a firmware crash.
 

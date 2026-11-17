@@ -328,6 +328,8 @@ const PS_AWAKE: u32 = 0;
 const PS_PRE_SLEEP: u32 = 1;
 const PS_SLEEP_CFM: u32 = 2;
 const PS_ASLEEP: u32 = 3;
+/// Sleeps and wakes logged (the first few, to see the pattern).
+const PS_LOGGED: u64 = 12;
 
 /// MSI interrupts taken (the handler only wakes the wlan thread).
 static IRQS: AtomicU64 = AtomicU64::new(0);
@@ -707,7 +709,9 @@ impl Card {
     /// Send a command and wait for its response body.
     /// A command, waking the chip first if it sleeps.
     fn command(&self, g: &mut Inner, cmd: u16, body: &[u8], timeout_ms: u64) -> Result<Vec<u8>, WlanError> {
-        self.wake();
+        if !self.wake() {
+            return Err(WlanError::Timeout("waking the chip"));
+        }
         self.command_raw(g, cmd, body, timeout_ms)
     }
 
@@ -720,14 +724,19 @@ impl Card {
     /// No register is read while the chip sleeps: a read sent to the
     /// sleeping 88W8897 stalled the Surface for good (Linux only reads the
     /// card after its interrupt). Its MSI says it is awake.
-    fn wake(&self) {
+    /// False if it did not wake: it stays marked asleep (its registers are
+    /// still not read).
+    fn wake(&self) -> bool {
         // A sleep confirmation under way finishes first.
         let t0 = crate::irq::uptime_ms();
         while self.ps.load(Ordering::Acquire) == PS_SLEEP_CFM && crate::irq::uptime_ms() - t0 < 200 {
             crate::task::sched::sleep_ms(1);
         }
+        if self.ps.load(Ordering::Acquire) == PS_SLEEP_CFM {
+            return false;
+        }
         if self.hw_ok() {
-            return;
+            return true;
         }
         let r = &self.regs;
         let mark = self.sleep_irqs.load(Ordering::Acquire);
@@ -738,9 +747,14 @@ impl Card {
         });
         if !woke {
             crate::wlog!("{}: the firmware did not wake up", self.name);
+            return false;
         }
         self.ps.store(PS_AWAKE, Ordering::Release);
-        self.wakes.fetch_add(1, Ordering::Relaxed);
+        let n = self.wakes.fetch_add(1, Ordering::Relaxed);
+        if n < PS_LOGGED {
+            crate::wlog!("{}: woke the chip ({} ms)", self.name, crate::irq::uptime_ms() - t0);
+        }
+        true
     }
 
     /// The chip's registers may be read: it is not asleep, or it raised
@@ -751,7 +765,9 @@ impl Card {
             return true;
         }
         if IRQS.load(Ordering::Acquire) != self.sleep_irqs.load(Ordering::Acquire) {
-            let _ = self.ps.compare_exchange(PS_ASLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed);
+            if self.ps.compare_exchange(PS_ASLEEP, PS_AWAKE, Ordering::AcqRel, Ordering::Relaxed).is_ok() && self.sleeps.load(Ordering::Relaxed) <= PS_LOGGED {
+                crate::wlog!("{}: the chip woke up (interrupt)", self.name);
+            }
             return true;
         }
         false
@@ -772,13 +788,22 @@ impl Card {
                 return;
             }
         }
+        let before = IRQS.load(Ordering::Acquire);
         match self.command_raw(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::sleep_confirm_body(), 1000) {
             Ok(_) => {
                 self.regs.w(CPU_INT_EVENT, CPU_INTR_SLEEP_CFM_DONE);
-                // From here on no register is read until an interrupt.
+                // The response was seen by polling; its MSI may still be on
+                // the way, and must not count as the chip waking. Wait for
+                // it, then mark: from here on no register is read until an
+                // interrupt.
+                spin_until(20_000, || IRQS.load(Ordering::Acquire) != before);
+                spin_until(1_000, || false);
                 self.sleep_irqs.store(IRQS.load(Ordering::Acquire), Ordering::Release);
                 self.ps.store(PS_ASLEEP, Ordering::Release);
-                self.sleeps.fetch_add(1, Ordering::Relaxed);
+                let n = self.sleeps.fetch_add(1, Ordering::Relaxed);
+                if n < PS_LOGGED {
+                    crate::wlog!("{}: the chip sleeps", self.name);
+                }
             }
             Err(e) => {
                 self.ps.store(PS_AWAKE, Ordering::Release);
@@ -1147,7 +1172,10 @@ impl WlanDriver for Card {
         // The chip must be awake to take a frame; a sleep confirmation
         // starts only with the ring empty and under this lock.
         let mut dg = loop {
-            self.wake();
+            if !self.wake() {
+                self.tx_dropped.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
             let dg = self.data.lock();
             if matches!(self.ps.load(Ordering::Acquire), PS_AWAKE | PS_PRE_SLEEP) {
                 break dg;
