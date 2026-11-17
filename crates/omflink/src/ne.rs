@@ -201,7 +201,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         seg_data.push(data);
         seg_relocs.push(recs);
     }
-    // Entry table.
+    // Entry table. Entries in movable segments (MOVEABLE, IOPL) are
+    // movable entries (INT 3Fh); the rest fixed bundles per segment.
+    let movable_unit = |u: usize| units[u].attrs.moveable == Some(true) || units[u].attrs.iopl == Some(true);
     let mut exports = o.exports.clone();
     exports.sort_by_key(|e| e.ordinal);
     let mut entry: Vec<u8> = Vec::new();
@@ -209,8 +211,19 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     {
         let mut i = 0;
         let mut next_ord = 1u16;
+        let kind = |e: &crate::link::ExportEnt| -> u8 {
+            match e.at {
+                Some((u, _)) if movable_unit(u) => 0xff,
+                Some((u, _)) => (u + 1) as u8,
+                None => 0xfe,
+            }
+        };
         while i < exports.len() {
             let e = &exports[i];
+            if e.ordinal < next_ord {
+                i += 1;
+                continue;
+            }
             if e.ordinal > next_ord {
                 // Unused ordinals.
                 let mut gap = e.ordinal - next_ord;
@@ -223,13 +236,6 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 next_ord = e.ordinal;
             }
             // A bundle of consecutive entries of the same kind.
-            let kind = |e: &crate::link::ExportEnt| -> u8 {
-                match (e.at, e.absolute) {
-                    (Some((u, _)), _) => (u + 1) as u8,
-                    (None, Some(_)) => 0xfe,
-                    _ => 0xfe,
-                }
-            };
             let k = kind(e);
             let mut j = i;
             while j < exports.len() && j - i < 255 && exports[j].ordinal == next_ord + (j - i) as u16 && kind(&exports[j]) == k {
@@ -245,32 +251,34 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 fl |= (e.pwords & 0x1f) << 3;
                 entry.push(fl);
                 let off = e.at.map(|a| a.1).or(e.absolute).unwrap_or(0) as u16;
+                if k == 0xff {
+                    entry.extend_from_slice(&[0xcd, 0x3f]);
+                    entry.push((e.at.unwrap().0 + 1) as u8);
+                    movable += 1;
+                }
                 put16(&mut entry, off);
             }
             next_ord += (j - i) as u16;
             i = j;
         }
-        entry.push(0);
-        if exports.is_empty() {
-            entry.push(0);
-        }
-        let _ = &mut movable;
+        // The table ends with an empty bundle (two zero bytes, as IBM's).
+        entry.extend_from_slice(&[0, 0]);
     }
-    // Resident and non-resident names.
+    // Resident and non-resident names. Names exported without an ordinal
+    // are resident (programs import them by name); IBM's LINK lists the
+    // names last defined first.
     let mut resident: Vec<u8> = Vec::new();
     pstr(&mut resident, &o.module_name);
     put16(&mut resident, 0);
     let mut nonres: Vec<u8> = Vec::new();
     let desc = if o.description.is_empty() { o.module_name.clone() } else { o.description.clone() };
-    if !o.description.is_empty() || true {
-        pstr(&mut nonres, &desc);
-        put16(&mut nonres, 0);
-    }
-    for e in &exports {
+    pstr(&mut nonres, &desc);
+    put16(&mut nonres, 0);
+    for e in o.exports.iter().rev() {
         if e.noname {
             continue;
         }
-        if e.resident {
+        if e.resident || !e.explicit {
             pstr(&mut resident, &e.name);
             put16(&mut resident, e.ordinal);
         } else {
@@ -284,7 +292,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     let mut segflags = Vec::new();
     for (i, u) in units.iter().enumerate() {
         let a = &u.attrs;
-        let mut f = if a.moveable == Some(true) { sf::MOVEABLE } else { 0 };
+        let mut f = if movable_unit(i) { sf::MOVEABLE } else { 0 };
         if !u.code {
             f |= sf::DATA;
         }
@@ -362,17 +370,26 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     let mut stack = l.opt.stack.or(def.stacksize).unwrap_or(0);
     let heap = def.heapsize.unwrap_or(0);
     let (mut ss, mut sp) = (0u16, 0u16);
+    let mut alloc: Vec<u32> = units.iter().map(|u| u.size).collect();
     if !dll {
-        let stack_seg = o.lsegs.iter().find(|s| s.combine == crate::omf::Combine::Stack && s.absolute.is_none());
-        if let Some(s) = stack_seg {
+        let stack_seg = o.lsegs.iter().position(|s| s.combine == crate::omf::Combine::Stack && s.absolute.is_none());
+        if let Some(si) = stack_seg {
+            let s = &o.lsegs[si];
             let su = s.unit;
-            // Relative to the frame: the group if the segment is in one.
-            ss = su as u16 + 1;
-            sp = (s.offset + s.size) as u16;
-            if l.opt.stack.or(def.stacksize).is_none() {
-                stack = 0;
+            if Some(su) == o.autodata && units[su].lsegs.last() == Some(&si) {
+                // A stack at the end of DGROUP becomes the header's stack
+                // size: the loader adds it to the automatic data segment.
+                ss = autodata;
+                sp = 0;
+                stack = l.opt.stack.or(def.stacksize).unwrap_or(s.size);
+                alloc[su] = s.offset;
+            } else {
+                ss = su as u16 + 1;
+                sp = (s.offset + s.size) as u16;
+                if l.opt.stack.or(def.stacksize).is_none() {
+                    stack = 0;
+                }
             }
-            let _ = su;
         } else if autodata != 0 {
             ss = autodata;
             sp = 0;
@@ -382,7 +399,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     }
     if autodata != 0 && !dll {
         let au = o.autodata.unwrap();
-        let total = units[au].size as u64 + stack as u64 + heap as u64;
+        let total = alloc[au] as u64 + stack as u64 + heap as u64;
         if total > 0x10000 && sp == 0 {
             l.msgs.error(l.host, "", 2041, "the stack plus the data are larger than 64K");
         }
@@ -465,11 +482,11 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     put16(&mut h, 0);
     put16(&mut h, 0);
     debug_assert_eq!(h.len(), 0x40);
-    for (i, u) in units.iter().enumerate() {
+    for i in 0..units.len() {
         put16(&mut h, (seg_pos[i] >> shift) as u16);
         put16(&mut h, seg_data[i].len() as u16);
         put16(&mut h, segflags[i]);
-        put16(&mut h, if u.size >= 0x10000 { 0 } else { u.size as u16 });
+        put16(&mut h, if alloc[i] >= 0x10000 { 0 } else { alloc[i] as u16 });
     }
     h.extend_from_slice(&resident);
     for m in &modref {

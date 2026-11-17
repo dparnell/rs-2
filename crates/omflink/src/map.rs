@@ -78,6 +78,18 @@ pub fn write(l: &Linker, o: &Linked, exe: &str) -> String {
         };
         s.push_str(&format!(" {:04X}:{:X}   {}\r\n", u, off, g.name));
     }
+    // The exports (LINK).
+    if !o.lx && !l.def.exports.is_empty() {
+        s.push_str("\r\n Address   Export                  Alias\r\n\r\n");
+        for (i, e) in l.def.exports.iter().enumerate() {
+            if l.def.exports[..i].iter().any(|p| p.internal.eq_ignore_ascii_case(&e.internal)) {
+                continue;
+            }
+            let at = o.exports.iter().find(|x| x.name.eq_ignore_ascii_case(&e.name)).and_then(|x| x.at);
+            let (u, off) = at.map(|(u, off)| (u + 1, off)).unwrap_or((0, 0));
+            s.push_str(&format!(" {:04X}:{:04X} {:<23} {}\r\n", u, off, e.name, e.internal));
+        }
+    }
     if l.opt.map {
         let mut pubs: Vec<(String, u16, u32, bool, bool)> = Vec::new();
         for (i, sy) in o.syms.iter().enumerate() {

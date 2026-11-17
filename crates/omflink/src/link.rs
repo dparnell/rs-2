@@ -149,6 +149,8 @@ pub struct Reloc {
 #[derive(Debug, Clone)]
 pub struct ExportEnt {
     pub name: String,
+    /// The ordinal was given (not assigned by the linker).
+    pub explicit: bool,
     pub sym: Option<usize>,
     pub ordinal: u16,
     pub resident: bool,
@@ -207,6 +209,8 @@ pub struct Linker<'h> {
     pub dosseg: bool,
     pub start: Option<(usize, omf::Fixup)>,
     pub def: Def,
+    /// Symbols in the order they became imports (numbers the modules).
+    pub import_seq: Vec<usize>,
 }
 
 /// A library being searched.
@@ -237,6 +241,7 @@ impl<'h> Linker<'h> {
             dosseg: false,
             start: None,
             def: Def::default(),
+            import_seq: Vec::new(),
         }
     }
 
@@ -423,6 +428,7 @@ impl<'h> Linker<'h> {
             let s = self.sym(&imp.internal);
             if matches!(self.syms[s].def, SymDef::Undefined) {
                 self.syms[s].def = SymDef::Import { module: imp.module.clone(), entry: imp.entry.clone() };
+                self.import_seq.push(s);
             }
         }
         let use32 = obj.segs.iter().any(|s| s.use32);
@@ -534,15 +540,11 @@ impl<'h> Linker<'h> {
                 let mut wanted_now: Vec<String> = self.undefined().iter().map(|&s| key(&self.syms[s].name, case)).collect();
                 wanted_now.sort();
                 loop {
+                    // One pass per library each round; the next library
+                    // then gets its turn (IBM's order).
                     if mi >= self.libs[li].modules.len() {
-                        if !pass_progress {
-                            break;
-                        }
-                        mi = 0;
-                        pass_progress = false;
-                        wanted_now = self.undefined().iter().map(|&s| key(&self.syms[s].name, case)).collect();
-                        wanted_now.sort();
-                        continue;
+                        let _ = pass_progress;
+                        break;
                     }
                     let off = self.libs[li].modules[mi].0;
                     mi += 1;
@@ -646,6 +648,15 @@ fn segment_order(l: &Linker) -> Vec<usize> {
                 order.push(i);
             }
         }
+    }
+    // Segments the .DEF file's SEGMENTS statement names come first, in its
+    // order (as IBM's LINK numbers them).
+    if !l.def.segments.is_empty() {
+        let rank = |i: &usize| {
+            let n = &l.lsegs[*i].name;
+            l.def.segments.iter().position(|d| d.name.eq_ignore_ascii_case(n)).unwrap_or(usize::MAX)
+        };
+        order.sort_by_key(rank);
     }
     if l.dosseg {
         let dg = l.groups.iter().position(|g| g.name.eq_ignore_ascii_case("DGROUP"));
@@ -1034,7 +1045,9 @@ pub fn link(l: &mut Linker) -> Option<Linked> {
         protmem: l.mods.iter().any(|m| m.obj.protmem),
     };
     // Imported modules are numbered in the order their names were defined.
-    for s in 0..l.syms.len() {
+    let mut seq = l.import_seq.clone();
+    seq.extend(0..l.syms.len());
+    for s in seq {
         if !l.syms[s].referenced {
             continue;
         }
@@ -1179,7 +1192,9 @@ impl<'a, 'h> Fixer<'a, 'h> {
         let fb = self.frame_base16(m, f, t, loc);
         // LX: a frame other than FLAT is the whole object its target is in
         // (offsets count from the object's start, as IBM's LINK386 has it).
-        if self.l.opt.lx { fb.map(|(u, _)| (u, 0)) } else { fb }
+        // NE: likewise the physical segment (packed segments and groups
+        // share its selector).
+        fb.map(|(u, _)| (u, 0))
     }
 
     fn frame_base16(&self, m: usize, f: &Frame, t: &Target, loc: Option<(usize, u32)>) -> Option<(usize, u32)> {
@@ -1401,7 +1416,15 @@ impl<'a, 'h> Fixer<'a, 'h> {
                     }
                     return;
                 }
-                let flat_frame = lx && self.frame_base(m, &f.frame, &f.target, Some((u, at))).is_none();
+                // A 32-bit offset into a 32-bit object is a flat address
+                // whatever frame the object module names: OS/2 2.x has no
+                // other 32-bit segments. (IBM's LINK386 makes it relative to
+                // the object when the frame is a segment, which no program
+                // can use: Open Watcom's run time names segment frames and
+                // crashed when linked by it.)
+                let flat_frame = lx
+                    && (self.frame_base(m, &f.frame, &f.target, Some((u, at))).is_none()
+                        || (matches!(f.loc, Loc::Offset32 | Loc::LoaderOffset32) && self.out.units[tu].use32 && !self.l.opt.ibm_frames));
                 match f.loc {
                     Loc::Offset32 | Loc::LoaderOffset32 if flat_frame => {
                         // A flat address: needs a fix-up in LX (objects move).
@@ -1461,10 +1484,34 @@ impl<'a, 'h> Fixer<'a, 'h> {
                             _ => (tu, toff),
                         };
                         let rel = rel.wrapping_add(existing & 0xffff);
+                        if lx {
+                            self.out.units[u].relocs.push(Reloc {
+                                offset: at,
+                                kind: RelocKind::Ptr1616,
+                                target: RTarget::Internal { unit: fu, offset: rel },
+                                add: 0,
+                            });
+                        } else {
+                            // NE: the offset is known now; only the selector
+                            // is the loader's (IBM's LINK chains it with the
+                            // segment's other selector fix-ups).
+                            let d = &mut self.out.units[u].data;
+                            wr(d, atu, 2, rel);
+                            self.out.units[u].relocs.push(Reloc {
+                                offset: at + 2,
+                                kind: RelocKind::Selector,
+                                target: RTarget::Internal { unit: fu, offset: 0 },
+                                add: 0,
+                            });
+                        }
+                    }
+                    Loc::Ptr1632 if !lx => {
+                        let d = &mut self.out.units[u].data;
+                        wr(d, atu, 4, toff.wrapping_add(existing));
                         self.out.units[u].relocs.push(Reloc {
-                            offset: at,
-                            kind: RelocKind::Ptr1616,
-                            target: RTarget::Internal { unit: fu, offset: rel },
+                            offset: at + 4,
+                            kind: RelocKind::Selector,
+                            target: RTarget::Internal { unit: tu, offset: 0 },
                             add: 0,
                         });
                     }
@@ -1494,11 +1541,22 @@ impl<'a, 'h> Fixer<'a, 'h> {
             }
             list.push(e);
         };
-        for e in &self.l.def.exports {
+        let def_exports = self.l.def.exports.clone();
+        for (i, e) in def_exports.iter().enumerate() {
+            // LINK takes one export per internal name (L4023); LINK386 allows
+            // aliases.
+            if !self.l.opt.lx {
+                if let Some(p) = def_exports[..i].iter().find(|p| p.internal.eq_ignore_ascii_case(&e.internal)) {
+                    let t = format!("{}({}) : export internal name conflict", p.name, p.internal);
+                    self.l.msgs.warn(self.l.host, "", 4023, &t);
+                    continue;
+                }
+            }
             add(
                 &mut list,
                 ExportEnt {
                     name: e.name.clone(),
+                    explicit: e.ordinal.is_some(),
                     sym: None,
                     ordinal: e.ordinal.unwrap_or(0),
                     resident: e.resident,
@@ -1533,6 +1591,7 @@ impl<'a, 'h> Fixer<'a, 'h> {
                     &mut list,
                     ExportEnt {
                         name: e.name.clone(),
+                        explicit: e.ordinal.is_some(),
                         sym: si,
                         ordinal: e.ordinal.unwrap_or(0),
                         resident: e.resident,

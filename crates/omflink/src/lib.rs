@@ -74,6 +74,9 @@ pub struct Options {
     pub runfromvdm: bool,
     pub warnfixup: bool,
     pub segments: Option<u32>,
+    /// 32-bit offsets with a segment frame relative to their object, as
+    /// IBM's LINK386 has them (rs2's default makes them flat addresses).
+    pub ibm_frames: bool,
 }
 
 /// Output file contents.
@@ -291,9 +294,8 @@ pub fn run(host: &mut dyn Host, prog: Prog, args: &str) -> i32 {
         }
     };
     let mut o = Options { lx: prog == Prog::Link386, ..Default::default() };
-    if prog == Prog::Link386 {
-        o.packcode = Some(u32::MAX);
-    }
+    // Code segments are packed by default (IBM's LINK: up to 65500 bytes).
+    o.packcode = Some(if prog == Prog::Link386 { u32::MAX } else { 65500 });
     match apply_options(&fields.opts, &mut o, prog, &mut msgs, host) {
         Ok(true) => {
             host.out(&help(prog));
@@ -371,6 +373,7 @@ fn link_with(host: &mut dyn Host, prog: Prog, mut o: Options, msgs: msg::Msgs, f
     for i in &def.imports {
         let s = l.sym(&i.internal);
         l.syms[s].def = link::SymDef::Import { module: i.module.clone(), entry: i.entry.clone() };
+        l.import_seq.push(s);
     }
     for ob in &fields.objs {
         let p = cmd::with_ext(ob, "OBJ");
