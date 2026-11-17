@@ -732,6 +732,13 @@ unsafe impl Send for Ctrl {}
 
 static CTRLS: SpinLock<Vec<Ctrl>> = SpinLock::new(Vec::new());
 
+/// `xhcistall` (testing the command watchdog in QEMU, whose commands never
+/// hang): the first Address Device is queued with the wrong cycle bit, so
+/// the controller stops in front of it as before a command that does not
+/// complete. STALLED is that TRB.
+static STALL_ARMED: AtomicBool = AtomicBool::new(false);
+static STALLED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 /// Size of memory BAR 0 (sized with decoding off).
 fn bar_size(dev: &pci::Device) -> u64 {
     let cmd = dev.read(0x04);
@@ -839,6 +846,9 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
 
 /// Bring the controller up: reset, memory structures, run, port power.
 fn start(dev: &pci::Device) -> Option<Ctrl> {
+    if crate::boot_info().cmdline().split_whitespace().any(|w| w == "xhcistall") {
+        STALL_ARMED.store(true, Ordering::Relaxed);
+    }
     dev.enable();
     // Polled: mask legacy INTx.
     dev.write(0x04, (dev.read(0x04) & 0xffff) | 1 << 10);
@@ -1319,7 +1329,16 @@ impl Ctrl {
         let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
         let who = self.devs.get(i).and_then(|d| d.as_ref()).map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
         let sc = self.devs.get(i).and_then(|d| d.as_ref()).map_or(0, |d| self.portsc(d.root_port as usize - 1));
-        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}); aborting it", self.name);
+        let crcr = rd32(self.op, CRCR);
+        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}, CRCR {crcr:#x}); aborting it", self.name);
+        if crcr & CRCR_CRR == 0 {
+            // The ring is not running (it never fetched the command): an
+            // abort has no effect and no event comes. Skip the command as
+            // a stopped ring would.
+            let status = (CC_CMD_RING_STOPPED as u32) << 24;
+            self.command_done(Event { param: trb, status, control: EV_COMMAND << 10 });
+            return;
+        }
         self.aborting = now;
         // The low half only: its pointer bits are ignored while the ring
         // runs.
@@ -1329,6 +1348,11 @@ impl Ctrl {
     fn command(&mut self, i: usize, kind: Cmd, param: u64, control: u32) -> u64 {
         let epoch = self.devs[i].as_ref().map_or(0, |d| d.epoch);
         let trb = self.cmd.push(param, 0, control);
+        if control >> 10 & 0x3f == TRB_ADDRESS && STALL_ARMED.swap(false, Ordering::Relaxed) {
+            let p = phys::phys_to_virt(trb) as *mut u32;
+            unsafe { write_volatile(p.add(3), read_volatile(p.add(3)) ^ TRB_CYCLE) };
+            STALLED.store(trb, Ordering::Relaxed);
+        }
         self.cmds.push((trb, i, epoch, kind));
         let now = self.now();
         if let Some(d) = self.devs[i].as_mut() {
@@ -1414,7 +1438,10 @@ impl Ctrl {
                     noop = true;
                     let p = phys::phys_to_virt(ev.param) as *mut u32;
                     unsafe {
-                        let cycle = read_volatile(p.add(3)) & TRB_CYCLE;
+                        let mut cycle = read_volatile(p.add(3)) & TRB_CYCLE;
+                        if STALLED.swap(0, Ordering::Relaxed) == ev.param {
+                            cycle ^= TRB_CYCLE;
+                        }
                         write_volatile(p, 0);
                         write_volatile(p.add(1), 0);
                         write_volatile(p.add(2), 0);

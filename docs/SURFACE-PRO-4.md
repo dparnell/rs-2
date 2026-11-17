@@ -184,7 +184,20 @@ The SP4 has no serial port. Done (2026-11-15):
     it stopped on the aborted command without running it: it was
     started again on the same command. That command is now made a
     No Op and fails as aborted. "command ring stopped" is logged, and
-    the abort line has the root port's PORTSC.
+    the abort line has the root port's PORTSC and CRCR.
+  - The second dock boot (with the port reset) hung the same way: port
+    14 at SuperSpeed, enabled, link in U0 (PORTSC 0x1203), Address
+    Device still not completed. Its log again stopped at the kernel
+    threads, with no line from the abort's aftermath.
+  - `xhcistall` on the command line queues the first Address Device
+    with the wrong cycle bit, so QEMU's controller stops in front of it
+    as in front of a hung command. The watchdog found the ring not
+    running (CRR 0). An abort then has no effect and sends no event, so
+    the controller was given up 5 s later. A ring that is not running
+    is now handled as stopped at once: the command is skipped, it fails
+    as aborted, and the commands behind it run (the keyboard and mouse
+    enumerate). In QEMU the system keeps running and LIVEBOOT.LOG keeps
+    being written, so why the Surface's log stops is still open.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
