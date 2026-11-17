@@ -646,6 +646,7 @@ tools, so it can be written to a CD, a USB stick or attached to a VM.
 | `xtask` | Host build tool: builds everything, makes disk images and ISOs, runs QEMU |
 | `tools/lxdump` | Inspect OS/2 executables |
 | `tools/dosrun` | Run DOS programs on the host with rs2's DOS machine |
+| `crates/omflink`, `userland/link` | The OMF linker behind LINK.EXE (NE) and LINK386.EXE (LX), also runnable on the host ([UTILITIES.md](UTILITIES.md#the-linkers-cratesomflink)) |
 | `crates/msgf`, `tools/mkmsgf` | OS/2 message files: MKMSGF's compiler, a reader and a decompiler ([PM.md](PM.md#rs2s-own-messages-and-help)) |
 | `userland/msg`, `userland/help` | rs2's own system message files (MKMSGF source) and help books (IPF source) |
 | `userland-std` | Programs using Rust's std: rs2libc (the C library std needs, over the OS/2 API), STDTEST, webcore and the web browsers WEBTEXT and WEB ([BROWSER.md](BROWSER.md)) |
