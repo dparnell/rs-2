@@ -743,6 +743,69 @@ fn is_child_frame(h: u32) -> bool {
     p != 0 && p != HWND_DESKTOP && p != pmwin::HWND_OBJECT
 }
 
+/// The desktop's work area (WinSetDesktopWorkArea; the screen without
+/// one): x, y, cx, cy.
+pub fn work_area() -> (i32, i32, i32, i32) {
+    let s = st();
+    let (w, h) = (s.surface.width, s.surface.height);
+    match s.work {
+        Some((l, b, r, t)) => {
+            let (l, b, r, t) = (l.clamp(0, w), b.clamp(0, h), r.clamp(0, w), t.clamp(0, h));
+            if r - l < 64 || t - b < 64 { (0, 0, w, h) } else { (l, b, r - l, t - b) }
+        }
+        None => (0, 0, w, h),
+    }
+}
+
+/// WinSetDesktopWorkArea(hwndDesktop, prcl) (PMWIN.1068, PMMERGE.5468;
+/// later Toolkits): the part of the desktop maximized windows fill (a
+/// bar such as the WarpCenter keeps the rest); NULL gives the whole
+/// screen back. Frames that are maximized take the new area.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetDesktopWorkArea(_desk: u32, r: *const i32) -> u32 {
+    let new = if r.is_null() {
+        None
+    } else {
+        let v = unsafe { [*r, *r.add(1), *r.add(2), *r.add(3)] };
+        Some((v[0], v[1], v[2], v[3]))
+    };
+    let s = st();
+    if s.work == new {
+        return 1;
+    }
+    s.work = new;
+    let maxed: alloc::vec::Vec<u32> = s
+        .frames
+        .keys()
+        .copied()
+        .filter(|&f| !is_child_frame(f) && s.desk.get(f).is_some_and(|w| w.style & ws::MAXIMIZED != 0))
+        .collect();
+    let (x, y, cx, cy) = work_area();
+    for f in maxed {
+        let b = border(fcf(f));
+        WinSetWindowPos(f, 0, x - b, y - b, cx + 2 * b, cy + 2 * b, 0x0003);
+    }
+    1
+}
+
+/// WinQueryDesktopWorkArea(hwndDesktop, prcl) (PMWIN.1069,
+/// PMMERGE.5469): the part of the desktop maximized windows fill
+/// (Firefox asks for it).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryDesktopWorkArea(_desk: u32, r: *mut i32) -> u32 {
+    if r.is_null() {
+        return 0;
+    }
+    let (x, y, cx, cy) = work_area();
+    unsafe {
+        *r = x;
+        *r.add(1) = y;
+        *r.add(2) = x + cx;
+        *r.add(3) = y + cy;
+    }
+    1
+}
+
 /// SWP fields: fl, cy, cx, y, x, hwndInsertBehind, hwnd.
 fn put_swp(pswp: *mut u32, h: u32, (x, y, cx, cy): (i32, i32, i32, i32)) {
     unsafe {
@@ -765,8 +828,8 @@ pub extern "C" fn WinGetMaxPosition(h: u32, pswp: *mut u32) -> u32 {
     }
     let b = if st().frames.contains_key(&h) { border(fcf(h)) } else { 0 };
     let parent = ctl::parent(h);
-    let (cx, cy) = if parent == HWND_DESKTOP || parent == 0 { (st().surface.width, st().surface.height) } else { ctl::size(parent) };
-    put_swp(pswp, h, (-b, -b, cx + 2 * b, cy + 2 * b));
+    let (x, y, cx, cy) = if parent == HWND_DESKTOP || parent == 0 { work_area() } else { (0, 0, ctl::size(parent).0, ctl::size(parent).1) };
+    put_swp(pswp, h, (x - b, y - b, cx + 2 * b, cy + 2 * b));
     1
 }
 
@@ -837,14 +900,14 @@ pub fn maximize(h: u32, on: bool) {
     let b = border(fcf(h));
     // A frame inside another window fills that window.
     let child = is_child_frame(h);
-    let (sw, sh) = if child { ctl::size(ctl::parent(h)) } else { (s.surface.width, s.surface.height) };
+    let (wx, wy, sw, sh) = if child { (0, 0, ctl::size(ctl::parent(h)).0, ctl::size(ctl::parent(h)).1) } else { work_area() };
     let s = st();
     let Some(f) = s.frames.get_mut(&h) else { return };
     let target = if on {
         if f.restore.is_none() {
             f.restore = Some(cur);
         }
-        (-b, -b, sw + 2 * b, sh + 2 * b)
+        (wx - b, wy - b, sw + 2 * b, sh + 2 * b)
     } else {
         match f.restore.take() {
             Some(r) => r,

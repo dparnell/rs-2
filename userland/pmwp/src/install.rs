@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"17";
+const DESKTOP_VERSION: &[u8] = b"18";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -222,6 +222,16 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
     if prf_read(HINI_USER, b"PM_Workplace", crate::launchpad::CLOSED_KEY).is_none() {
         out.push((LP_START.0.to_vec(), LP_START.1.to_vec()));
     }
+    // The WarpCenter, its first tray holding IBM's objects (those there
+    // are); open at each start, at the top of the screen, unless the user
+    // closed it (warpcenter.rs).
+    let mut wc = crate::warpcenter::OBJECT.1.to_vec();
+    wc.push(b';');
+    wc.extend_from_slice(&crate::warpcenter::first_tray_setup());
+    out.push((crate::warpcenter::OBJECT.0.to_vec(), wc));
+    if prf_read(HINI_USER, b"PM_Workplace", crate::warpcenter::CLOSED_KEY).is_none() {
+        out.push((crate::warpcenter::START.0.to_vec(), crate::warpcenter::START.1.to_vec()));
+    }
     out
 }
 
@@ -304,7 +314,7 @@ pub fn run() {
     // version 12 the applets (Utilities, Games, Locale, Mahjongg's folder);
     // version 13 the TCP/IP and Multimedia folders and the multimedia
     // classes; version 15 the Hardware Manager; version 16 4OS2's
-    // prompts and book; version 17 WiFi;
+    // prompts and book; version 17 WiFi; version 18 the WarpCenter;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         // rs2's multimedia classes (mm.rs) in the class table, unless

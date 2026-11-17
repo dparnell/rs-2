@@ -686,8 +686,9 @@ which apply it on their next tick or before their next idle wait.
   selects a battery, 0 all of them; byte 7 the time unit, 1 minutes;
   battery status and flags high/low/critical/charging; byte 12 the
   number of batteries); without batteries it is still on line, no
-  system battery. POWERCFG and the Power object's status view read
-  `APM$` (`os2::power::apm_status`). `noaml` on the kernel command line
+  system battery. POWERCFG, the Power object's status view and the
+  WarpCenter's battery monitor (docs/WPS.md) read `APM$`
+  (`os2::power::apm_status`). `noaml` on the kernel command line
   leaves the thread out. QEMU has no battery: `cargo run -p aml
   --example battery_ssdt -- work/battery.aml [--discharging]` writes a
   test SSDT for `cargo xtask run ... -- -acpitable file=work/battery.aml`.

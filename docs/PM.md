@@ -1462,6 +1462,15 @@ deepest descendant, under a point) and `WinQueryWindowProcess`;
 presentation parameters (see [Presentation
 parameters](#presentation-parameters)).
 
+**The work area.** `WinSetDesktopWorkArea(hwndDesktop, prcl)` (PMWIN
+1068, PMMERGE 5468, as IBM's forward it; the later Toolkits' name) sets
+the part of the screen that maximized frames fill, and NULL gives the
+whole screen back. Frames that are maximized when it changes take the
+new area, and `WinGetMaxPosition` gives it; `WinQueryDesktopWorkArea`
+(1069, 5469) reports it. It lives in the shared PM state. The WarpCenter
+keeps its bar out of it, as IBM's SCENTER.DLL does (docs/WPS.md).
+PMXTEST checks it.
+
 **System values and colours.** `WinSetSysValue` sets the values a user
 changes: SV_SWAPBUTTON (the right button becomes button 1), SV_DBLCLKTIME
 (how close two clicks must be to make a double-click), SV_ALARM (whether

@@ -133,6 +133,46 @@ fn list_windows(parent: u32, depth: usize) {
     unsafe { WinEndEnumWindows(e) };
 }
 
+unsafe extern "C" {
+    #[link_name = "PMMERGE.5468"]
+    fn WinSetDesktopWorkArea(desk: u32, r: *const RectL) -> u32;
+    #[link_name = "PMMERGE.5469"]
+    fn WinQueryDesktopWorkArea(desk: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMWIN.829"]
+    fn WinQuerySysValue(desk: u32, i: i32) -> i32;
+}
+
+/// WinSetDesktopWorkArea (the WarpCenter's): maximized frames fill the
+/// area, also the ones maximized before it changed; NULL gives the whole
+/// screen back.
+fn work_area_checks(frame: u32) {
+    let (cx, cy) = unsafe { (WinQuerySysValue(HWND_DESKTOP, 20), WinQuerySysValue(HWND_DESKTOP, 21)) };
+    let mut swp = [0i32; 9];
+    // SWP_MAXIMIZE
+    unsafe { WinSetWindowPos(frame, 0, 0, 0, 0, 0, 0x0800) };
+    let top = |swp: &[i32; 9]| swp[3] + swp[1];
+    let full = unsafe { WinQueryWindowPos(frame, swp.as_mut_ptr()) } != 0 && top(&swp) > cy;
+    let area = RectL { left: 0, bottom: 0, right: cx, top: cy - 30 };
+    let set = unsafe { WinSetDesktopWorkArea(HWND_DESKTOP, &area) } != 0;
+    let mut q = RectL { left: -1, bottom: -1, right: -1, top: -1 };
+    unsafe { WinQueryDesktopWorkArea(HWND_DESKTOP, &mut q) };
+    unsafe { WinQueryWindowPos(frame, swp.as_mut_ptr()) };
+    // The sizing border lies outside the area.
+    let b = swp[3].abs();
+    let fits = top(&swp) - b == cy - 30;
+    unsafe { WinSetDesktopWorkArea(HWND_DESKTOP, core::ptr::null()) };
+    let mut q2 = RectL { left: -1, bottom: -1, right: -1, top: -1 };
+    unsafe { WinQueryDesktopWorkArea(HWND_DESKTOP, &mut q2) };
+    unsafe { WinQueryWindowPos(frame, swp.as_mut_ptr()) };
+    let back = top(&swp) > cy;
+    // SWP_RESTORE
+    unsafe { WinSetWindowPos(frame, 0, 0, 0, 0, 0, 0x1000) };
+    check(
+        "WinSetDesktopWorkArea: a maximized frame takes the area, WinQueryDesktopWorkArea gives it, NULL gives the screen back",
+        full && set && (q.left, q.bottom, q.right, q.top) == (0, 0, cx, cy - 30) && fits && (q2.left, q2.bottom, q2.right, q2.top) == (0, 0, cx, cy) && back,
+    );
+}
+
 fn main(s: &Startup) -> u32 {
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
@@ -162,6 +202,9 @@ fn main(s: &Startup) -> u32 {
         }
         let cl = unsafe { WinQueryWindowULong(frame, 0x18) };
         check("QWL_HWNDFOCUSSAVE: a frame without a client that has the focus is its own; a frame's focused client", f2 != 0 && own == (f2, f2) && cl == client);
+    }
+    if args.is_empty() {
+        work_area_checks(frame);
     }
     if args.starts_with(b"CHILD") {
         let r = hooks::child(hab, client);

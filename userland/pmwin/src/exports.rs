@@ -521,10 +521,12 @@ aligned! {
     __a_WinValidateRect => crate::win::WinValidateRect, 3, 492;
     __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 493;
     __a_WinDrawText => crate::win::WinDrawText, 7, 494;
+    __a_WinSetDesktopWorkArea => crate::frame::WinSetDesktopWorkArea, 2, 495;
+    __a_WinQueryDesktopWorkArea => crate::frame::WinQueryDesktopWorkArea, 2, 496;
 }
 
 /// Export names and argument counts by trampoline index.
-pub static NAMES: [(&str, u8); 495] = [
+pub static NAMES: [(&str, u8); 497] = [
     ("WinLoadAccelTable", 3),
     ("WinCreateAccelTable", 2),
     ("WinDestroyAccelTable", 1),
@@ -1020,4 +1022,6 @@ pub static NAMES: [(&str, u8); 495] = [
     ("WinValidateRect", 3),
     ("WinUpdateWindow", 1),
     ("WinDrawText", 7),
+    ("WinSetDesktopWorkArea", 2),
+    ("WinQueryDesktopWorkArea", 2),
 ];

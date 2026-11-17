@@ -89,6 +89,8 @@ EXTRA = {
     'RS2Shutdown': ['WPAbstract'],
     'RS2WindowList': ['WPAbstract'],
     'RS2System': ['WPAbstract'],
+    # SCENTER.DLL's WarpCenter (IBM's class name; no IDL in the Toolkit).
+    'SmartCenter': ['WPLaunchPad'],
     # WPCONFIG.DLL's settings objects (the IDL describes them).
     'WPMouse': ['WPAbstract'],
     'WPKeyboard': ['WPAbstract'],

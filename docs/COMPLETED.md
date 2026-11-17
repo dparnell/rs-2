@@ -633,6 +633,10 @@ What is already done, by milestone. What is still to do is in
   fonts (WarpSans, Helvetica, Times New Roman, Courier) when installed
   from the CD (docs/PM.md, Fonts)
 - done: the Font Palette and folder fonts (PP_FONTNAMESIZE)
+- done: the WarpCenter (SmartCenter: the Desktop and window list menus,
+  Lockup, Find, Shut down, the battery, processor and disk monitor, up
+  to 16 trays, the Assistance menu and the clock; WinSetDesktopWorkArea
+  keeps maximized windows off it)
 - done: deleting with IBM's confirmations and the Shredder, IBM's
   settings pages (File, Type, Window, Association, Session, Details, the
   View page's font), the System object and System Clock, Connections

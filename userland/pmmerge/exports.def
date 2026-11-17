@@ -9,7 +9,6 @@ WinQueryKbdLayout=__a_WinQueryKbdLayout @5479
 WinSetKbdLayout=__a_WinSetKbdLayout @5458
 PmMergeHelpHook=__a_PmMergeHelpHook @5119
 WinQueryCpType=__a_WinQueryCpType @5480
-WinQueryDesktopWorkArea=__a_WinQueryDesktopWorkArea @5469
 AAB32GetReg=__a_AAB32GetReg @5000
 AAB32SetReg=__a_AAB32SetReg @5001
 WinSetProperty=__a_WinSetProperty @5452
@@ -121,6 +120,8 @@ WinInvertRect @5206
 WinIsChild @5207
 WinIsRectEmpty @5209
 WinIsThreadActive @5210
+WinSetDesktopWorkArea @5468
+WinQueryDesktopWorkArea @5469
 WinIsWindow @5211
 WinIsWindowEnabled @5212
 WinIsWindowShowing @5213

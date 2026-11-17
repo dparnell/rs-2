@@ -213,6 +213,8 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
         Some(b"~Index")
     } else if is(o, "WPUrl") {
         Some(b"~Browser")
+    } else if is(o, "SmartCenter") {
+        Some(b"~WarpCenter")
     } else if is(o, "WPLaunchPad") {
         Some(b"~LaunchPad")
     } else {

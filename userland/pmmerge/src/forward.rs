@@ -108,6 +108,8 @@ forward! {
     WinIsChild = "PMWIN.768";
     WinIsRectEmpty = "PMWIN.770";
     WinIsThreadActive = "PMWIN.771";
+    WinSetDesktopWorkArea = "PMWIN.1068";
+    WinQueryDesktopWorkArea = "PMWIN.1069";
     WinIsWindow = "PMWIN.772";
     WinIsWindowEnabled = "PMWIN.773";
     WinIsWindowShowing = "PMWIN.774";

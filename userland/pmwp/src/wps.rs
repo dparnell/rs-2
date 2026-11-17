@@ -68,6 +68,7 @@ fn implementation(name: &str) -> Impl {
         "MMDevice" => crate::mm::impl_device(),
         "MMVolume" => crate::mm::impl_volume(),
         "WPLaunchPad" => crate::launchpad::impl_launchpad(),
+        "SmartCenter" => crate::warpcenter::impl_warpcenter(),
         "Mindex" => crate::mindex::impl_mindex(),
         "WPMinWinViewer" => crate::minwin::impl_viewer(),
         "RS2Shutdown" => crate::rs2obj::impl_shutdown(),
