@@ -154,6 +154,18 @@ The SP4 has no serial port. Done (2026-11-15):
   lost so). The drivers now note the partition the firmware booted from
   (by position and GPT GUID, `drivers::BOOT_DRIVE`) and bootlog writes
   only there; on a live boot where it is not known, nowhere.
+- **Surface Dock at boot: all USB stops** (2026-11-17): a text-mode boot
+  with the dock attached ends with `xhci 00:14.0: port 7: timed out (step
+  EnableSlot)` over and over (port 7 is the Type Cover). Commands on the
+  xHCI command ring run one at a time, and rs2 never aborted one: a
+  command the controller does not complete (probably an Address Device
+  to something behind the dock) blocked every later one, so no device
+  could be enumerated. Now a command not completed 5 s after reaching the
+  head of the ring is aborted (CRCR Command Abort; it completes as
+  "command aborted", the ring is restarted on what is left), with a line
+  naming the command type, port and slot; steps waiting behind another
+  command are not timed out. Which command hangs, and why, still needs
+  that line from the Surface.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints

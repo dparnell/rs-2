@@ -82,6 +82,18 @@ const NET_TX_BUFS: usize = 16;
 const NET_BUF_PAGES: usize = NET_RX_BUFS * NET_RX_MAX_PAGES + NET_TX_BUFS;
 /// Time allowed for one command or control transfer.
 const STEP_TIMEOUT_MS: u64 = 1000;
+/// A command the controller has not completed this long after it reached
+/// the head of the command ring is aborted (Linux waits 5 s too). Commands
+/// run one after another: without the abort one stuck command (Address
+/// Device to a device that does not answer) blocks every later one, and
+/// all USB stops (the Surface Dock: `port 7: timed out (step EnableSlot)`
+/// for the Type Cover, over and over).
+const CMD_TIMEOUT_MS: u64 = 5000;
+/// CRCR Command Abort and Command Ring Running.
+const CRCR_CA: u32 = 1 << 2;
+const CRCR_CRR: u32 = 1 << 3;
+const CC_CMD_RING_STOPPED: u8 = 24;
+const CC_CMD_ABORTED: u8 = 25;
 /// Boot-time wait for devices to appear and be configured (hubs take a
 /// while: power-on, debounce and reset of every port, one device at a
 /// time).
@@ -662,6 +674,10 @@ struct Ctrl {
     ev_idx: usize,
     ev_cycle: bool,
     cmds: Vec<(u64, usize, u32, Cmd)>,
+    /// The command at the head of the ring and since when it is there.
+    head: (u64, u64),
+    /// A Command Abort was asked for at this time (0: none).
+    aborting: u64,
     /// All devices; `root` and the hubs' children index into this.
     devs: Vec<Option<Device>>,
     /// Device on each root port.
@@ -919,6 +935,8 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         ev_idx: 0,
         ev_cycle: true,
         cmds: Vec::new(),
+        head: (0, 0),
+        aborting: 0,
         devs: Vec::new(),
         root: (0..ports).map(|_| None).collect(),
         next_epoch: 1,
@@ -1183,6 +1201,7 @@ impl Ctrl {
 
     /// Deadlines: debounce, reset completion, recovery, timeouts.
     fn timers(&mut self, now: u64) {
+        self.command_watchdog(now);
         for i in 0..self.devs.len() {
             let Some(d) = self.devs[i].as_ref() else { continue };
             let (step, deadline, p) = (d.step, d.deadline, d.root_port as usize - 1);
@@ -1217,7 +1236,14 @@ impl Ctrl {
                 Step::Running if hub_waiting && now >= deadline => self.fail(i, "hub request timed out"),
                 Step::Debounce(_) | Step::Settle(_) | Step::Running | Step::Unused | Step::Failed => {}
                 _ => {
-                    if now >= deadline {
+                    // A step waiting for its command: the command's own
+                    // timeout (the watchdog) applies; it may be queued
+                    // behind others.
+                    let epoch = d.epoch;
+                    let queued = self.cmds.iter().any(|c| c.1 == i && c.2 == epoch && matches!(c.3, Cmd::Step));
+                    if queued {
+                        self.dev(i).deadline = now + STEP_TIMEOUT_MS;
+                    } else if now >= deadline {
                         self.fail(i, "timed out");
                     }
                 }
@@ -1256,6 +1282,38 @@ impl Ctrl {
                 }
             }
         }
+    }
+
+    /// Abort the command at the head of the ring when the controller has
+    /// not completed it in CMD_TIMEOUT_MS; it then completes with "command
+    /// aborted" and the ring stops, to be started again (command_done).
+    fn command_watchdog(&mut self, now: u64) {
+        let Some(&(trb, i, _, _)) = self.cmds.first() else {
+            self.head = (0, now);
+            return;
+        };
+        if self.head.0 != trb {
+            self.head = (trb, now);
+            return;
+        }
+        if self.aborting != 0 {
+            if now >= self.aborting + CMD_TIMEOUT_MS {
+                let running = rd32(self.op, CRCR) & CRCR_CRR != 0;
+                crate::println!("{}: the command ring did not stop after the abort (running: {running}), stopped", self.name);
+                self.dead = true;
+            }
+            return;
+        }
+        if now < self.head.1 + CMD_TIMEOUT_MS {
+            return;
+        }
+        let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
+        let who = self.devs.get(i).and_then(|d| d.as_ref()).map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
+        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms; aborting it", self.name);
+        self.aborting = now;
+        // The low half only: its pointer bits are ignored while the ring
+        // runs.
+        wr32(self.op, CRCR, CRCR_CA);
     }
 
     fn command(&mut self, i: usize, kind: Cmd, param: u64, control: u32) -> u64 {
@@ -1333,6 +1391,17 @@ impl Ctrl {
     }
 
     fn command_done(&mut self, ev: Event) {
+        if ev.code() == CC_CMD_RING_STOPPED {
+            // After an abort: start the ring again on what is left.
+            self.aborting = 0;
+            if !self.cmds.is_empty() {
+                self.ring_doorbell(0, 0);
+            }
+            return;
+        }
+        if ev.code() == CC_CMD_ABORTED {
+            crate::println!("{}: command aborted", self.name);
+        }
         let Some(n) = self.cmds.iter().position(|c| c.0 == ev.param) else { return };
         let (trb, i, epoch, kind) = self.cmds.remove(n);
         match kind {
