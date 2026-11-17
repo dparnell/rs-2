@@ -157,6 +157,9 @@ const PORT_WPR: u32 = 1 << 31;
 /// Port Link State: Inactive, Compliance.
 const PLS_INACTIVE: u32 = 6;
 const PLS_COMPLIANCE: u32 = 10;
+/// Port Link State Disabled, written with Link Write Strobe (USB 3 ports).
+const PLS_DISABLED: u32 = 4;
+const PORT_LWS: u32 = 1 << 16;
 /// All RW1C change bits (CSC PEC WRC OCC PRC PLC CEC).
 const PORT_CHANGES: u32 = 0x7f << 17;
 /// Bits written back unchanged: PP, port indicator, wake enables.
@@ -684,6 +687,14 @@ struct Ctrl {
     head: (u64, u64),
     /// A Command Abort was asked for at this time (0: none).
     aborting: u64,
+    /// The root port of the device whose command hung was disabled at
+    /// this time (0: not done for the command at the head).
+    disabled: u64,
+    /// Root ports (1-based) left alone: a command for their device hung.
+    skip: Vec<u8>,
+    /// During boot: a command hung past the abort; reset the controller
+    /// and enumerate again without its port (probe).
+    restart: bool,
     /// All devices; `root` and the hubs' children index into this.
     devs: Vec<Option<Device>>,
     /// Device on each root port.
@@ -737,6 +748,11 @@ static CTRLS: SpinLock<Vec<Ctrl>> = SpinLock::new(Vec::new());
 /// the controller stops in front of it as before a command that does not
 /// complete. STALLED is that TRB.
 static STALL_ARMED: AtomicBool = AtomicBool::new(false);
+/// `xhcistall=hard`: the hung command also ignores the port being
+/// disabled and Command Abort, as on the Surface Dock (QEMU's ring is not
+/// running in front of the stalled TRB, and an abort written then would
+/// move its dequeue pointer: the abort is not written).
+static STALL_HARD: AtomicBool = AtomicBool::new(false);
 static STALLED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Size of memory BAR 0 (sized with decoding off).
@@ -806,6 +822,12 @@ fn alloc_pages(n: usize, limit: u64) -> Option<u64> {
 /// the mass storage devices among them. Returns their logical units as
 /// block devices, with whether each is an optical drive.
 pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
+    for w in crate::boot_info().cmdline().split_whitespace() {
+        if w == "xhcistall" || w == "xhcistall=hard" {
+            STALL_ARMED.store(true, Ordering::Relaxed);
+            STALL_HARD.store(w.ends_with("hard"), Ordering::Relaxed);
+        }
+    }
     let Some(mut c) = start(dev) else { return Vec::new() };
     // Interrupter 0 through MSI-X entry 0 or MSI; the messages flow once
     // the kernel is up (msi::start), boot enumeration polls.
@@ -824,6 +846,14 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     }
     c.booting = true;
     c.boot_enumerate();
+    if c.restart {
+        c = match restart(dev, c) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        c.booting = true;
+        c.boot_enumerate();
+    }
     c.booting = false;
     let pending = core::mem::take(&mut c.new_storage);
     let idx = {
@@ -844,11 +874,36 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     out
 }
 
+/// A command hung during boot past its port being disabled and an abort
+/// (the controller stops every later command behind it): reset the
+/// controller and start again, leaving the ports in `skip` alone. The old
+/// controller's memory is not reused (a few pages, once).
+fn restart(dev: &pci::Device, mut old: Ctrl) -> Option<Ctrl> {
+    crate::println!("{}: reset; root port(s) {:?} left alone", old.name, old.skip);
+    // What the old enumeration set up goes; device handles stay unique.
+    for d in old.devs.iter().flatten() {
+        for h in &d.hids {
+            hid::detach(h.handle);
+        }
+        if let Some(n) = &d.net {
+            n.state.alive.store(false, Ordering::Release);
+        }
+    }
+    old.new_storage.clear();
+    let mut c = start(dev)?;
+    c.skip = core::mem::take(&mut old.skip);
+    c.next_epoch = old.next_epoch;
+    c.irq = old.irq;
+    if c.irq.is_some() {
+        wr32(c.rt, IMAN, IMAN_IE | IMAN_IP);
+        wr32(c.op, USBCMD, rd32(c.op, USBCMD) | CMD_INTE);
+    }
+    changed();
+    Some(c)
+}
+
 /// Bring the controller up: reset, memory structures, run, port power.
 fn start(dev: &pci::Device) -> Option<Ctrl> {
-    if crate::boot_info().cmdline().split_whitespace().any(|w| w == "xhcistall") {
-        STALL_ARMED.store(true, Ordering::Relaxed);
-    }
     dev.enable();
     // Polled: mask legacy INTx.
     dev.write(0x04, (dev.read(0x04) & 0xffff) | 1 << 10);
@@ -953,6 +1008,9 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         cmds: Vec::new(),
         head: (0, 0),
         aborting: 0,
+        disabled: 0,
+        skip: Vec::new(),
+        restart: false,
         devs: Vec::new(),
         root: (0..ports).map(|_| None).collect(),
         next_epoch: 1,
@@ -1034,7 +1092,10 @@ impl Ctrl {
                 let hub_busy = d.step == Step::Running && d.hub.as_ref().is_some_and(|h| !h.hub.settled());
                 hub_busy || !matches!(d.step, Step::Running | Step::Unused | Step::Failed)
             });
-            if (t >= BOOT_MIN_MS && !busy) || t >= BOOT_MAX_MS || self.dead {
+            // A hung command being recovered from finishes first (its
+            // steps are bounded by the watchdog).
+            let recovering = self.disabled != 0 || self.aborting != 0;
+            if (t >= BOOT_MIN_MS && !busy) || (t >= BOOT_MAX_MS && !recovering) || self.dead || self.restart {
                 break;
             }
             core::hint::spin_loop();
@@ -1096,7 +1157,7 @@ impl Ctrl {
                     self.remove(i);
                 }
             }
-            if connected && self.root[p].is_none() {
+            if connected && self.root[p].is_none() && !self.skip.contains(&((p + 1) as u8)) {
                 let i = self.add(Step::Debounce(now + 100), (p + 1) as u8);
                 self.root[p] = Some(i);
             }
@@ -1303,35 +1364,71 @@ impl Ctrl {
         }
     }
 
-    /// Abort the command at the head of the ring when the controller has
-    /// not completed it in CMD_TIMEOUT_MS; it then completes with "command
-    /// aborted" and the ring stops, to be started again (command_done).
+    /// A command at the head of the ring that the controller has not
+    /// completed in CMD_TIMEOUT_MS. First its device's root port is
+    /// disabled (a device holding off SET_ADDRESS keeps Address Device
+    /// waiting; the Surface Dock's USB 3 hub did) and the port is left
+    /// alone from then on. If the command is still there a second later it
+    /// is aborted: it completes as aborted and the ring stops, to be
+    /// started again (command_done). An abort the controller does not
+    /// answer either gives the controller up, or during boot has it reset
+    /// and enumerated again without that port (probe).
     fn command_watchdog(&mut self, now: u64) {
         let Some(&(trb, i, _, _)) = self.cmds.first() else {
             self.head = (0, now);
+            self.disabled = 0;
             return;
         };
         if self.head.0 != trb {
             self.head = (trb, now);
+            self.disabled = 0;
             return;
         }
+        let hard = STALLED.load(Ordering::Relaxed) == trb && STALL_HARD.load(Ordering::Relaxed);
         if self.aborting != 0 {
             if now >= self.aborting + CMD_TIMEOUT_MS {
                 let running = rd32(self.op, CRCR) & CRCR_CRR != 0;
-                crate::println!("{}: the command ring did not stop after the abort (running: {running}), stopped", self.name);
-                self.dead = true;
+                if self.booting && !self.skip.is_empty() {
+                    crate::println!("{}: the command ring did not stop after the abort (running: {running}); resetting the controller", self.name);
+                    self.restart = true;
+                } else {
+                    crate::println!("{}: the command ring did not stop after the abort (running: {running}), stopped", self.name);
+                    self.dead = true;
+                }
             }
             return;
         }
         if now < self.head.1 + CMD_TIMEOUT_MS {
             return;
         }
-        let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
-        let who = self.devs.get(i).and_then(|d| d.as_ref()).map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
-        let sc = self.devs.get(i).and_then(|d| d.as_ref()).map_or(0, |d| self.portsc(d.root_port as usize - 1));
+        let dev = self.devs.get(i).and_then(|d| d.as_ref());
+        let root = dev.map_or(0, |d| d.root_port);
+        if self.disabled == 0 {
+            let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
+            let who = dev.map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
+            let sc = if root != 0 { self.portsc(root as usize - 1) } else { 0 };
+            let crcr = rd32(self.op, CRCR);
+            crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}, CRCR {crcr:#x})", self.name);
+            self.disabled = now;
+            if root != 0 {
+                // USB 3 ports are disabled through their link state,
+                // USB 2 ports by writing PED.
+                let p = root as usize - 1;
+                let ss = sc >> 10 & 0xf >= 4;
+                self.port_write(p, if ss { PORT_LWS | PLS_DISABLED << 5 } else { PORT_PED });
+                if !self.skip.contains(&root) {
+                    self.skip.push(root);
+                }
+                crate::println!("{}: root port {root} disabled and left alone (PORTSC now {:#x})", self.name, self.portsc(p));
+                return;
+            }
+        }
+        if now < self.disabled + 1000 {
+            return;
+        }
         let crcr = rd32(self.op, CRCR);
-        crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}, CRCR {crcr:#x}); aborting it", self.name);
-        if crcr & CRCR_CRR == 0 {
+        crate::println!("{}: the command is still not completed (CRCR {crcr:#x}); aborting it", self.name);
+        if crcr & CRCR_CRR == 0 && !hard {
             // The ring is not running (it never fetched the command): an
             // abort has no effect and no event comes. Skip the command as
             // a stopped ring would.
@@ -1340,9 +1437,11 @@ impl Ctrl {
             return;
         }
         self.aborting = now;
-        // The low half only: its pointer bits are ignored while the ring
-        // runs.
-        wr32(self.op, CRCR, CRCR_CA);
+        if !hard {
+            // The low half only: its pointer bits are ignored while the
+            // ring runs.
+            wr32(self.op, CRCR, CRCR_CA);
+        }
     }
 
     fn command(&mut self, i: usize, kind: Cmd, param: u64, control: u32) -> u64 {

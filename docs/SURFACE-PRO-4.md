@@ -210,6 +210,30 @@ The SP4 has no serial port. Done (2026-11-15):
     with the dock attached: the boot completes, but the Type Cover still
     does not work. The fixes above are not enough. That boot's
     BOOT.LOG is needed.
+  - A live dock boot with c311c67f: the abort line reads `root PORTSC
+    0x1203, CRCR 0x8`. The ring is running (CRR 1), unlike in QEMU's
+    stall, so the controller was sent Command Abort. Nothing came back
+    in the 3 s of boot enumeration left: no "ring stopped", and the
+    Type Cover on port 7, queued behind, was never enumerated. With no
+    answer, the controller is given up 5 s after the abort, which alone
+    explains a dead Type Cover. The log again stops at the kernel
+    threads, but with no save failure: the full partition was not the
+    reason (that partition's BOOT.LOG is 7.8 KB). Why later lines do
+    not reach the file is still open.
+  - Now a hung command goes through three steps: (1) its device's root
+    port is disabled (USB 3: link state Disabled; USB 2: PED) and left
+    alone for the rest of the boot; (2) a second later, Command Abort
+    (or the skip, if the ring is not running); (3) if the abort gets no
+    answer within 5 s during boot, the controller is reset and
+    enumerated again without that port. Boot enumeration waits for the
+    steps to finish. After boot, the controller is still given up at
+    (3). `xhcistall=hard` makes the stalled command ignore (1) and (2)
+    in QEMU: the controller is reset, root port 3 is left alone, and
+    the keyboard and mouse enumerate. Plain `xhcistall` still ends at
+    (2) with "command aborted".
+  - Leaving the port alone means the dock's USB 3 hub, and SuperSpeed
+    devices behind it, do not work. Its USB 2 hub is on a USB 2 root
+    port of its own, so slower devices behind the dock may.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
