@@ -36,7 +36,7 @@ use alloc::vec::Vec;
 
 pub use ea::{fea2_size, Ea};
 pub use format::{format, FormatParams};
-pub use repair::Report as CheckReport;
+pub use repair::{Progress as CheckProgress, Report as CheckReport};
 pub use name::{is_83, valid_name, CaseMap, MAX_NAME};
 
 use dir::Dirent;

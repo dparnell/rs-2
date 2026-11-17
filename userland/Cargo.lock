@@ -334,6 +334,7 @@ dependencies = [
  "uls",
  "utils",
  "vt100",
+ "wlan",
 ]
 
 [[package]]
@@ -740,6 +741,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs2crypto"
+version = "0.1.0"
+
+[[package]]
 name = "rs2shell"
 version = "0.1.0"
 dependencies = [
@@ -976,6 +981,15 @@ name = "vt100"
 version = "0.1.0"
 
 [[package]]
+name = "wifipm"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+ "wlan",
+]
+
+[[package]]
 name = "win16-dll"
 version = "0.1.0"
 dependencies = [
@@ -1006,6 +1020,13 @@ name = "winhlp"
 version = "0.1.0"
 dependencies = [
  "ipf",
+]
+
+[[package]]
+name = "wlan"
+version = "0.1.0"
+dependencies = [
+ "rs2crypto",
 ]
 
 [[package]]

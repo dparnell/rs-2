@@ -119,6 +119,26 @@ pub fn thread_report() -> alloc::string::String {
             emit!("    kernel:{}", stack_line(sp, top));
         }
     }
+    match crate::task::kthread::try_all() {
+        Some(ts) => {
+            for t in ts {
+                let state = t.state();
+                emit!("kernel thread {} id {} {:?} on_cpu {}", t.kname, t.id, state, t.on_cpu.load(core::sync::atomic::Ordering::Relaxed));
+                if state == State::Running {
+                    continue;
+                }
+                if state == State::Blocked {
+                    emit!("    wake_at {} sleeper {:?} timed_out {}", t.wake_at(), crate::task::sched::is_sleeper(&t), t.timed_out());
+                }
+                let sp = unsafe { *t.rsp_slot() };
+                let top = t.kstack_top();
+                if (top - 0x10_0000..top).contains(&sp) {
+                    emit!("    kernel:{}", stack_line(sp, top));
+                }
+            }
+        }
+        None => emit!("kernel thread list busy"),
+    }
     match crate::api::sem::mutex_report() {
         Some(v) => {
             for l in v {

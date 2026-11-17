@@ -36,7 +36,12 @@ pub fn resolve(c: &Ctx, p: &str) -> Result<FullPath, u32> {
         return Err(err::FILE_NOT_FOUND);
     }
     let cwd = c.process.cwd.lock();
-    path::canonical(p, cwd.0, &cwd.1)
+    let p = path::canonical(p, cwd.0, &cwd.1)?;
+    // The system keychain's directory is the kernel's alone.
+    if crate::keychain::protected(&p) {
+        return Err(err::ACCESS_DENIED);
+    }
+    Ok(p)
 }
 
 fn read_path(c: &Ctx, addr: u32) -> Result<String, u32> {
@@ -906,6 +911,9 @@ pub fn dos_move(c: &mut Ctx) -> u32 {
     path_op(c, 0, |f, p| {
         if p.drive != to.drive {
             return Err(err::NOT_SAME_DEVICE);
+        }
+        if crate::keychain::contains_protected(p) {
+            return Err(err::ACCESS_DENIED);
         }
         f.rename(&p.rel(), &to.rel())
     })
@@ -1857,7 +1865,7 @@ pub fn copy_path(src: &FullPath, dst: &FullPath, opt: u32) -> Result<(), u32> {
             copy_eas(sfs.as_ref(), src, dfs.as_ref(), dst, opt)?;
         }
         for e in sfs.list(&src.rel())? {
-            if e.name == "." || e.name == ".." {
+            if e.name == "." || e.name == ".." || crate::keychain::protected(&child(src, &e.name)) {
                 continue;
             }
             copy_path(&child(src, &e.name), &child(dst, &e.name), opt)?;

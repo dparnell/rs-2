@@ -37,6 +37,17 @@ pub struct Report {
     pub was_dirty: bool,
 }
 
+/// How far a check is, for [`Volume::check_with`].
+#[derive(Debug, Clone, Copy)]
+pub enum Progress {
+    /// Walking the directory tree: directories and files seen so far.
+    Tree { dirs: u64, files: u64 },
+    /// Comparing the bitmaps with what the tree owns: sectors done of total.
+    Bitmaps { done: u32, total: u32 },
+    /// Writing the corrections (with `fix`): how many bits are wrong.
+    Repair { wrong: u32 },
+}
+
 impl Report {
     pub fn ok(&self) -> bool {
         self.problems.is_empty()
@@ -122,6 +133,12 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Check the volume (and with `fix` repair it, see the module docs).
     pub fn check(&mut self, fix: bool) -> Result<Report> {
+        self.check_with(fix, &mut |_| {})
+    }
+
+    /// [`Volume::check`], telling `progress` how far it is: after each
+    /// directory, every band of the bitmap comparison, before the repair.
+    pub fn check_with(&mut self, fix: bool, progress: &mut dyn FnMut(Progress)) -> Result<Report> {
         let mut r = Report::default();
         let s = self.read_sector(SUPER_LBA)?;
         let mut sp = self.read_sector(SPARE_LBA)?;
@@ -145,6 +162,7 @@ impl<D: BlockDevice> Volume<D> {
         let mut stack: Vec<(u32, String)> = vec![(self.root, String::new())];
         let mut seen = 0u32;
         while let Some((fno, path)) = stack.pop() {
+            progress(Progress::Tree { dirs: r.dirs, files: r.files });
             seen += 1;
             if seen > self.total {
                 break;
@@ -254,6 +272,9 @@ impl<D: BlockDevice> Volume<D> {
         let mut used_free = Vec::new();
         let mut leaked = Vec::new();
         for x in 0..self.total {
+            if x % BAND == 0 {
+                progress(Progress::Bitmaps { done: x, total: self.total });
+            }
             let owned = own.get(x);
             if owned && self.is_free(x) {
                 used_free.push(x);
@@ -277,15 +298,14 @@ impl<D: BlockDevice> Volume<D> {
         if !band_wrong.is_empty() {
             r.problems.push(format!("{} DNODEs of the directory band are marked wrongly", band_wrong.len()));
         }
+        progress(Progress::Bitmaps { done: self.total, total: self.total });
         if fix {
-            for x in used_free {
-                self.set_bits_pub(x, false)?;
-                r.marked_used += 1;
+            let wrong = used_free.len() + leaked.len() + band_wrong.len();
+            if wrong > 0 {
+                progress(Progress::Repair { wrong: wrong as u32 });
             }
-            for x in leaked {
-                self.free_run(x, 1)?;
-                r.freed += 1;
-            }
+            r.marked_used = self.set_list(&used_free, false)?;
+            r.freed = self.set_list(&leaked, true)?;
             for k in band_wrong {
                 self.band.bits[k / 8] ^= 1 << (k % 8);
                 let sec = k / 8 / SECTOR;
@@ -299,15 +319,5 @@ impl<D: BlockDevice> Volume<D> {
             self.cache = None;
         }
         Ok(r)
-    }
-
-    fn set_bits_pub(&mut self, s: u32, free: bool) -> Result<()> {
-        if free {
-            self.free_run(s, 1)
-        } else {
-            // Taking exactly one known sector.
-            let got = self.extend_at(s, 1)?;
-            if got == 1 { Ok(()) } else { Err(crate::Error::Corrupt) }
-        }
     }
 }

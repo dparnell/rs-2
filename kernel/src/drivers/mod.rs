@@ -12,6 +12,7 @@ pub mod hotplug;
 pub mod hub;
 pub mod ide;
 pub mod mpt;
+pub mod mwifiex;
 pub mod nvme;
 pub mod part;
 pub mod pci;
@@ -61,6 +62,16 @@ static RESERVED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::
 
 /// A free drive letter. Callers hold `fs::MOUNTING` from here until they
 /// have mounted it.
+/// The drive of the partition the firmware booted from (the one holding
+/// \RS2\KERNEL the loader ran), 0 if not known: where bootlog writes.
+/// On a live boot (C: is the RAM disk) and with root= that is not C:, and
+/// another disk's EFI partition can hold an rs2 kernel too.
+pub static BOOT_DRIVE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+fn mounted_mask() -> u32 {
+    (0..26u8).filter(|&d| crate::fs::drive(d).is_some()).fold(0, |m, d| m | 1 << d)
+}
+
 pub(crate) fn next_letter() -> Option<u8> {
     use core::sync::atomic::Ordering;
     let free = |d: u8| crate::fs::drive(d).is_none();
@@ -210,6 +221,9 @@ pub fn init() {
         if vmxnet3::is_vmxnet3(d) {
             vmxnet3::probe(d);
         }
+        if mwifiex::is_mwifiex(d) {
+            mwifiex::probe(d);
+        }
         if pcnet::is_pcnet(d) {
             pcnet::probe(d);
         }
@@ -300,69 +314,96 @@ pub fn init() {
             .or_else(|| find(&holds_kernel));
         match found {
             Some(i) => match crate::fs::fatfs::FatFs::mount(crate::api::harderr::wrap(Arc::new(parts.remove(i)))) {
-                Ok(fs) => crate::fs::mount(2, fs),
+                Ok(fs) => {
+                    crate::fs::mount(2, fs);
+                    BOOT_DRIVE.store(2, core::sync::atomic::Ordering::Relaxed);
+                }
                 Err(e) => crate::println!("boot partition: cannot mount ({e})"),
             },
             None => crate::println!("boot partition not found (start {})", boot.start),
         }
     }
+    // Otherwise (a live boot, root=) the boot partition gets a letter
+    // below like any other; it is told by position and signature, not by
+    // \RS2\KERNEL alone: the internal disk's EFI partition has one too.
+    let boot_part = if crate::fs::drive(2).is_some() && BOOT_DRIVE.load(core::sync::atomic::Ordering::Relaxed) == 2 {
+        None
+    } else {
+        let same = |p: &part::Partition| boot.kind == 1 && p.start == boot.start && p.count == boot.size;
+        let signed = |p: &part::Partition| same(p) && has_boot_signature(p, &boot);
+        let find = |f: &dyn Fn(&part::Partition) -> bool| parts.iter().position(f);
+        find(&|p| signed(p) && holds_kernel(p))
+            .or_else(|| find(&|p| same(p) && holds_kernel(p)))
+            .or_else(|| find(&signed))
+            .map(|i| (Arc::as_ptr(&parts[i].dev) as *const u8 as usize, parts[i].start))
+    };
     // Primary partitions, then logical drives; volumes OS/2 LVM gave a
     // drive letter get that letter, the others the rest in order.
     parts.sort_by_key(|p| !p.primary);
     let reserved = parts.iter().filter(|p| p.letter != 0).fold(0u32, |m, p| m | 1 << (p.letter - b'A'));
     RESERVED.store(reserved, core::sync::atomic::Ordering::Relaxed);
     for p in parts {
-        WANT.store(if p.letter != 0 { p.letter - b'A' } else { 0 }, core::sync::atomic::Ordering::Relaxed);
-        // An LVM volume with a letter is a drive whatever it holds, also
-        // before FORMAT has written a file system on it.
-        if p.letter != 0 && crate::fs::drive(p.letter - b'A').is_none() {
-            let (d, t) = (p.letter - b'A', p.mbr_type);
-            let fs = crate::fs::probe_volume(Arc::new(p));
-            crate::println!("disk: LVM volume {}: ({}, partition type {t:#x})", (b'A' + d) as char, fs.name());
-            crate::fs::mount(d, fs);
-            continue;
-        }
-        // GPT data partitions hold any file system: probe them.
-        if p.mbr_type == 0 && p.gpt_type == part::GPT_BASIC_DATA {
-            match crate::fs::probe_mount(Arc::new(p)) {
-                Some((fs, name)) => {
-                    if let Some(d) = next_letter() {
-                        crate::println!("disk: {name} partition (GPT)");
-                        crate::fs::mount(d, fs);
-                    }
-                }
-                None => crate::println!("disk: GPT data partition with no file system rs2 can mount"),
+        let is_boot = boot_part == Some((Arc::as_ptr(&p.dev) as *const u8 as usize, p.start));
+        let before = mounted_mask();
+        (|| {
+            WANT.store(if p.letter != 0 { p.letter - b'A' } else { 0 }, core::sync::atomic::Ordering::Relaxed);
+            // An LVM volume with a letter is a drive whatever it holds, also
+            // before FORMAT has written a file system on it.
+            if p.letter != 0 && crate::fs::drive(p.letter - b'A').is_none() {
+                let (d, t) = (p.letter - b'A', p.mbr_type);
+                let fs = crate::fs::probe_volume(Arc::new(p));
+                crate::println!("disk: LVM volume {}: ({}, partition type {t:#x})", (b'A' + d) as char, fs.name());
+                crate::fs::mount(d, fs);
+                return;
             }
-            continue;
-        }
-        let fat = if p.mbr_type != 0 { is_fat_type(p.mbr_type) } else { p.gpt_type == part::GPT_EFI_SYSTEM };
-        if !fat {
-            match p.mbr_type {
-                // 0x07 is shared by HPFS, NTFS and exFAT: check the superblock.
-                0x07 => {
-                    if !try_mount_hpfs(Arc::new(p), "disk: HPFS partition type 0x7") {
-                        crate::println!("disk: partition type 0x7 is not HPFS (NTFS/exFAT not supported)");
-                    }
-                }
-                // OS/2 LVM: JFS volumes (others need LVM, not supported).
-                0x35 => match crate::fs::probe_mount(Arc::new(p)) {
+            // GPT data partitions hold any file system: probe them.
+            if p.mbr_type == 0 && p.gpt_type == part::GPT_BASIC_DATA {
+                match crate::fs::probe_mount(Arc::new(p)) {
                     Some((fs, name)) => {
                         if let Some(d) = next_letter() {
-                            crate::println!("disk: {name} partition type 0x35");
+                            crate::println!("disk: {name} partition (GPT)");
                             crate::fs::mount(d, fs);
                         }
                     }
-                    None => crate::println!("disk: partition type 0x35 is not a JFS volume rs2 can mount"),
-                },
-                _ => {}
+                    None => crate::println!("disk: GPT data partition with no file system rs2 can mount"),
+                }
+                return;
             }
-            continue;
+            let fat = if p.mbr_type != 0 { is_fat_type(p.mbr_type) } else { p.gpt_type == part::GPT_EFI_SYSTEM };
+            if !fat {
+                match p.mbr_type {
+                    // 0x07 is shared by HPFS, NTFS and exFAT: check the superblock.
+                    0x07 => {
+                        if !try_mount_hpfs(Arc::new(p), "disk: HPFS partition type 0x7") {
+                            crate::println!("disk: partition type 0x7 is not HPFS (NTFS/exFAT not supported)");
+                        }
+                    }
+                    // OS/2 LVM: JFS volumes (others need LVM, not supported).
+                    0x35 => match crate::fs::probe_mount(Arc::new(p)) {
+                        Some((fs, name)) => {
+                            if let Some(d) = next_letter() {
+                                crate::println!("disk: {name} partition type 0x35");
+                                crate::fs::mount(d, fs);
+                            }
+                        }
+                        None => crate::println!("disk: partition type 0x35 is not a JFS volume rs2 can mount"),
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            let what = match p.mbr_type {
+                0 => alloc::string::String::from("disk: FAT EFI system partition (GPT)"),
+                t => alloc::format!("disk: FAT partition type {t:#x}"),
+            };
+            try_mount_fat(Arc::new(p), &what);
+        })();
+        if is_boot {
+            let new = mounted_mask() & !before;
+            if new != 0 {
+                BOOT_DRIVE.store(new.trailing_zeros() as u8, core::sync::atomic::Ordering::Relaxed);
+            }
         }
-        let what = match p.mbr_type {
-            0 => alloc::string::String::from("disk: FAT EFI system partition (GPT)"),
-            t => alloc::format!("disk: FAT partition type {t:#x}"),
-        };
-        try_mount_fat(Arc::new(p), &what);
     }
     WANT.store(0, core::sync::atomic::Ordering::Relaxed);
     // Every CD drive gets a letter, with or without a disc: the disc is

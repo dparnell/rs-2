@@ -519,6 +519,11 @@ this boot writes to a clean volume, which kernel threads (bootlog) may do
 before the check.
 The CONFIG.SYS rs2 ships has `/AUTOCHECK:*`; updating an installation keeps
 the user's CONFIG.SYS, which then needs the line added by hand.
+On HPFS, CHKDSK prints progress while it runs (a line when it starts on the
+directories, on the bitmap comparison and on the corrections, then one every 3
+seconds), so a long check of a large volume does not look like a hung boot.
+Its corrections write each changed bitmap sector once (before, one disk write
+per wrong sector).
 IBM's CHKDSK.SYS runs before the volumes are in use; rs2's CHKDSK is an
 ordinary program, which works on the boot drive because the loader keeps no
 files open.

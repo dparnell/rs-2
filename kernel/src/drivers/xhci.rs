@@ -82,11 +82,25 @@ const NET_TX_BUFS: usize = 16;
 const NET_BUF_PAGES: usize = NET_RX_BUFS * NET_RX_MAX_PAGES + NET_TX_BUFS;
 /// Time allowed for one command or control transfer.
 const STEP_TIMEOUT_MS: u64 = 1000;
+/// A command the controller has not completed this long after it reached
+/// the head of the command ring is aborted (Linux waits 5 s too). Commands
+/// run one after another: without the abort one stuck command (Address
+/// Device to a device that does not answer) blocks every later one, and
+/// all USB stops (the Surface Dock: `port 7: timed out (step EnableSlot)`
+/// for the Type Cover, over and over).
+const CMD_TIMEOUT_MS: u64 = 5000;
+/// CRCR Command Abort and Command Ring Running.
+const CRCR_CA: u32 = 1 << 2;
+const CRCR_CRR: u32 = 1 << 3;
+const CC_CMD_RING_STOPPED: u8 = 24;
+const CC_CMD_ABORTED: u8 = 25;
 /// Boot-time wait for devices to appear and be configured (hubs take a
 /// while: power-on, debounce and reset of every port, one device at a
 /// time).
 const BOOT_MIN_MS: u64 = 250;
 const BOOT_MAX_MS: u64 = 8000;
+/// Enumeration attempts after the first for a device on a root port.
+const ENUM_RETRIES: u8 = 2;
 /// Hub tiers below the root ports that the route string can describe.
 const MAX_DEPTH: u8 = 5;
 /// Poll interval (ticks) and port scan interval (ms) after boot.
@@ -140,6 +154,14 @@ const PORT_PR: u32 = 1 << 4;
 const PORT_PP: u32 = 1 << 9;
 const PORT_CSC: u32 = 1 << 17;
 const PORT_PRC: u32 = 1 << 21;
+/// Warm Port Reset (USB 3 ports).
+const PORT_WPR: u32 = 1 << 31;
+/// Port Link State: Inactive, Compliance.
+const PLS_INACTIVE: u32 = 6;
+const PLS_COMPLIANCE: u32 = 10;
+/// Port Link State Disabled, written with Link Write Strobe (USB 3 ports).
+const PLS_DISABLED: u32 = 4;
+const PORT_LWS: u32 = 1 << 16;
 /// All RW1C change bits (CSC PEC WRC OCC PRC PLC CEC).
 const PORT_CHANGES: u32 = 0x7f << 17;
 /// Bits written back unchanged: PP, port indicator, wake enables.
@@ -159,6 +181,7 @@ const TRB_EVALUATE: u32 = 13;
 const TRB_RESET_EP: u32 = 14;
 const TRB_STOP_EP: u32 = 15;
 const TRB_SET_DEQ: u32 = 16;
+const TRB_NOOP_CMD: u32 = 23;
 const EV_TRANSFER: u32 = 32;
 const EV_COMMAND: u32 = 33;
 const EV_PORT: u32 = 34;
@@ -341,6 +364,9 @@ enum Step {
     Settle(u64),
     EnableSlot,
     Address,
+    /// SET_ADDRESS recovery before the first request at the new address
+    /// (USB 2.0 9.2.6.3 allows 2 ms; Linux waits 10).
+    Addressed(u64),
     DevDesc8,
     Evaluate,
     DevDesc,
@@ -662,6 +688,22 @@ struct Ctrl {
     ev_idx: usize,
     ev_cycle: bool,
     cmds: Vec<(u64, usize, u32, Cmd)>,
+    /// The command at the head of the ring and since when it is there.
+    head: (u64, u64),
+    /// A Command Abort was asked for at this time (0: none).
+    aborting: u64,
+    /// The root port of the device whose command hung was disabled at
+    /// this time (0: not done for the command at the head).
+    disabled: u64,
+    /// Root ports (1-based) left alone: a command for their device hung.
+    skip: Vec<u8>,
+    /// During boot: a command hung past the abort; reset the controller
+    /// and enumerate again without its port (probe).
+    restart: bool,
+    /// Enumeration retries used on each root port while connected.
+    retries: Vec<u8>,
+    /// Failed devices (index, epoch) to forget so they are found again.
+    retry: Vec<(usize, u32)>,
     /// All devices; `root` and the hubs' children index into this.
     devs: Vec<Option<Device>>,
     /// Device on each root port.
@@ -709,6 +751,21 @@ fn interrupt(ctx: usize) {
 unsafe impl Send for Ctrl {}
 
 static CTRLS: SpinLock<Vec<Ctrl>> = SpinLock::new(Vec::new());
+
+/// `xhcistall` (testing the command watchdog in QEMU, whose commands never
+/// hang): the first Address Device is queued with the wrong cycle bit, so
+/// the controller stops in front of it as before a command that does not
+/// complete. STALLED is that TRB.
+static STALL_ARMED: AtomicBool = AtomicBool::new(false);
+/// `xhcistall=hard`: the hung command also ignores the port being
+/// disabled and Command Abort, as on the Surface Dock (QEMU's ring is not
+/// running in front of the stalled TRB, and an abort written then would
+/// move its dequeue pointer: the abort is not written).
+static STALL_HARD: AtomicBool = AtomicBool::new(false);
+/// `xhcifail`: the first device's enumeration fails once (testing the
+/// retry in QEMU).
+static FAIL_ARMED: AtomicBool = AtomicBool::new(false);
+static STALLED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Size of memory BAR 0 (sized with decoding off).
 fn bar_size(dev: &pci::Device) -> u64 {
@@ -777,6 +834,15 @@ fn alloc_pages(n: usize, limit: u64) -> Option<u64> {
 /// the mass storage devices among them. Returns their logical units as
 /// block devices, with whether each is an optical drive.
 pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
+    for w in crate::boot_info().cmdline().split_whitespace() {
+        if w == "xhcistall" || w == "xhcistall=hard" {
+            STALL_ARMED.store(true, Ordering::Relaxed);
+            STALL_HARD.store(w.ends_with("hard"), Ordering::Relaxed);
+        }
+        if w == "xhcifail" {
+            FAIL_ARMED.store(true, Ordering::Relaxed);
+        }
+    }
     let Some(mut c) = start(dev) else { return Vec::new() };
     // Interrupter 0 through MSI-X entry 0 or MSI; the messages flow once
     // the kernel is up (msi::start), boot enumeration polls.
@@ -795,6 +861,14 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     }
     c.booting = true;
     c.boot_enumerate();
+    if c.restart {
+        c = match restart(dev, c) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        c.booting = true;
+        c.boot_enumerate();
+    }
     c.booting = false;
     let pending = core::mem::take(&mut c.new_storage);
     let idx = {
@@ -813,6 +887,34 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
         }
     }
     out
+}
+
+/// A command hung during boot past its port being disabled and an abort
+/// (the controller stops every later command behind it): reset the
+/// controller and start again, leaving the ports in `skip` alone. The old
+/// controller's memory is not reused (a few pages, once).
+fn restart(dev: &pci::Device, mut old: Ctrl) -> Option<Ctrl> {
+    crate::println!("{}: reset; root port(s) {:?} left alone", old.name, old.skip);
+    // What the old enumeration set up goes; device handles stay unique.
+    for d in old.devs.iter().flatten() {
+        for h in &d.hids {
+            hid::detach(h.handle);
+        }
+        if let Some(n) = &d.net {
+            n.state.alive.store(false, Ordering::Release);
+        }
+    }
+    old.new_storage.clear();
+    let mut c = start(dev)?;
+    c.skip = core::mem::take(&mut old.skip);
+    c.next_epoch = old.next_epoch;
+    c.irq = old.irq;
+    if c.irq.is_some() {
+        wr32(c.rt, IMAN, IMAN_IE | IMAN_IP);
+        wr32(c.op, USBCMD, rd32(c.op, USBCMD) | CMD_INTE);
+    }
+    changed();
+    Some(c)
 }
 
 /// Bring the controller up: reset, memory structures, run, port power.
@@ -919,6 +1021,13 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         ev_idx: 0,
         ev_cycle: true,
         cmds: Vec::new(),
+        head: (0, 0),
+        aborting: 0,
+        disabled: 0,
+        skip: Vec::new(),
+        restart: false,
+        retries: alloc::vec![0; ports],
+        retry: Vec::new(),
         devs: Vec::new(),
         root: (0..ports).map(|_| None).collect(),
         next_epoch: 1,
@@ -1000,7 +1109,10 @@ impl Ctrl {
                 let hub_busy = d.step == Step::Running && d.hub.as_ref().is_some_and(|h| !h.hub.settled());
                 hub_busy || !matches!(d.step, Step::Running | Step::Unused | Step::Failed)
             });
-            if (t >= BOOT_MIN_MS && !busy) || t >= BOOT_MAX_MS || self.dead {
+            // A hung command being recovered from finishes first (its
+            // steps are bounded by the watchdog).
+            let recovering = self.disabled != 0 || self.aborting != 0;
+            if (t >= BOOT_MIN_MS && !busy) || (t >= BOOT_MAX_MS && !recovering) || self.dead || self.restart {
                 break;
             }
             core::hint::spin_loop();
@@ -1058,11 +1170,12 @@ impl Ctrl {
             }
             let connected = sc & PORT_CCS != 0;
             if !connected {
+                self.retries[p] = 0;
                 if let Some(i) = self.root[p] {
                     self.remove(i);
                 }
             }
-            if connected && self.root[p].is_none() {
+            if connected && self.root[p].is_none() && !self.skip.contains(&((p + 1) as u8)) {
                 let i = self.add(Step::Debounce(now + 100), (p + 1) as u8);
                 self.root[p] = Some(i);
             }
@@ -1171,34 +1284,61 @@ impl Ctrl {
 
     fn fail(&mut self, i: usize, why: &str) {
         let name = self.name.clone();
+        // A device on a root port that fails before it runs is tried again
+        // from a port reset, up to ENUM_RETRIES times while it stays
+        // connected (Linux does too; the Surface Dock's USB 2 hub failed
+        // its first request with a transaction error).
+        let retry = self.devs[i].as_ref().and_then(|d| {
+            let p = d.root_port as usize - 1;
+            let early = d.parent.is_none() && !matches!(d.step, Step::Running | Step::Unused | Step::Failed);
+            (early && self.retries[p] < ENUM_RETRIES && !self.skip.contains(&d.root_port)).then_some((p, d.epoch))
+        });
         if let Some(d) = self.devs[i].as_mut() {
-            crate::println!("{name}: port {}: {why} (step {:?})", d.path(), d.step);
+            let again = retry.map_or(String::new(), |(p, _)| alloc::format!("; trying again ({} of {ENUM_RETRIES})", self.retries[p] + 1));
+            // The root port's state: speed, link state, enabled.
+            let sc = if d.parent.is_none() { alloc::format!(", PORTSC {:#x}", rd32(self.op, PORTSC + (d.root_port as usize - 1) * 0x10)) } else { String::new() };
+            crate::println!("{name}: port {}: {why} (step {:?}{sc}){again}", d.path(), d.step);
             d.step = Step::Failed;
             if let Some(n) = &d.net {
                 n.state.alive.store(false, Ordering::Release);
                 crate::net::kick();
             }
         }
+        if let Some((p, epoch)) = retry {
+            self.retries[p] += 1;
+            self.retry.push((i, epoch));
+        }
     }
 
     /// Deadlines: debounce, reset completion, recovery, timeouts.
     fn timers(&mut self, now: u64) {
+        self.command_watchdog(now);
+        // Failed devices to try again: forgotten here, found again by the
+        // next port scan.
+        for (i, epoch) in core::mem::take(&mut self.retry) {
+            if self.devs[i].as_ref().is_some_and(|d| d.epoch == epoch && d.step == Step::Failed) {
+                self.remove(i);
+            }
+        }
         for i in 0..self.devs.len() {
             let Some(d) = self.devs[i].as_ref() else { continue };
             let (step, deadline, p) = (d.step, d.deadline, d.root_port as usize - 1);
             let hub_waiting = d.hub.is_some() && d.ctl_busy;
             match step {
                 Step::Debounce(t) if now >= t => {
+                    // Reset every port, USB 3 ports too (they enable
+                    // themselves): a device the firmware configured keeps
+                    // its address and configuration until a reset, and the
+                    // Surface Dock's USB 3 hub then never completed Address
+                    // Device. A USB 3 link that is not usable gets a warm
+                    // reset.
                     let sc = self.portsc(p);
+                    let pls = sc >> 5 & 0xf;
+                    let warm = sc & PORT_PED == 0 && matches!(pls, PLS_INACTIVE | PLS_COMPLIANCE);
                     let d = self.dev(i);
-                    if sc & PORT_PED != 0 {
-                        // USB 3 ports enable themselves.
-                        d.step = Step::Settle(now + 10);
-                    } else {
-                        d.step = Step::Reset;
-                        d.deadline = now + 500;
-                        self.port_write(p, PORT_PR);
-                    }
+                    d.step = Step::Reset;
+                    d.deadline = now + 500;
+                    self.port_write(p, if warm { PORT_WPR } else { PORT_PR });
                 }
                 Step::Reset => {
                     let sc = self.portsc(p);
@@ -1213,11 +1353,21 @@ impl Ctrl {
                         self.fail(i, "port reset timed out");
                     }
                 }
+                Step::Settle(t) if now >= t && FAIL_ARMED.swap(false, Ordering::Relaxed) => self.fail(i, "failed on purpose (xhcifail)"),
                 Step::Settle(t) if now >= t => self.enable_slot(i),
+                Step::Addressed(t) if now >= t => self.get_device_desc8(i),
+                Step::Addressed(_) => {}
                 Step::Running if hub_waiting && now >= deadline => self.fail(i, "hub request timed out"),
                 Step::Debounce(_) | Step::Settle(_) | Step::Running | Step::Unused | Step::Failed => {}
                 _ => {
-                    if now >= deadline {
+                    // A step waiting for its command: the command's own
+                    // timeout (the watchdog) applies; it may be queued
+                    // behind others.
+                    let epoch = d.epoch;
+                    let queued = self.cmds.iter().any(|c| c.1 == i && c.2 == epoch && matches!(c.3, Cmd::Step));
+                    if queued {
+                        self.dev(i).deadline = now + STEP_TIMEOUT_MS;
+                    } else if now >= deadline {
                         self.fail(i, "timed out");
                     }
                 }
@@ -1258,9 +1408,94 @@ impl Ctrl {
         }
     }
 
+    /// A command at the head of the ring that the controller has not
+    /// completed in CMD_TIMEOUT_MS. First its device's root port is
+    /// disabled (a device holding off SET_ADDRESS keeps Address Device
+    /// waiting; the Surface Dock's USB 3 hub did) and the port is left
+    /// alone from then on. If the command is still there a second later it
+    /// is aborted: it completes as aborted and the ring stops, to be
+    /// started again (command_done). An abort the controller does not
+    /// answer either gives the controller up, or during boot has it reset
+    /// and enumerated again without that port (probe).
+    fn command_watchdog(&mut self, now: u64) {
+        let Some(&(trb, i, _, _)) = self.cmds.first() else {
+            self.head = (0, now);
+            self.disabled = 0;
+            return;
+        };
+        if self.head.0 != trb {
+            self.head = (trb, now);
+            self.disabled = 0;
+            return;
+        }
+        let hard = STALLED.load(Ordering::Relaxed) == trb && STALL_HARD.load(Ordering::Relaxed);
+        if self.aborting != 0 {
+            if now >= self.aborting + CMD_TIMEOUT_MS {
+                let running = rd32(self.op, CRCR) & CRCR_CRR != 0;
+                if self.booting && !self.skip.is_empty() {
+                    crate::println!("{}: the command ring did not stop after the abort (running: {running}); resetting the controller", self.name);
+                    self.restart = true;
+                } else {
+                    crate::println!("{}: the command ring did not stop after the abort (running: {running}), stopped", self.name);
+                    self.dead = true;
+                }
+            }
+            return;
+        }
+        if now < self.head.1 + CMD_TIMEOUT_MS {
+            return;
+        }
+        let dev = self.devs.get(i).and_then(|d| d.as_ref());
+        let root = dev.map_or(0, |d| d.root_port);
+        if self.disabled == 0 {
+            let ty = unsafe { read_volatile((phys::phys_to_virt(trb) as *const u32).add(3)) } >> 10 & 0x3f;
+            let who = dev.map_or(String::from("?"), |d| alloc::format!("port {} slot {} (step {:?})", d.path(), d.slot, d.step));
+            let sc = if root != 0 { self.portsc(root as usize - 1) } else { 0 };
+            let crcr = rd32(self.op, CRCR);
+            crate::println!("{}: command type {ty} for {who} not completed in {CMD_TIMEOUT_MS} ms (root PORTSC {sc:#x}, CRCR {crcr:#x})", self.name);
+            self.disabled = now;
+            if root != 0 {
+                // USB 3 ports are disabled through their link state,
+                // USB 2 ports by writing PED.
+                let p = root as usize - 1;
+                let ss = sc >> 10 & 0xf >= 4;
+                self.port_write(p, if ss { PORT_LWS | PLS_DISABLED << 5 } else { PORT_PED });
+                if !self.skip.contains(&root) {
+                    self.skip.push(root);
+                }
+                crate::println!("{}: root port {root} disabled and left alone (PORTSC now {:#x})", self.name, self.portsc(p));
+                return;
+            }
+        }
+        if now < self.disabled + 1000 {
+            return;
+        }
+        let crcr = rd32(self.op, CRCR);
+        crate::println!("{}: the command is still not completed (CRCR {crcr:#x}); aborting it", self.name);
+        if crcr & CRCR_CRR == 0 && !hard {
+            // The ring is not running (it never fetched the command): an
+            // abort has no effect and no event comes. Skip the command as
+            // a stopped ring would.
+            let status = (CC_CMD_RING_STOPPED as u32) << 24;
+            self.command_done(Event { param: trb, status, control: EV_COMMAND << 10 });
+            return;
+        }
+        self.aborting = now;
+        if !hard {
+            // The low half only: its pointer bits are ignored while the
+            // ring runs.
+            wr32(self.op, CRCR, CRCR_CA);
+        }
+    }
+
     fn command(&mut self, i: usize, kind: Cmd, param: u64, control: u32) -> u64 {
         let epoch = self.devs[i].as_ref().map_or(0, |d| d.epoch);
         let trb = self.cmd.push(param, 0, control);
+        if control >> 10 & 0x3f == TRB_ADDRESS && STALL_ARMED.swap(false, Ordering::Relaxed) {
+            let p = phys::phys_to_virt(trb) as *mut u32;
+            unsafe { write_volatile(p.add(3), read_volatile(p.add(3)) ^ TRB_CYCLE) };
+            STALLED.store(trb, Ordering::Relaxed);
+        }
         self.cmds.push((trb, i, epoch, kind));
         let now = self.now();
         if let Some(d) = self.devs[i].as_mut() {
@@ -1333,6 +1568,43 @@ impl Ctrl {
     }
 
     fn command_done(&mut self, ev: Event) {
+        if ev.code() == CC_CMD_RING_STOPPED {
+            // After an abort: start the ring again on what is left. A ring
+            // that stopped on the command it was told to abort did not run
+            // it: that command becomes a no-op and fails as aborted, or the
+            // ring would start on it again.
+            crate::println!("{}: command ring stopped", self.name);
+            self.aborting = 0;
+            let mut noop = false;
+            if let Some(n) = self.cmds.iter().position(|c| c.0 == ev.param) {
+                if n == 0 {
+                    noop = true;
+                    let p = phys::phys_to_virt(ev.param) as *mut u32;
+                    unsafe {
+                        let mut cycle = read_volatile(p.add(3)) & TRB_CYCLE;
+                        if STALLED.swap(0, Ordering::Relaxed) == ev.param {
+                            cycle ^= TRB_CYCLE;
+                        }
+                        write_volatile(p, 0);
+                        write_volatile(p.add(1), 0);
+                        write_volatile(p.add(2), 0);
+                        write_volatile(p.add(3), TRB_NOOP_CMD << 10 | cycle);
+                    }
+                    fence(Ordering::SeqCst);
+                    let status = (CC_CMD_ABORTED as u32) << 24;
+                    let ev = Event { param: ev.param, status, control: EV_COMMAND << 10 | ev.control & 0xff00_0000 };
+                    self.command_done(ev);
+                    // The no-op's own completion finds no command.
+                }
+            }
+            if noop || !self.cmds.is_empty() {
+                self.ring_doorbell(0, 0);
+            }
+            return;
+        }
+        if ev.code() == CC_CMD_ABORTED {
+            crate::println!("{}: command aborted", self.name);
+        }
         let Some(n) = self.cmds.iter().position(|c| c.0 == ev.param) else { return };
         let (trb, i, epoch, kind) = self.cmds.remove(n);
         match kind {
@@ -1380,7 +1652,10 @@ impl Ctrl {
         }
         match step {
             Step::EnableSlot => self.address_device(i, ev.slot()),
-            Step::Address => self.get_device_desc8(i),
+            Step::Address => {
+                let now = self.now();
+                self.dev(i).step = Step::Addressed(now + 10);
+            }
             Step::Evaluate => self.get_device_desc(i),
             Step::Configure => self.start_running(i),
             Step::Ep0Reset => {

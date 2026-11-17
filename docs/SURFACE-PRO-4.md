@@ -131,6 +131,154 @@ The SP4 has no serial port. Done (2026-11-15):
   for such keyboards yet. Checked: the parser alone on a keyboard plus
   mouse descriptor (report IDs 1 and 2) and a bitmap keyboard; QEMU's
   boot keyboard and usb-tablet unchanged. Not yet on the Surface.
+- **Boot log on an installed system** (2026-11-16: the system installed
+  from the stick stopped during boot, and there was no BOOT.LOG to read):
+  the installer copies `bootlog` and `bootdiag` from the live stick's
+  `\RS2\CMDLINE` to the installed one, after `root=`. That system then
+  writes `\RS2\BOOT.LOG` on its EFI system partition (the small FAT
+  partition, a drive letter of its own when the live stick is booted).
+  On a system installed before that: boot the stick and
+  `ECHO bootlog>>X:\RS2\CMDLINE`, X: being the drive whose
+  `\RS2\CMDLINE` starts with `root=`.
+- **The previous boot's log** (2026-11-17): bootlog renames the last
+  boot's `\RS2\BOOT.LOG` to `\RS2\BOOTPREV.LOG` before writing this
+  one's, so a boot that went wrong (with the Surface Dock attached, USB
+  stopped working) can be read on the next boot. A boot volume left
+  dirty gets its log only after AUTOCHECK's CHKDSK (the installed
+  CONFIG.SYS checks every drive, the EFI partition too).
+- **Which drive BOOT.LOG goes to** (2026-11-17): bootlog wrote to the
+  first drive holding `\RS2\KERNEL`. Booted from the live stick with
+  rs2 installed on the internal disk, that was the internal EFI
+  partition, not the stick: two live boots replaced the installed
+  system's BOOT.LOG and BOOTPREV.LOG (the log of a boot with the dock was
+  lost so). The drivers now note the partition the firmware booted from
+  (by position and GPT GUID, `drivers::BOOT_DRIVE`) and bootlog writes
+  only there; on a live boot where it is not known, nowhere.
+- **A live boot whose stick dies** (2026-11-17): with the dock, USB stops
+  and the stick with it, so a live boot could keep no log. After three
+  failed saves to the stick (or with no stick drive at all), bootlog
+  writes `\RS2\LIVEBOOT.LOG` (the one before: `LIVEPREV.LOG`) on another
+  drive holding an rs2 kernel, the internal disk's EFI partition. The
+  installed system's BOOT.LOG and BOOTPREV.LOG are not touched.
+- **Surface Dock at boot: all USB stops** (2026-11-17): a text-mode boot
+  with the dock attached ends with `xhci 00:14.0: port 7: timed out (step
+  EnableSlot)` over and over (port 7 is the Type Cover). Commands on the
+  xHCI command ring run one at a time, and rs2 never aborted one: a
+  command the controller does not complete (probably an Address Device
+  to something behind the dock) blocked every later one, so no device
+  could be enumerated. Now a command not completed 5 s after reaching the
+  head of the ring is aborted (CRCR Command Abort; it completes as
+  "command aborted", the ring is restarted on what is left), with a line
+  naming the command type, port and slot; steps waiting behind another
+  command are not timed out.
+  - The dock boot's LIVEBOOT.LOG named it: Address Device (TRB type 11)
+    for root port 14 (a USB 3 port: the dock's USB 3 hub). rs2 did not
+    reset USB 3 ports ("they enable themselves"), so the hub the
+    firmware had already addressed and configured was still in that
+    state. It probably held the SET_ADDRESS off with NRDY, which USB 3
+    allows forever. Every port is now reset before its device is
+    addressed, as Linux does (a hot reset; a warm reset for a USB 3 link
+    left Inactive or in Compliance).
+  - After the abort that boot logged nothing more, and its log stopped
+    at the kernel threads. The ring had also not been handled right if
+    it stopped on the aborted command without running it: it was
+    started again on the same command. That command is now made a
+    No Op and fails as aborted. "command ring stopped" is logged, and
+    the abort line has the root port's PORTSC and CRCR.
+  - The second dock boot (with the port reset) hung the same way: port
+    14 at SuperSpeed, enabled, link in U0 (PORTSC 0x1203), Address
+    Device still not completed. Its log again stopped at the kernel
+    threads, with no line from the abort's aftermath.
+  - `xhcistall` on the command line queues the first Address Device
+    with the wrong cycle bit, so QEMU's controller stops in front of it
+    as in front of a hung command. The watchdog found the ring not
+    running (CRR 0). An abort then has no effect and sends no event, so
+    the controller was given up 5 s later. A ring that is not running
+    is now handled as stopped at once: the command is skipped, it fails
+    as aborted, and the commands behind it run (the keyboard and mouse
+    enumerate).
+  - That dock boot reached the prompt and the desktop: only the log
+    stopped. Both dock LIVEBOOT.LOGs (and the installed system's BOOT.LOG
+    of 2760 bytes) stopped under 4 KB, as if the internal EFI partition
+    were full: the first save fits in one cluster, and growing the file
+    fails. Failed saves were silent. Now the first failure is logged
+    with the error and the volume's free space, and the file keeps the
+    newest lines that fit in the space it already has. Checked in QEMU
+    with an EFI partition filled to 4 KB free: "saving
+    D:\RS2\LIVEBOOT.LOG failed (error 112, 0 KB free)" is in the file.
+  - On the Surface (2026-11-17), installed system at c311c67f, booting
+    with the dock attached: the boot completes, but the Type Cover still
+    does not work. The fixes above are not enough. That boot's
+    BOOT.LOG is needed.
+  - A live dock boot with c311c67f: the abort line reads `root PORTSC
+    0x1203, CRCR 0x8`. The ring is running (CRR 1), unlike in QEMU's
+    stall, so the controller was sent Command Abort. Nothing came back
+    in the 3 s of boot enumeration left: no "ring stopped", and the
+    Type Cover on port 7, queued behind, was never enumerated. With no
+    answer, the controller is given up 5 s after the abort, which alone
+    explains a dead Type Cover. The log again stops at the kernel
+    threads, but with no save failure: the full partition was not the
+    reason (that partition's BOOT.LOG is 7.8 KB). Why later lines do
+    not reach the file is still open.
+  - Now a hung command goes through three steps: (1) its device's root
+    port is disabled (USB 3: link state Disabled; USB 2: PED) and left
+    alone for the rest of the boot; (2) a second later, Command Abort
+    (or the skip, if the ring is not running); (3) if the abort gets no
+    answer within 5 s during boot, the controller is reset and
+    enumerated again without that port. Boot enumeration waits for the
+    steps to finish. After boot, the controller is still given up at
+    (3). `xhcistall=hard` makes the stalled command ignore (1) and (2)
+    in QEMU: the controller is reset, root port 3 is left alone, and
+    the keyboard and mouse enumerate. Plain `xhcistall` still ends at
+    (2) with "command aborted".
+  - Leaving the port alone means the dock's USB 3 hub, and SuperSpeed
+    devices behind it, do not work. Its USB 2 hub is on a USB 2 root
+    port of its own, so slower devices behind the dock may.
+  - On the Surface (2026-11-17), live stick at 58edf14a with the dock
+    attached: **the Type Cover works.** The log is complete and was saved
+    to the stick. Port 14's Address Device hung (CRCR 0x8), disabling
+    the port did not help, and the abort got no answer (`running:
+    true`). The controller was reset with port 14 left alone, and then
+    the stick (port 1) and the Type Cover (port 7) enumerated. After
+    the reset, `port 2: control transfer failed, completion code 4
+    (step DevDesc8)`: a transaction error on the first request, most
+    likely from the dock's USB 2 hub, which the mouse behind the dock
+    hangs off. A failed device was never tried again. A root-port
+    device that fails before it runs is now dropped and found again by
+    the next port scan, from a fresh port reset, up to 2 more times
+    while it stays connected (not on a port left alone). `xhcifail`
+    fails the first device once in QEMU: port 3's stick enumerates on
+    the second try.
+  - With the retry (096dfd0e) on the Surface: the Type Cover works, the
+    mouse behind the dock does not. Port 2 failed `GET_DESCRIPTOR(8)`
+    with a transaction error on all 3 tries, then came back later
+    (disconnected and connected) and failed 3 more times. rs2 sent that
+    first request at once after Address Device. USB 2.0 gives a device
+    2 ms after SET_ADDRESS, and Linux waits 10 ms ("some device
+    hardware wants it"); QEMU does not care. Now the first request
+    waits 10 ms (step Addressed). A root-port failure line also carries
+    PORTSC (speed, link state, enabled), for the next log.
+  - **Working** (2026-11-17, live stick at c64eb097, dock attached): the
+    Type Cover and the mouse behind the dock both work. Port 14 still
+    hangs, and the controller is reset without it (about 11 s more at
+    boot). Port 2 then enumerates on the first try: the dock's USB 2
+    hub 045e:09b3, a second hub 045e:09b4 on 2.1, the mouse 1c59:0027
+    on 2.1.3, and HID interfaces without mouse or keyboard reports on
+    2.3, 2.5 and 2.1.5. The log was written to the end.
+  - Still open: the dock's USB 3 hub (port 14) is left alone, so
+    devices behind the dock run at USB 2 speed at most. Why its Address
+    Device never completes is not known; the controller reset costs
+    about 11 s of boot. The installed system needs this kernel too
+    (`rs2-kernel-c64eb097.elf`).
+- **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
+  volume said nothing between the volume label and its totals, which on
+  the Surface's large C: looked like a boot that stopped. It now prints
+  a line per stage and one every 3 seconds.
+- **Boot watch** (`bootdiag`): if no PM program has the display 60 s
+  after boot (and the boot is not `textmode` or `init=`), the kernel
+  logs the Ctrl+Alt+F12 thread report once, now with the kernel threads
+  (boot, wlan, network, hot-plug...) as well as the processes, so
+  BOOT.LOG shows what the boot waits for.
 - **No UART, no wait**: the kernel log checks COM1's scratch register at
   boot and skips the port when nothing answers. A missing port that reads
   00h made every logged byte wait out the "transmitter empty" timeout.
@@ -329,17 +477,19 @@ rest from `net::wlan::mac`:
 
 ```rust
 pub trait WlanDriver: Send + Sync {
-    fn caps(&self) -> WlanCaps;           // bands, ciphers, full/soft MAC, hw crypto
+    fn name(&self) -> String;
+    fn caps(&self) -> WlanCaps;           // bands, full/soft MAC (later: ciphers, hw crypto)
     fn mac_address(&self) -> [u8; 6];
-    fn scan(&self, req: &ScanRequest) -> Result<(), WlanError>;  // results arrive as events
-    fn connect(&self, bss: &Bss, ies: &[u8]) -> Result<(), WlanError>; // full MAC
-    fn disconnect(&self, reason: u16);
-    fn set_key(&self, key: &Key) -> Result<(), WlanError>; // pairwise/group, CCMP/TKIP
-    fn send(&self, frame: &[u8]) -> bool; // 802.3 frames (EAPOL included)
-    fn poll_events(&self, f: &mut dyn FnMut(WlanEvent)); // scan result, associated, deauth, rx frame
-    // soft MAC only:
-    fn set_channel(&self, _ch: Channel) -> Result<(), WlanError> { Err(WlanError::Unsupported) }
-    fn tx_raw(&self, _frame: &[u8]) -> bool { false }
+    fn start(&self) -> Result<String, WlanError>; // firmware, init; on the wlan thread
+    fn scan(&self, req: &ScanRequest) -> Result<Vec<Bss>, WlanError>; // blocks a few seconds
+    fn diagnostics(&self) -> Vec<(String, String)>; // for WIFI STATUS
+    // next rounds:
+    // fn connect(&self, bss: &Bss, ies: &[u8]) -> Result<(), WlanError>; // full MAC
+    // fn disconnect(&self, reason: u16);
+    // fn set_key(&self, key: &Key) -> Result<(), WlanError>; // pairwise/group, CCMP/TKIP
+    // fn send(&self, frame: &[u8]) -> bool; // 802.3 frames (EAPOL included)
+    // fn poll_events(&self, f: &mut dyn FnMut(WlanEvent)); // associated, deauth, rx frame
+    // soft MAC only: set_channel, tx_raw
 }
 ```
 
@@ -349,6 +499,181 @@ just its transport and command set, and the first soft-MAC chip adds
 the MAC layer once for all later ones. The supplicant and the 802.11
 element parsing live in `crates/wlan` and are tested on the host against
 the IEEE 802.11 test vectors and `hostapd` captures.
+
+### Status (2026-11-16): round 1, firmware and scan
+
+Works on the Surface Pro 4 (2026-11-16, live stick of commit ae8f0384):
+the firmware loads and `WIFI SCAN` lists the nearby networks. What it
+consists of:
+
+- `crates/wlan` (host tests: `cargo test -p wlan`): 802.11 elements and
+  `Bss` (SSID, channel, RSSI, RSN/WPA security), `WIFI.CFG` profiles,
+  and Marvell's host command format (`wlan::mwifiex`: framing,
+  PCIE_DESC_DETAILS, GET_HW_SPEC, legacy and extended scan commands and
+  their results).
+- `kernel/src/net/wlan`: the trait above (its first half), the adapters,
+  a `wlan` kernel thread started after CONFIG.SYS is read that starts
+  each chip, reads `\MPTN\ETC\WIFI.CFG` and scans once, logging every
+  network found.
+- `kernel/src/drivers/mwifiex.rs`: the 88W8897 (11AB:2B38). Firmware
+  from `C:\RS2\FIRMWARE\PCIE8897.BIN` (xtask fetches
+  `mrvl/pcie8897_uapsta.bin` from linux-firmware into `work/firmware`;
+  Marvell's licence, which allows binary redistribution, is
+  `RS2\FIRMWARE\MARVELL.TXT` from `dist/firmware/`), then
+  PCIE_DESC_DETAILS, FUNC_INIT, GET_HW_SPEC, RECONFIGURE_TX_BUFF,
+  MAC_CONTROL. Scans with the legacy command, four channels at a time
+  (2.4 GHz 1-11 active, 12-13 passive; 5 GHz 36-48 active, the rest
+  passive), and falls back to SCAN_EXT (results as events, what Linux
+  uses on this chip) if the firmware refuses it or it finds nothing.
+  Interrupts are not used yet: the driver polls the host interrupt
+  status while it waits for a command.
+- RS2API 620-622 (`kernel/src/api/wlan.rs`) and `WIFI.EXE`
+  (`userland/netapps/src/bin/wifi.rs`): `WIFI STATUS`, `WIFI SCAN`,
+  `WIFI LIST`, `WIFI RELOAD`.
+
+Testing on the Surface: boot the live stick with `bootlog`, wait for the
+desktop, then either open a command prompt and run `WIFI STATUS` and
+`WIFI SCAN`, or read `BOOT.LOG` afterwards: the lines starting
+`88W8897` and `wlan0` show each start-up step (BAR, revision, firmware
+status, the firmware blocks sent, each command), the first scan per
+channel group, and the networks found.
+
+### Status (2026-11-16): round 2, joining networks (WPA2-PSK)
+
+Written, not yet run on the chip:
+
+- `crates/wlan`: `crypto` (SHA-1, HMAC-SHA1, PBKDF2, the 802.11 PRF,
+  AES-128, RFC 3394 key wrap; FIPS/RFC/Annex J vectors) and `wpa`, the
+  supplicant: 4-way handshake and group rekeying for WPA2-PSK with CCMP
+  pairwise (TKIP or CCMP group), checked against a test authenticator,
+  with replay, MIC and RSN-element checks and no key reinstallation.
+  `mwifiex` gained ASSOCIATE, DEAUTHENTICATE, KEY_MATERIAL (both
+  layouts, chosen by the key API version GET_HW_SPEC reports), the TxPD
+  and received data (RxPD, 802.3 + SNAP to Ethernet II).
+- The driver: the transmit ring (under its own lock, so the network
+  thread never waits behind a scan), received frames, association, keys,
+  link events, and MSI waking the wlan thread (it also polls every 5 ms,
+  in case MSI does not arrive: `WIFI STATUS` shows `interrupts=`).
+- `net::wlan`: a connection manager on the wlan thread. It joins the
+  network from `WIFI CONNECT`, else the first network of WIFI.CFG in
+  range; open and WPA2-Personal (also WPA2/WPA3 transition networks)
+  work, WEP, WPA1, WPA3-only, Enterprise and networks that require
+  protected management frames are refused with a reason. It runs the
+  supplicant on EAPOL frames, installs the keys (message 4 is flushed
+  before the pairwise key goes in, so it leaves unencrypted), and retries
+  with growing pauses after failures or a lost link. Each adapter is a
+  `net::Nic` (an `eth`N interface) registered once the chip is up; its
+  link is up only while associated and keyed, so DHCP runs then.
+- RS2API 623/624 and `WIFI CONNECT ssid [passphrase]` (saves the
+  network first in WIFI.CFG, then follows the state until connected or
+  failed), `WIFI DISCONNECT`, `WIFI FORGET ssid`. The passphrase is kept
+  in the system keychain (docs/KEYCHAIN.md), encrypted and out of
+  programs' reach, not in WIFI.CFG; a `PASSPHRASE=` line found in
+  WIFI.CFG is moved there. On the live stick C: is a RAM disk, so
+  WIFI.CFG and the keychain do not survive a reboot there; on an
+  installed system they do.
+- Not yet: 802.11n/ac (association offers legacy rates only, up to
+  54 Mbit/s), power saving (kept off on purpose), hidden networks, roaming
+  between access points of one network, a PM applet.
+
+First try on the Surface: association worked, but the AP gave up the
+4-way handshake (deauthenticated, reason 15) because no frame ever left.
+The 88W8897's transmit read pointer starts at 0 with the rollover bit
+set; rs2 compared it the other way, so the first reclaim took back all
+32 slots and the ring looked full from then on, and WPA2 message 2 was
+refused. Fixed in b5ae0880 (frames in flight counted, at most 31), not
+yet tried on the chip. WiFi log lines are also kept in memory since
+then: `WIFI STATUS` shows the last 40, and a failed `WIFI CONNECT`
+prints the frame counts and what happened.
+
+Second try (b5ae0880, then 4384d6fc with every received packet logged):
+still reason 15, and no WPA2 message was logged. The AP's message 1 did
+arrive, three or four times per try: 113 bytes (an Ethernet II header
+and a 99-byte EAPOL-Key), RxPD type 2, offset 90. The parser took only
+RxPD type 0 as data and dropped them. Linux handles every type but
+A-MSDU (3), BAR (0x0a) and management (0xe5) as an ordinary frame; rs2
+now does too (A-MSDUs are not taken apart yet; they come only with
+802.11n, which rs2 does not offer).
+
+**Works** (2026-11-17, live stick at f46ac952): `WIFI CONNECT` joined
+a WPA2 network on 5 GHz (channel 136, -63 dBm) at the first try, the
+4-way handshake completed (messages 1-4), `eth0` came up and DHCP got a
+lease (address, gateway and DNS). Encrypted frames therefore go both
+ways (CCMP in the firmware, keys from KEY_MATERIAL v2). 802.11n/ac
+and a PM window followed (round 3, below). The keychain and WIFI.CFG on
+the live stick last until reboot only.
+
+Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
+`IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
+on lines starting `wlan0` and `88W8897` (key API version, association
+result, handshake failures).
+
+### Round 3: 802.11n and 802.11ac (written 2026-11-17, not yet run on the chip)
+
+Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
+`11n_rxreorder.c`, `11n_aggr.c`):
+
+- GET_HW_SPEC's 802.11n/ac capability words and stream count become
+  `wlan::mwifiex::Caps`; the log says what the chip offers ("802.11n
+  (2 stream(s), 20/40 MHz) and 802.11ac"). 11N_CFG at start-up lets
+  the firmware send at HT rates.
+- ASSOCIATE to a network that has them adds HT Capabilities (the
+  chip's), the channel with its secondary channel for 40 MHz, the
+  network's 20/40 coexistence and extended capabilities, VHT
+  Capabilities and Operation (at most 80 MHz unless the chip says
+  more), operating mode notification, and the WMM information element
+  (802.11n needs QoS). A network that refuses that association is
+  joined again at legacy rates. `associated as 802.11ac` (or n, a, g)
+  is logged, and `WIFI STATUS` shows `standard=`.
+- Block-ack sessions the AP asks for (EVENT_ADDBA) are accepted
+  (11N_ADDBA_RSP, window 32). Received frames to us of such a traffic
+  class go through a reorder window (`wlan::reorder`): duplicates and
+  old frames are dropped, a gap is skipped after 50 ms, a Block Ack
+  Request moves the window, DELBA or a timeout ends it.
+- A-MSDUs (RxPD type 0xe6) are split into their frames; BARs are 0xe7.
+- Host tests use the Surface's own capability words.
+
+Not done: transmit aggregation (A-MPDU/A-MSDU from rs2), power saving,
+roaming, hidden networks.
+
+### The WiFi window (WIFIPM.EXE)
+
+`C:\OS2\WIFIPM.EXE` (userland/wifipm) is the Presentation Manager
+counterpart of WIFI.EXE, on the same calls (RS2API 620-624, the
+keychain's 630 and 633). Its object, **WiFi**, is in the System Setup
+folder next to Display (`<RS2_WIFI>`; desktop version 17 adds it to
+existing desktops); from a command prompt, `START WIFIPM` or just
+`WIFIPM`. One window:
+
+- Connection: the adapter, the state (disconnected, joining, checking
+  the passphrase, connected, or failed with the kernel's reason while
+  it keeps trying), the network's signal (dBm and a word for it),
+  channel, security and the standard the link runs (802.11ac, n, a or
+  g), and the IP address of the adapter's interface
+  (found by its MAC address; "Waiting for DHCP..." until the lease).
+  Read again every 3 seconds; a line under it says what the last action
+  did.
+- Networks: one line per SSID (its strongest access point), strongest
+  first, with signal bars, the security and "Saved", "Joining" or
+  "Connected". Hidden networks are left out and counted in the heading.
+  The list shows the last scan's results at once and starts a new scan
+  (on a second thread: the window stays usable); Scan does it again.
+- Connect (or a double click): an open network is joined at once; a
+  WPA2 network not saved yet, or saved without a passphrase in the
+  keychain, first asks for its passphrase (8-63 characters, typed as
+  asterisks). As WIFI CONNECT, the network goes first in WIFI.CFG and
+  the kernel keeps the passphrase in the keychain; the status then
+  follows the join. WEP, WPA1, WPA3-only and Enterprise networks get a
+  "not supported" message.
+- Disconnect (as WIFI DISCONNECT); Forget (asks first) removes the
+  selected saved network from WIFI.CFG and its passphrase from the
+  keychain, and leaves it when connected to it.
+
+Without an adapter (QEMU has none) it says "No WiFi adapter found" and
+offers only Close. On the serial port it writes one line, `[wifipm]
+started: ...`, with what it found. `WIFIPM /DEMO` shows made-up networks
+and a connection without asking the kernel (to try the window in QEMU;
+its Connect, Disconnect and Forget only say what they would do).
 
 ### The first driver: Marvell 88W8897
 

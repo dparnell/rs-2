@@ -66,6 +66,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "keychain"
+version = "0.1.0"
+dependencies = [
+ "rs2crypto",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -164,12 +171,19 @@ dependencies = [
  "fat",
  "hpfs",
  "jfs",
+ "keychain",
  "os2-exe",
  "parport",
  "pathcache",
+ "rs2crypto",
  "smb",
  "tcpip",
+ "wlan",
 ]
+
+[[package]]
+name = "rs2crypto"
+version = "0.1.0"
 
 [[package]]
 name = "smb"
@@ -207,6 +221,13 @@ name = "winhlp"
 version = "0.1.0"
 dependencies = [
  "ipf",
+]
+
+[[package]]
+name = "wlan"
+version = "0.1.0"
+dependencies = [
+ "rs2crypto",
 ]
 
 [[package]]

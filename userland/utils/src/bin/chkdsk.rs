@@ -316,6 +316,46 @@ fn list<D: fat::BlockDevice>(vol: &fat::Volume<D>, letter: char, dir: &fat::Entr
     }
 }
 
+fn ms() -> u32 {
+    let mut t = 0u32;
+    unsafe { os2::DosQuerySysInfo(14, 14, &mut t, 4) };
+    t
+}
+
+/// Progress lines while the HPFS check runs (not for /P): a check of a
+/// large volume takes minutes and would otherwise say nothing, which at
+/// boot (/AUTOCHECK) looks like a hang. A line when a stage starts, then
+/// at most one every few seconds.
+fn hpfs_progress() -> impl FnMut(hpfs::CheckProgress) {
+    use hpfs::CheckProgress as P;
+    let mut stage = 0u8;
+    let mut last = ms();
+    move |p: P| {
+        if pm() {
+            return;
+        }
+        let now = ms();
+        let (st, due) = match p {
+            P::Tree { .. } => (1, now.wrapping_sub(last) >= 3000),
+            P::Bitmaps { done, total } => (2, now.wrapping_sub(last) >= 3000 || done == total),
+            P::Repair { .. } => (3, false),
+        };
+        let first = st != stage;
+        if !first && !due {
+            return;
+        }
+        stage = st;
+        last = now;
+        match p {
+            P::Tree { .. } if first => outln("CHKDSK is checking the directories and files..."),
+            P::Tree { dirs, files } => outln(&alloc::format!("  {dirs} directories and {files} files so far")),
+            P::Bitmaps { .. } if first => outln("CHKDSK is comparing the allocation bitmaps..."),
+            P::Bitmaps { done, total } => outln(&alloc::format!("  {}% done", (done as u64 * 100 / total.max(1) as u64))),
+            P::Repair { wrong } => outln(&alloc::format!("CHKDSK is correcting {wrong} allocation errors...")),
+        }
+    }
+}
+
 fn check_hpfs(d: u8, fix: bool, verbose: bool) -> u32 {
     let disk = match Disk::open(d, fix) {
         Ok(x) => x,
@@ -342,7 +382,7 @@ fn check_hpfs(d: u8, fix: bool, verbose: bool) -> u32 {
     }
     // The allocation check (and with /F the repair): bitmaps against what
     // the directory tree owns, the dirty flag.
-    let checked = vol.check(fix);
+    let checked = vol.check_with(fix, &mut hpfs_progress());
     let letter = (b'A' + d) as char;
     let problems;
     match &checked {

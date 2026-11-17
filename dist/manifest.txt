@@ -23,6 +23,9 @@ dist/etc/PROTOCOL -> MPTN\ETC\PROTOCOL
 dist/etc/NETWORKS -> MPTN\ETC\NETWORKS
 dist/etc/RPC -> MPTN\ETC\RPC
 dist/etc/LMHOSTS -> MPTN\ETC\LMHOSTS
+# The licence of the WiFi firmware xtask fetches from linux-firmware
+# (RS2\FIRMWARE\PCIE8897.BIN, the Marvell 88W8897's).
+dist/firmware/MARVELL.TXT -> RS2\FIRMWARE\MARVELL.TXT
 # The LAN requester's settings (docs/LAN.md).
 dist/ibmlan/IBMLAN.INI -> IBMLAN\IBMLAN.INI
 # The Liberation fonts (SIL Open Font License 1.1, PSFONTS\LIBERATN.TXT):

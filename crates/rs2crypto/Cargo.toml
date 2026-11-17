@@ -1,0 +1,8 @@
+[package]
+name = "rs2crypto"
+description = "no_std SHA-1, HMAC, PBKDF2, the 802.11 PRF, AES-128 (block, CTR, RFC 3394 key wrap): WPA2-Personal and the system keychain"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

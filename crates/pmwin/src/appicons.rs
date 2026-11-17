@@ -259,6 +259,18 @@ fn draw(name: &str, size: i32) -> Option<Image> {
             p.rect(14.0, 15.0, 24.0, 24.0, WHITE);
             p.rect(14.0, 22.5, 24.0, 24.0, NAVY);
         }
+        // WiFi: a dot and three arcs of radio waves above it.
+        "WIFIPM" => {
+            // Unit vectors from 45 to 135 degrees.
+            const ARC: [(f64, f64); 7] = [(0.7071, 0.7071), (0.5, 0.866), (0.2588, 0.9659), (0.0, 1.0), (-0.2588, 0.9659), (-0.5, 0.866), (-0.7071, 0.7071)];
+            let (cx, cy) = (16.0, 6.0);
+            for (r, w) in [(8.0, 3.0), (14.0, 3.0), (20.0, 3.0)] {
+                for s in ARC.windows(2) {
+                    p.line((cx + r * s[0].0, cy + r * s[0].1), (cx + r * s[1].0, cy + r * s[1].1), w, BLUE);
+                }
+            }
+            p.disc(cx, cy + 0.5, 3.0, BLUE, BLUE);
+        }
         _ => return None,
     }
     Some(p.img)
@@ -267,7 +279,7 @@ fn draw(name: &str, size: i32) -> Option<Image> {
 /// The names of the programs with an icon here.
 pub const PROGRAMS: &[&str] = &[
     "CLIPOS2", "MPCPUMON", "PMCHKDSK", "PMFORMAT", "PICVIEW", "PMSEEK", "PKGMGR", "ICONEDIT", "GLOCALE", "KLONDIKE", "MAHJONGG", "OS2CHESS", "MPPM", "WEPM",
-    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY", "WEB", "WEBTEXT",
+    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY", "WEB", "WEBTEXT", "WIFIPM",
 ];
 
 /// Program `name`'s icon as an OS/2 icon file (32 x 32 and 16 x 16).

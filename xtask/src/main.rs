@@ -5,7 +5,7 @@
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [--desktop]
 //!                  [--type KEYS | --type-file FILE] [--type-at S]
 //!                  [--hdd IMG] [--nvme IMG] [--floppy IMG|empty]... [--usb-kbd] [--usb-mouse] [--usb-tablet] [--usb-disk IMG]...
-//!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [--usb-hub]... [--boot-hdd] [--boot-usb] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
@@ -144,6 +144,9 @@ struct Opts {
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
     boot_hdd: bool,
+    /// `run`: the firmware boots the first --usb-disk (before the --nvme
+    /// or --hdd disk, which may hold an installed system).
+    boot_usb: bool,
     /// Build the distributable system (no development files).
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
@@ -226,6 +229,7 @@ fn parse(args: &[String]) -> Opts {
         mem: "512M".into(),
         system: false,
         boot_hdd: false,
+        boot_usb: false,
         dist: false,
         hpfs: false,
         fat32: false,
@@ -301,6 +305,7 @@ fn parse(args: &[String]) -> Opts {
             }
             "--system" => o.system = true,
             "--boot-hdd" => o.boot_hdd = true,
+            "--boot-usb" => o.boot_usb = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
             "--fat32" => o.fat32 = true,
@@ -594,6 +599,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
         files.extend(userland);
         files.extend(win16_tests());
         files.extend(four_os2(o.dist)?);
+        files.extend(firmware());
         if !o.dist {
             files.extend(dos_tests());
         }
@@ -768,6 +774,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("talk", "OS2\\TALK.EXE"),
         ("talkd", "OS2\\TALKD.EXE"),
         ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
+        ("wifi", "OS2\\WIFI.EXE"),
+        ("wifipm", "OS2\\WIFIPM.EXE"),
+        ("keychain", "OS2\\KEYCHAIN.EXE"),
         ("net", "OS2\\NET.EXE"),
         ("lantest", "RS2\\LANTEST.EXE"),
         ("netapi32", "OS2\\DLL\\NETAPI32.DLL"),
@@ -923,7 +932,7 @@ const APP_DATA: &[(&str, &str)] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmslow", "pmbench", "pmviowin", "rs2shell", "e", "view", "winhelp", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "vmagent", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmslow", "pmbench", "pmviowin", "rs2shell", "e", "view", "winhelp", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "vmagent", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell", "wifipm"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -1237,6 +1246,48 @@ fn dos_tests() -> image::FileList {
     v
 }
 
+/// Firmware for the WiFi chips rs2 drives, from linux-firmware (not in
+/// the repository: fetched into work/firmware on first use). Missing
+/// files only mean that chip cannot start.
+const FIRMWARE: &[(&str, &str, &str)] = &[(
+    "pcie8897_uapsta.bin",
+    "mrvl/pcie8897_uapsta.bin",
+    "RS2\\FIRMWARE\\PCIE8897.BIN",
+)];
+
+fn firmware() -> image::FileList {
+    let dir = root().join("work/firmware");
+    let _ = std::fs::create_dir_all(&dir);
+    let mut v = Vec::new();
+    for (name, upstream, dest) in FIRMWARE {
+        let path = dir.join(name);
+        // A real image starts with a download command (01 00 00 00), not
+        // an HTML error page.
+        let valid = |p: &Path| std::fs::read(p).is_ok_and(|b| b.len() > 65536 && b[..4] == [1, 0, 0, 0]);
+        if !valid(&path) {
+            for base in [
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/",
+                "https://gitlab.com/kernel-firmware/linux-firmware/-/raw/main/",
+            ] {
+                eprintln!("fetching {upstream} from linux-firmware");
+                let tmp = dir.join(format!("{name}.part"));
+                let ok = Command::new("curl").args(["-sSfL", "--retry", "2", "-o"]).arg(&tmp).arg(format!("{base}{upstream}")).status().is_ok_and(|s| s.success());
+                if ok && valid(&tmp) {
+                    let _ = std::fs::rename(&tmp, &path);
+                    break;
+                }
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+        if valid(&path) {
+            v.push((path, dest.to_string()));
+        } else {
+            eprintln!("warning: no {upstream} (WiFi on that chip will not start)");
+        }
+    }
+    v
+}
+
 /// The Windows 3.x test programs (userland/win16test, built with Open
 /// Watcom when it is installed) as C:\\RS2\\*.EXE.
 fn win16_tests() -> image::FileList {
@@ -1431,7 +1482,8 @@ fn usb_devices(o: &Opts, c: &mut Command) {
     }
     for (n, d) in o.usb_disks.iter().enumerate() {
         c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
-        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
+        let boot = if n == 0 && o.boot_usb { ",bootindex=0" } else { "" };
+        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}{boot}", port()));
     }
 }
 

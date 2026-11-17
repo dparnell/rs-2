@@ -28,6 +28,7 @@ mod fs;
 mod infoseg;
 mod irq;
 mod kbd;
+mod keychain;
 mod klog;
 mod loader;
 mod lockdep;
@@ -158,6 +159,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     fs::cache::start();
     bench::start(cmdline);
     klog::start_bootlog();
+    klog::start_boot_watch();
     crash::start_test();
     bootdiag::stage("kernel threads");
     // CONFIG.SYS and the first programs on a kernel thread of their own:
@@ -245,6 +247,7 @@ pub mod boot {
             crate::fs::set_libpath(lp);
         }
         start_network(cmdline, cfg.network.as_deref());
+        crate::net::wlan::start();
         crate::bootdiag::stage("network");
         let mut env = default_env();
         for e in &cfg.env {
