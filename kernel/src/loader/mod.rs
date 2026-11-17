@@ -316,6 +316,16 @@ pub fn find_loaded_path(path: &str) -> Option<Arc<Module>> {
     REGISTRY.lock().modules.iter().find(|m| m.is_dll && same(&m.path)).cloned()
 }
 
+/// A running program's executable by the path of its file, the newest
+/// when several processes run it.
+pub fn find_loaded_exe_path(path: &str) -> Option<Arc<Module>> {
+    let same = |m: &str| m.len() == path.len() && m.bytes().zip(path.bytes()).all(|(x, y)| {
+        let f = |c: u8| if c == b'/' { b'\\' } else { c.to_ascii_uppercase() };
+        f(x) == f(y)
+    });
+    REGISTRY.lock().modules.iter().rev().find(|m| !m.is_dll && same(&m.path)).cloned()
+}
+
 /// Every module loaded in the system (DosQuerySysState).
 pub fn all_modules() -> Vec<Arc<Module>> {
     REGISTRY.lock().modules.clone()

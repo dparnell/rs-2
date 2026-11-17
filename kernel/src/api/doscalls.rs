@@ -1056,9 +1056,13 @@ fn dos16_get_mod_name(c: &mut Ctx) -> u32 {
     0
 }
 
+fn find_module(name: &str) -> Option<alloc::sync::Arc<loader::Module>> {
+    let m = if name.contains(['\\', '/', ':']) { loader::find_loaded_path(name).or_else(|| loader::find_loaded_exe_path(name)) } else { None };
+    m.or_else(|| loader::find_loaded(&loader::module_name(name)))
+}
+
 fn find_module_handle(name: &str) -> Option<u16> {
-    let m = if name.contains(['\\', '/', ':']) { loader::find_loaded_path(name) } else { None };
-    m.or_else(|| loader::find_loaded(&loader::module_name(name))).map(|m| m.hmte)
+    find_module(name).map(|m| m.hmte)
 }
 
 /// A loaded module's handle if the calling process uses it (its program,
@@ -1069,7 +1073,7 @@ fn find_module_handle_here(c: &Ctx, name: &str) -> Option<u16> {
 }
 
 /// DosQueryModuleHandle / DosGetModHandle: the handle of a module loaded
-/// anywhere in the system, as IBM's kernel answers it (w_getmodhandle:
+/// anywhere in the system (a DLL, or a running program's executable), as IBM's kernel answers it (w_getmodhandle:
 /// ldrFindModule walks the global module list and does not ask whether
 /// the caller uses the module). On OS/2 a DLL's code is in the shared
 /// arena, so callers use such a handle without loading the module (IBM's
@@ -1079,12 +1083,30 @@ fn find_module_handle_here(c: &Ctx, name: &str) -> Option<u16> {
 /// (mapped, its initialisation run, kept until the process ends).
 fn query_module_handle(c: &mut Ctx, pname: u32, phmod: u32) -> u32 {
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_PARAMETER };
+    // The caller's own program before another process's run from the
+    // same file.
+    let own = &c.process.exe;
+    let mine = if name.contains(['\\', '/', ':']) {
+        own.path.replace('/', "\\").eq_ignore_ascii_case(&name.replace('/', "\\"))
+    } else {
+        own.name.eq_ignore_ascii_case(&loader::module_name(&name))
+    };
+    if mine {
+        let h = own.hmte;
+        if c.is16 { c.write_u16(phmod, h) } else { c.write_u32(phmod, h as u32) };
+        return 0;
+    }
     if let Some(h) = find_module_handle_here(c, &name) {
         if c.is16 { c.write_u16(phmod, h) } else { c.write_u32(phmod, h as u32) };
         return 0;
     }
-    if find_module_handle(&name).is_none() {
-        return err::MOD_NOT_FOUND;
+    let Some(m) = find_module(&name) else { return err::MOD_NOT_FOUND };
+    // Another process's program: its handle, as IBM's answers it (Turbo
+    // Debugger's TDOS2 gets the MTE of the program it debugs so, for
+    // DosDebug's DBG_C_NumToAddr); there is nothing to load.
+    if !m.is_dll {
+        if c.is16 { c.write_u16(phmod, m.hmte) } else { c.write_u32(phmod, m.hmte as u32) };
+        return 0;
     }
     super::module::load(c, 0, 0, pname, phmod)
 }

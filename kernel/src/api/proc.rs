@@ -208,13 +208,17 @@ pub fn dos_wait_child(c: &mut Ctx) -> u32 {
                 None => return err::CHILD_NOT_COMPLETE,
             }
         } else {
-            let mut got = None;
+            // A child started with EXEC_ASYNC keeps no result: it leaves
+            // the table when it ends, and the wait ends with it.
+            let (mut got, mut gone) = (None, false);
             c.process.child_waiters.wait_until(None, || {
                 got = done();
-                got.is_some()
+                gone = got.is_none() && children().is_empty();
+                got.is_some() || gone
             });
             match got {
                 Some(p) => p,
+                None if gone => return if pid == 0 { err::WAIT_NO_CHILDREN } else { err::INVALID_PROCID },
                 None => return err::INTERRUPT,
             }
         };

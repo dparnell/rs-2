@@ -101,6 +101,7 @@ fn main(s: &Startup) -> u32 {
     nls();
     console::run();
     killed_sync_parent();
+    other_program_handle();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -1018,6 +1019,44 @@ fn killed_sync_parent() {
     }
     check(&alloc::format!("a child started with EXEC_SYNC runs on when its parent is killed (exec {rc}, kill {krc})"), rc == 0 && krc == 0 && ok);
     let _ = unsafe { DosDelete(b"C:\\ORPHAN.OK\0".as_ptr()) };
+}
+
+/// DosQueryModuleHandle of a program another process runs: its handle,
+/// as IBM's kernel finds it in the global module list (Borland's TDOS2
+/// asks so for the program it debugs, for DosDebug's DBG_C_NumToAddr; rs2
+/// tried to load the program as a DLL, ERROR_INVALID_MODULETYPE). The
+/// caller's own program is its own handle.
+fn other_program_handle() {
+    let (path, _) = self_args(b"");
+    let copy = b"C:\\APICOPY.EXE\0";
+    let crc = unsafe { DosCopy(path.as_ptr(), copy.as_ptr(), 1) };
+    let mut args = [0u8; 40];
+    args[..14].copy_from_slice(b"C:\\APICOPY.EXE");
+    args[15..21].copy_from_slice(b"orphan");
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { DosExecPgm(null_mut(), 0, 1, args.as_ptr(), null(), &mut res, copy.as_ptr()) };
+    let mut h = 0;
+    let qrc = unsafe { DosQueryModuleHandle(b"c:\\apicopy.exe\0".as_ptr(), &mut h) };
+    let mut name = [0u8; 260];
+    let nrc = unsafe { DosQueryModuleName(h, 260, name.as_mut_ptr()) };
+    let named = name.iter().position(|&c| c == 0).is_some_and(|n| name[..n].eq_ignore_ascii_case(b"C:\\APICOPY.EXE"));
+    let (mut tib, mut pib) = (null_mut(), null_mut());
+    unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
+    let mut own = 0;
+    let orc = unsafe { DosQueryModuleHandle(path.as_ptr(), &mut own) };
+    check(
+        &alloc::format!("DosQueryModuleHandle of a program another process runs (copy {crc}, exec {rc}, query {qrc}, name {nrc}), of the caller's own ({orc})"),
+        crc == 0 && rc == 0 && qrc == 0 && nrc == 0 && named && h != unsafe { (*pib).hmte } && orc == 0 && own == unsafe { (*pib).hmte },
+    );
+    // EXEC_ASYNC keeps no result: waiting for the child ends when it does,
+    // with ERROR_INVALID_PROCID (rs2 waited for ever).
+    let (child, mut pid) = (res.code_terminate, 0);
+    let wrc = unsafe { DosWaitChild(0, 0, &mut res, &mut pid, child) };
+    check(&alloc::format!("DosWaitChild for a child started with EXEC_ASYNC ends with it ({wrc})"), wrc == 303);
+    unsafe {
+        DosDelete(copy.as_ptr());
+        DosDelete(b"C:\\ORPHAN.OK\0".as_ptr());
+    }
 }
 
 fn exit_list() {
