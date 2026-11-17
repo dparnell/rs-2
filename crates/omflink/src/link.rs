@@ -213,8 +213,8 @@ pub struct Linker<'h> {
 pub struct Lib {
     pub path: String,
     pub data: Vec<u8>,
-    /// Symbol key -> module offset in the file.
-    pub index: BTreeMap<String, usize>,
+    /// The modules in file order: offset and the names they define.
+    pub modules: Vec<(usize, Vec<String>)>,
     pub loaded: Vec<usize>,
     /// Default library (named by an object), searched after the others.
     pub default: bool,
@@ -476,7 +476,7 @@ impl<'h> Linker<'h> {
             }
         };
         let case = self.case();
-        let mut index = BTreeMap::new();
+        let mut modules = Vec::new();
         for &off in &lib.modules {
             let Ok(o) = Object::parse(&data[off..]) else { continue };
             let names = o
@@ -487,11 +487,9 @@ impl<'h> Linker<'h> {
                 .chain(o.impdefs.iter().map(|i| &i.internal))
                 .chain(o.comdats.iter().filter(|c| !c.local && !c.continuation).map(|c| &c.name))
                 .chain(o.aliases.iter().map(|a| &a.0));
-            for n in names {
-                index.entry(key(n, case)).or_insert(off);
-            }
+            modules.push((off, names.map(|n| key(n, case)).collect()));
         }
-        self.libs.push(Lib { path, data, index, loaded: Vec::new(), default });
+        self.libs.push(Lib { path, data, modules, loaded: Vec::new(), default });
         true
     }
 
@@ -528,13 +526,37 @@ impl<'h> Linker<'h> {
         loop {
             let mut progress = false;
             for li in 0..self.libs.len() {
+                // Passes over the library (as IBM's linkers do): the modules
+                // defining the symbols undefined when the pass starts are
+                // loaded in file order; until a pass loads nothing.
+                let mut mi = 0;
+                let mut pass_progress = false;
+                let mut wanted_now: Vec<String> = self.undefined().iter().map(|&s| key(&self.syms[s].name, case)).collect();
+                wanted_now.sort();
                 loop {
-                    let und = self.undefined();
-                    let hit = und.iter().find_map(|&s| {
-                        let k = key(&self.syms[s].name, case);
-                        self.libs[li].index.get(&k).copied().filter(|o| !self.libs[li].loaded.contains(o))
+                    if mi >= self.libs[li].modules.len() {
+                        if !pass_progress {
+                            break;
+                        }
+                        mi = 0;
+                        pass_progress = false;
+                        wanted_now = self.undefined().iter().map(|&s| key(&self.syms[s].name, case)).collect();
+                        wanted_now.sort();
+                        continue;
+                    }
+                    let off = self.libs[li].modules[mi].0;
+                    mi += 1;
+                    if self.libs[li].loaded.contains(&off) {
+                        continue;
+                    }
+                    let wanted = self.libs[li].modules[mi - 1].1.iter().any(|k| {
+                        wanted_now.binary_search(k).is_ok()
+                            && self.symtab.get(k).is_some_and(|&s| matches!(self.syms[s].def, SymDef::Undefined))
                     });
-                    let Some(off) = hit else { break };
+                    if !wanted {
+                        continue;
+                    }
+                    pass_progress = true;
                     self.libs[li].loaded.push(off);
                     match Object::parse(&self.libs[li].data[off..]) {
                         Ok(o) => {
@@ -820,7 +842,7 @@ pub fn link(l: &mut Linker) -> Option<Linked> {
     l.place_comdats();
     // Linker-defined symbols of DOSSEG programs.
     let order0 = segment_order(l);
-    if l.dosseg && !l.opt.lx {
+    if l.dosseg {
         for (name, class) in [("_edata", "BSS"), ("_end", "STACK")] {
             let s = l.sym(name);
             if matches!(l.syms[s].def, SymDef::Undefined) {
@@ -1154,6 +1176,13 @@ impl<'a, 'h> Fixer<'a, 'h> {
     /// The frame's (unit, offset) for 16-bit offsets; None for no frame or
     /// FLAT.
     fn frame_base(&self, m: usize, f: &Frame, t: &Target, loc: Option<(usize, u32)>) -> Option<(usize, u32)> {
+        let fb = self.frame_base16(m, f, t, loc);
+        // LX: a frame other than FLAT is the whole object its target is in
+        // (offsets count from the object's start, as IBM's LINK386 has it).
+        if self.l.opt.lx { fb.map(|(u, _)| (u, 0)) } else { fb }
+    }
+
+    fn frame_base16(&self, m: usize, f: &Frame, t: &Target, loc: Option<(usize, u32)>) -> Option<(usize, u32)> {
         let md = &self.l.mods[m];
         let seg_frame = |ls: usize| {
             let s = &self.l.lsegs[ls];
@@ -1172,7 +1201,7 @@ impl<'a, 'h> Fixer<'a, 'h> {
                 let (ls, _) = md.seg(s)?;
                 // Explicitly a segment's frame: that segment's start.
                 let s = &self.l.lsegs[ls];
-                if self.l.opt.lx { None } else { Some((s.unit, if s.group.is_some() { seg_frame(ls)?.1 } else { s.offset })) }
+                Some((s.unit, if s.group.is_some() { seg_frame(ls)?.1 } else { s.offset }))
             }
             Frame::Grp(g) => {
                 let gi = *md.grpmap.get(g as usize - 1)?;
@@ -1216,8 +1245,8 @@ impl<'a, 'h> Fixer<'a, 'h> {
             }),
             Frame::Target => match *t {
                 Target::Seg(s) => seg_frame(md.seg(s)?.0),
-                Target::Grp(g) => self.frame_base(m, &Frame::Grp(g), t, loc),
-                Target::Ext(e) => self.frame_base(m, &Frame::Ext(e), t, loc),
+                Target::Grp(g) => self.frame_base16(m, &Frame::Grp(g), t, loc),
+                Target::Ext(e) => self.frame_base16(m, &Frame::Ext(e), t, loc),
                 Target::Abs(_) => None,
             },
             Frame::Abs(_) | Frame::None => None,

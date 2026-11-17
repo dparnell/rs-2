@@ -40,6 +40,9 @@ fn sym_place(o: &Linked, s: usize) -> Option<(u16, u32, bool)> {
 pub fn write(l: &Linker, o: &Linked, exe: &str) -> String {
     let _ = exe;
     let mut s = String::new();
+    if o.lx {
+        s.push_str(&l.msgs.log);
+    }
     s.push_str("\r\n ");
     s.push_str(&o.module_name);
     s.push_str("\r\n\r\n");
@@ -56,10 +59,8 @@ pub fn write(l: &Linker, o: &Linked, exe: &str) -> String {
         }
         let unit = ls.unit + 1;
         if wide {
-            s.push_str(&format!(
-                " {:04X}:{:08X} {:08X}H {:<22} {}\r\n",
-                unit, ls.offset, ls.size, ls.name, ls.class
-            ));
+            let bits = if ls.use32 { "32-bit" } else { "16-bit" };
+            s.push_str(&format!(" {:04X}:{:08X} {:09X}H {:<22} {} {bits}\r\n", unit, ls.offset, ls.size, ls.name, ls.class));
         } else {
             s.push_str(&format!(" {:04X}:{:04X} {:05X}H     {:<22} {}\r\n", unit, ls.offset, ls.size, ls.name, ls.class));
         }

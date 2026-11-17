@@ -14,17 +14,22 @@ pub struct Msgs {
     pub fatal: bool,
     /// /WARNFIXUP and similar: show L4xxx warnings at all.
     pub quiet_warnings: bool,
+    /// Everything shown (LINK386 copies it to the top of the map file).
+    pub log: String,
 }
 
 impl Msgs {
     pub fn new(prog: &'static str) -> Self {
-        Msgs { prog, errors: 0, warnings: 0, fatal: false, quiet_warnings: false }
+        Msgs { prog, errors: 0, warnings: 0, fatal: false, quiet_warnings: false, log: String::new() }
     }
 
-    fn show(&self, host: &mut dyn Host, file: &str, kind: &str, num: u32, text: &str) {
+    fn show(&mut self, host: &mut dyn Host, file: &str, kind: &str, num: u32, text: &str) {
         let at = if file.is_empty() { self.prog } else { file };
-        let s = format!("{at} : {kind} L{num:04}: {text}\r\n");
+        // LINK386 puts two blanks before the kind of message.
+        let gap = if self.prog == "LINK386" { "  " } else { " " };
+        let s = format!("{at} :{gap}{kind} L{num:04}: {text}\r\n");
         host.out(&s);
+        self.log.push_str(&s);
     }
 
     pub fn fatal(&mut self, host: &mut dyn Host, file: &str, num: u32, text: &str) {

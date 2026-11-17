@@ -63,27 +63,30 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     // The stack: a STACK segment, or STACKSIZE added to the data object.
     let mut stack = l.opt.stack.or(def.stacksize).unwrap_or(0);
     let mut esp: Option<(usize, u32)> = None;
-    let autodata = o.autodata.or_else(|| o.units.iter().position(|u| !u.code && u.attrs.shared != Some(true)));
+    let autodata = o.autodata;
+    if autodata.is_none() && !dll {
+        l.msgs.warn(l.host, "", 4036, "no automatic data segment");
+    }
     if !dll {
-        if let Some(s) = o.lsegs.iter().find(|s| s.combine == Combine::Stack && s.absolute.is_none()) {
+        if let Some(si) = o.lsegs.iter().position(|s| s.combine == Combine::Stack && s.absolute.is_none()) {
+            let s = &o.lsegs[si];
             let (u, end) = (s.unit, s.offset + s.size);
             // A stack segment smaller than the requested size grows.
             let have = s.size;
-            if stack > have && o.units[u].lsegs.last() == Some(&o.lsegs.iter().position(|x| core::ptr::eq(x, s)).unwrap()) {
+            if stack > have && o.units[u].lsegs.last() == Some(&si) {
                 o.units[u].size += stack - have;
                 esp = Some((u, end + stack - have));
             } else {
                 esp = Some((u, end));
             }
             stack = stack.max(have);
+        } else if stack == 0 {
+            l.msgs.warn(l.host, "", 4021, "no stack segment");
         } else if let Some(a) = autodata {
-            if stack == 0 {
-                l.msgs.warn(l.host, "", 4021, "no stack segment");
-            }
             let u = &mut o.units[a];
-            u.size = u.size.next_multiple_of(4) + stack;
+            u.size += stack;
             esp = Some((a, u.size));
-        } else if stack > 0 {
+        } else {
             // No data object at all: a stack object of its own.
             o.units.push(crate::link::Unit {
                 size: stack,
@@ -94,8 +97,6 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             });
             let n = o.units.len() - 1;
             esp = Some((n, stack));
-        } else {
-            l.msgs.warn(l.host, "", 4021, "no stack segment");
         }
     }
     // Object addresses.
@@ -139,7 +140,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         }
     }
     // Internal fix-ups a program does not need (it always loads at its base).
-    let strip_internal = !dll;
+    let strip_internal = false;
     // Import procedure names.
     let mut procs: Vec<u8> = vec![0];
     let mut proc_off: BTreeMap<String, u32> = BTreeMap::new();
@@ -156,6 +157,8 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     struct Pg {
         data: Vec<u8>,
         fix: Vec<u8>,
+        /// Records: source type, flags, target bytes, source offsets.
+        recs: Vec<(u8, u8, Vec<u8>, Vec<i16>)>,
     }
     let mut pages: Vec<Pg> = Vec::new();
     let mut first_page: Vec<u32> = Vec::new();
@@ -168,19 +171,24 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         }
         let n = (init as u32).div_ceil(PAGE);
         npages.push(n);
+        // A page's data in the file: up to its last initialised byte,
+        // rounded up to the file alignment.
+        let align = 1usize << shift;
         for p in 0..n {
             let s = (p * PAGE) as usize;
             let e = (s + PAGE as usize).min(init);
             let mut d = datas[ui][s..e].to_vec();
-            while d.last() == Some(&0) {
-                d.pop();
-            }
-            pages.push(Pg { data: d, fix: Vec::new() });
+            d.resize(d.len().next_multiple_of(align).min(PAGE as usize), 0);
+            pages.push(Pg { data: d, fix: Vec::new(), recs: Vec::new() });
         }
     }
     let mut bad = 0;
     for (ui, u) in units.iter().enumerate() {
-        for r in &u.relocs {
+        // Within a page: references to other modules first, then internal
+        // ones (IBM's order).
+        let mut order: Vec<&crate::link::Reloc> = u.relocs.iter().filter(|r| !matches!(r.target, RTarget::Internal { .. })).collect();
+        order.extend(u.relocs.iter().filter(|r| matches!(r.target, RTarget::Internal { .. })));
+        for r in order {
             let mut st = match src_type(r.kind) {
                 Some(s) => s,
                 None => {
@@ -275,10 +283,30 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 }
                 let pg = &mut pages[(first_page[ui] - 1 + p) as usize];
                 let srcoff = (r.offset as i64 - (p * PAGE) as i64) as i16;
-                pg.fix.push(st);
-                pg.fix.push(flags);
-                pg.fix.extend_from_slice(&srcoff.to_le_bytes());
-                pg.fix.extend_from_slice(&tail);
+                // Locations with the same target share a record (a source
+                // list) as in IBM's output.
+                match pg.recs.iter_mut().find(|x| x.0 == st && x.1 == flags && x.2 == tail && x.3.len() < 255) {
+                    Some(x) => x.3.push(srcoff),
+                    None => pg.recs.push((st, flags, tail.clone(), vec![srcoff])),
+                }
+            }
+        }
+    }
+    for pg in &mut pages {
+        for (st, flags, tail, srcs) in &pg.recs {
+            if srcs.len() == 1 {
+                pg.fix.push(*st);
+                pg.fix.push(*flags);
+                pg.fix.extend_from_slice(&srcs[0].to_le_bytes());
+                pg.fix.extend_from_slice(tail);
+            } else {
+                pg.fix.push(*st | 0x20);
+                pg.fix.push(*flags);
+                pg.fix.push(srcs.len() as u8);
+                pg.fix.extend_from_slice(tail);
+                for s in srcs {
+                    pg.fix.extend_from_slice(&s.to_le_bytes());
+                }
             }
         }
     }
@@ -452,6 +480,10 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         AppType::NoVio => 0x100,
         AppType::Vio => 0x200,
         AppType::Pm => 0x300,
+        AppType::Unspecified if !dll && def.kind == Kind::Exe => {
+            l.msgs.warn(l.host, "", 4071, "application type not specified; assuming WINDOWCOMPAT");
+            0x200
+        }
         AppType::Unspecified => 0,
     };
     match def.kind {
@@ -485,6 +517,11 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     let fixsize: usize = pages.iter().map(|p| p.fix.len()).sum();
     let imod_off = fixrec + fixsize;
     let iproc_off = imod_off + imods.len();
+    // No imports by name: no procedure name table at all.
+    if procs.len() == 1 {
+        procs.clear();
+    }
+    let procs_len = procs.len();
     let fix_end = iproc_off + procs.len();
     let stub = match (&def.stub, def.stub_none) {
         (Some(s), _) => crate::ne::load_stub(l, s)?,
@@ -493,17 +530,40 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     };
     let hdr = stub.len();
     let align = 1usize << shift;
-    let nonres_off = hdr + fix_end;
-    let data_off = (nonres_off + nonres.len()).next_multiple_of(align);
+    let data_off = (hdr + fix_end).next_multiple_of(align);
+    // Page data: the instance pages (writable, not shared objects) first,
+    // as IBM's linker orders them, then the others in object order.
+    let mut page_obj = Vec::new();
+    for (ui, &n) in npages.iter().enumerate() {
+        for _ in 0..n {
+            page_obj.push(ui);
+        }
+    }
+    let instance = |ui: usize| oflags[ui] & of::WRITE != 0 && oflags[ui] & of::SHARED == 0;
+    let mut file_order: Vec<usize> = (0..pages.len()).filter(|&p| instance(page_obj[p])).collect();
+    file_order.extend((0..pages.len()).filter(|&p| !instance(page_obj[p])));
+    let mut page_off = vec![0u32; pages.len()];
+    let mut off = 0u32;
+    for &p in &file_order {
+        page_off[p] = off >> shift;
+        off = (off + pages[p].data.len() as u32).next_multiple_of(align as u32);
+    }
+    let nonres_off = if nonres.len() > 1 { data_off + off as usize } else { 0 };
+    let instance_pages = pages.iter().enumerate().filter(|(p, _)| instance(page_obj[*p])).count() as u32;
     let mut f = stub;
     if f.len() >= 0x40 {
         f[0x3c..0x40].copy_from_slice(&(hdr as u32).to_le_bytes());
+        // The DOS header's size: up to the data pages.
+        f[2..4].copy_from_slice(&((data_off % 512) as u16).to_le_bytes());
+        f[4..6].copy_from_slice(&(data_off.div_ceil(512) as u16).to_le_bytes());
     }
     let mut h = vec![0u8; hdr_size];
     let w32 = |h: &mut Vec<u8>, o: usize, v: u32| h[o..o + 4].copy_from_slice(&v.to_le_bytes());
     h[0..2].copy_from_slice(b"LX");
     h[8..10].copy_from_slice(&2u16.to_le_bytes());
     h[10..12].copy_from_slice(&1u16.to_le_bytes());
+    // Module version 2.2, as IBM's LINK386 writes it.
+    w32(&mut h, 0x0c, 0x0002_0002);
     w32(&mut h, 0x10, mflags);
     w32(&mut h, 0x14, pages.len() as u32);
     let (eip_o, eip) = o.start.map(|(u, off)| (u as u32 + 1, off)).unwrap_or((0, 0));
@@ -522,7 +582,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     w32(&mut h, 0x40, obj_table as u32);
     w32(&mut h, 0x44, units.len() as u32);
     w32(&mut h, 0x48, page_table as u32);
-    w32(&mut h, 0x50, rsrc_table as u32);
+    w32(&mut h, 0x50, 0);
     w32(&mut h, 0x58, resname as u32);
     w32(&mut h, 0x5c, entry_off as u32);
     w32(&mut h, 0x68, fixpage as u32);
@@ -532,8 +592,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     w32(&mut h, 0x78, iproc_off as u32);
     w32(&mut h, 0x80, data_off as u32);
     w32(&mut h, 0x88, nonres_off as u32);
-    w32(&mut h, 0x8c, nonres.len() as u32);
+    w32(&mut h, 0x8c, if nonres_off != 0 { nonres.len() as u32 } else { 0 });
     w32(&mut h, 0x94, autodata.map(|a| a as u32 + 1).unwrap_or(0));
+    w32(&mut h, 0xa4, instance_pages);
     w32(&mut h, 0xa8, def.heapsize.unwrap_or(0));
     w32(&mut h, 0xac, stack);
     f.extend_from_slice(&h);
@@ -541,18 +602,14 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         put32(&mut f, u.size);
         put32(&mut f, u.base);
         put32(&mut f, oflags[i]);
-        put32(&mut f, if npages[i] == 0 { 0 } else { first_page[i] });
+        put32(&mut f, first_page[i]);
         put32(&mut f, npages[i]);
         put32(&mut f, 0);
     }
-    let mut off = 0u32;
-    for p in &pages {
-        put32(&mut f, if p.data.is_empty() { 0 } else { off >> shift });
+    for (i, p) in pages.iter().enumerate() {
+        put32(&mut f, page_off[i]);
         put16(&mut f, p.data.len() as u16);
-        put16(&mut f, if p.data.is_empty() { 3 } else { 0 });
-        if !p.data.is_empty() {
-            off = (off + p.data.len() as u32).next_multiple_of(align as u32);
-        }
+        put16(&mut f, 0);
     }
     f.extend_from_slice(&resident);
     f.extend_from_slice(&entry);
@@ -567,14 +624,14 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     }
     f.extend_from_slice(&imods);
     f.extend_from_slice(&procs);
-    f.extend_from_slice(&nonres);
     f.resize(data_off, 0);
-    for p in &pages {
-        if p.data.is_empty() {
-            continue;
-        }
-        f.extend_from_slice(&p.data);
+    let _ = procs_len;
+    for &p in &file_order {
+        f.extend_from_slice(&pages[p].data);
         f.resize(f.len().next_multiple_of(align), 0);
+    }
+    if nonres_off != 0 {
+        f.extend_from_slice(&nonres);
     }
     Some(f)
 }

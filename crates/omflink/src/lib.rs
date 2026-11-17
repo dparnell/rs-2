@@ -439,7 +439,10 @@ fn link_with(host: &mut dyn Host, prog: Prog, mut o: Options, msgs: msg::Msgs, f
         Some(n) => n.to_ascii_uppercase(),
         None => {
             let b = cmd::base_name(&exe);
-            String::from(b.split('.').next().unwrap_or(b)).to_ascii_uppercase()
+            let b = String::from(b.split('.').next().unwrap_or(b));
+            // LINK386 names a module without NAME/LIBRARY after its file
+            // in lower case, LINK in upper case.
+            if prog == Prog::Link386 { b.to_ascii_lowercase() } else { b.to_ascii_uppercase() }
         }
     };
     // Without DESCRIPTION, LINK describes the module by its file name.
