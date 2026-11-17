@@ -571,6 +571,24 @@ impl Card {
         self.queue_rx(out);
     }
 
+    /// One ASSOCIATE (802.11n/ac offered with `caps`): the AID.
+    fn associate(&self, g: &mut Inner, bss: &Bss, rsn_ie: Option<&[u8]>, caps: Option<&mw::Caps>) -> Result<u16, WlanError> {
+        let body = self.command(g, mw::CMD_802_11_ASSOCIATE, &mw::associate_body(bss, rsn_ie, caps), 15000)?;
+        let (cap, status, aid) = mw::associate_result(&body).ok_or(WlanError::Failed("short association response".into()))?;
+        if status != 0 {
+            let why = match cap {
+                1 => "authentication failed",
+                2 => "no answer to authentication",
+                3 => "association timed out",
+                4 => "association refused",
+                5 => "station failure",
+                _ => "refused by the access point",
+            };
+            return Err(WlanError::Failed(alloc::format!("{why} (status {status}, {cap:#x})")));
+        }
+        Ok(aid)
+    }
+
     fn queue_rx(&self, out: Vec<Vec<Vec<u8>>>) {
         let mut q = self.rxq.lock();
         for f in out.into_iter().flatten() {
@@ -904,24 +922,22 @@ impl WlanDriver for Card {
             return Err(WlanError::NotReady);
         }
         let caps = *self.caps.lock();
+        let legacy = if bss.channel > 14 { "802.11a" } else { "802.11g" };
         let mode = match (caps.filter(|c| c.ht()), bss.standard()) {
             (Some(c), "ac") if c.vht() => "802.11ac",
             (Some(_), "ac" | "n") => "802.11n",
-            _ => if bss.channel > 14 { "802.11a" } else { "802.11g" },
+            _ => legacy,
         };
-        let body = self.command(&mut g, mw::CMD_802_11_ASSOCIATE, &mw::associate_body(bss, rsn_ie, caps.as_ref()), 15000)?;
-        let (cap, status, aid) = mw::associate_result(&body).ok_or(WlanError::Failed("short association response".into()))?;
-        if status != 0 {
-            let why = match cap {
-                1 => "authentication failed",
-                2 => "no answer to authentication",
-                3 => "association timed out",
-                4 => "association refused",
-                5 => "station failure",
-                _ => "refused by the access point",
-            };
-            return Err(WlanError::Failed(alloc::format!("{why} (status {status}, {cap:#x})")));
-        }
+        let (aid, mode) = match self.associate(&mut g, bss, rsn_ie, caps.as_ref()) {
+            Ok(aid) => (aid, mode),
+            // A network (or the firmware) that refuses what 802.11n/ac
+            // adds is joined at legacy rates instead.
+            Err(e) if mode != legacy => {
+                crate::wlog!("{}: joining as {mode} failed ({e}); trying {legacy}", self.name);
+                (self.associate(&mut g, bss, rsn_ie, None)?, legacy)
+            }
+            Err(e) => return Err(e),
+        };
         *self.bssid.lock() = Some(bss.bssid);
         *self.mode.lock() = mode;
         crate::wlog!("{}: associated as {mode}", self.name);
