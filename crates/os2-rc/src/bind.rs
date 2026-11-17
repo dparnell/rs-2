@@ -277,10 +277,16 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
             let rel = at;
             let mut e = [0u8; 8];
             w32(&mut e, 0, (rel >> shift) as u32);
+            // -x: an iterated (EXEPACK 1) page when that is smaller.
+            let packed = if o.compress != 0 { pack_iterated(chunk) } else { None };
+            let (chunk, kind): (&[u8], u16) = match &packed {
+                Some(p) => (p, 1),
+                None => (chunk, 0),
+            };
             // Page sizes are whole alignment units (zero padded).
             let len = chunk.len().div_ceil(align) * align;
             w16(&mut e, 4, len as u16);
-            w16(&mut e, 6, 0);
+            w16(&mut e, 6, kind);
             ldr.extend_from_slice(&e);
             // Bytes from data_base on are written after the kept data.
             let pos = rel - data_base;
@@ -393,6 +399,38 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
         out.extend_from_slice(&d[tail_from..]);
     }
     Ok(out)
+}
+
+/// EXEPACK 1 (iterated data) of a page: records of (count, length,
+/// bytes), runs of one byte packed; `None` if that is not smaller.
+fn pack_iterated(page: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let lit = |out: &mut Vec<u8>, b: &[u8]| {
+        if !b.is_empty() {
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&(b.len() as u16).to_le_bytes());
+            out.extend_from_slice(b);
+        }
+    };
+    let (mut i, mut from) = (0, 0);
+    while i < page.len() {
+        let mut r = 1;
+        while i + r < page.len() && page[i + r] == page[i] {
+            r += 1;
+        }
+        if r >= 8 {
+            lit(&mut out, &page[from..i]);
+            out.extend_from_slice(&(r as u16).to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.push(page[i]);
+            i += r;
+            from = i;
+        } else {
+            i += r;
+        }
+    }
+    lit(&mut out, &page[from..]);
+    (out.len() + 4 < page.len()).then_some(out)
 }
 
 // ---- NE ----

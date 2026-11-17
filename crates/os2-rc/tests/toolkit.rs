@@ -65,3 +65,35 @@ fn toolkit_samples_match_ibm() {
     assert!(bad.is_empty(), "resources that differ from IBM's: {bad:#?}");
     assert!(compiled >= 40 && same >= 300, "{compiled} scripts, {same} resources compared");
 }
+
+/// Rebinding a module's own resources (plain and compressed) keeps them
+/// readable and leaves the rest of the module alone.
+#[test]
+fn rebind_toolkit_modules() {
+    let mut mods = Vec::new();
+    for d in ["samples/pm/stdwnd/hello.exe", "samples/pm/dialog/dialog.exe", "samples/mm/clock/clock.exe", "samples/rexx/api/pmrexx/pmrexxio.dll"] {
+        if let Ok(b) = std::fs::read(format!("{TK}/{d}")) {
+            mods.push(b);
+        }
+    }
+    let ne = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/unpacked/disk_1/OS2/DLL/PMFORMAT.DLL");
+    if let Ok(b) = std::fs::read(ne) {
+        mods.push(b);
+    }
+    for m in mods {
+        let res: Vec<os2_rc::Resource> = os2_exe::res::list(&m)
+            .into_iter()
+            .map(|(ty, id)| os2_rc::Resource { ty, name: Name::Id(id), flags: 0x1030, data: os2_exe::res::get(&m, ty, id).unwrap() })
+            .collect();
+        for compress in [0, 1] {
+            let o = os2_rc::bind::BindOptions { compress, pack: false };
+            let out = os2_rc::bind::bind(&m, &res, o).unwrap();
+            for r in &res {
+                let Name::Id(id) = r.name else { continue };
+                assert_eq!(os2_exe::res::get(&out, r.ty, id).as_deref(), Some(&r.data[..]), "{}.{id}", r.ty);
+            }
+            // Bound twice gives the same module.
+            assert_eq!(os2_rc::bind::bind(&out, &res, o).unwrap(), out);
+        }
+    }
+}
