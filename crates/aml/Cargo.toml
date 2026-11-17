@@ -1,0 +1,6 @@
+[package]
+name = "aml"
+description = "no_std ACPI Machine Language interpreter: loads definition blocks and runs control methods"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

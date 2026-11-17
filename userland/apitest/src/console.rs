@@ -891,7 +891,21 @@ fn ioctls(b: &Buf) {
             ps[0] = 13;
             let mut rcw = [0xffu8; 2];
             let rc = ioctl(h, 0xc, 0x60, &mut ps, &mut rcw).0;
-            check("APM$ power status: on line, no battery", rc == 0 && rcw == [0, 0] && ps[0] == 13 && ps[4] == 1 && ps[10] == 0x80);
+            if ps[10] & 0x80 != 0 {
+                check("APM$ power status: on line, no battery", rc == 0 && rcw == [0, 0] && ps[0] == 13 && ps[4] == 1 && ps[10] == 0x80);
+            } else {
+                // A battery (QEMU with the test SSDT, a laptop): AC known,
+                // life a percentage, time in minutes or unknown.
+                println!("APM$ power status: AC {}, status {}, life {}%, flags {:#x}, {} battery(ies)", ps[4], ps[5], ps[6], ps[10], ps[12]);
+                check("APM$ power status: a battery", rc == 0 && rcw == [0, 0] && ps[4] <= 1 && ps[6] <= 100 && ps[7] != 0 && ps[12] >= 1);
+            }
+            // Byte 11 selects a battery: one past the last is a bad device.
+            let count = ps[12];
+            let mut ps = [0u8; 13];
+            ps[0] = 13;
+            ps[11] = count + 1;
+            let rc = ioctl(h, 0xc, 0x60, &mut ps, &mut rcw).0;
+            check("APM$ power status of a battery that is not there", rc == 87 && rcw == [3, 0]);
             let mut pi = [0u8; 10];
             pi[0] = 10;
             let rc = ioctl(h, 0xc, 0x62, &mut pi, &mut rcw).0;

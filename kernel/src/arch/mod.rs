@@ -111,6 +111,70 @@ pub unsafe fn wrmsr(msr: u32, v: u64) {
     };
 }
 
+// MSR access that survives a #GP: the trap handler sees the fault on
+// one of the two marked instructions ([`msr_fixup`]), skips it and sets
+// R8. For registers a CPU may lack (model-specific power and energy
+// registers, which emulators refuse).
+core::arch::global_asm!(
+    ".global rs2_rdmsr_safe",
+    "rs2_rdmsr_safe:",
+    "    mov ecx, edi",
+    "    xor r8d, r8d",
+    "    xor eax, eax",
+    "    xor edx, edx",
+    ".global rs2_rdmsr_insn",
+    "rs2_rdmsr_insn:",
+    "    rdmsr",
+    "    mov [rsi], eax",
+    "    mov [rsi + 4], edx",
+    "    mov eax, r8d",
+    "    ret",
+    ".global rs2_wrmsr_safe",
+    "rs2_wrmsr_safe:",
+    "    mov ecx, edi",
+    "    mov eax, esi",
+    "    mov rdx, rsi",
+    "    shr rdx, 32",
+    "    xor r8d, r8d",
+    ".global rs2_wrmsr_insn",
+    "rs2_wrmsr_insn:",
+    "    wrmsr",
+    "    mov eax, r8d",
+    "    ret",
+);
+
+unsafe extern "C" {
+    fn rs2_rdmsr_safe(msr: u32, out: *mut u64) -> u32;
+    fn rs2_wrmsr_safe(msr: u32, v: u64) -> u32;
+    static rs2_rdmsr_insn: u8;
+    static rs2_wrmsr_insn: u8;
+}
+
+/// Read an MSR the CPU may not have: None if reading it faults.
+pub fn rdmsr_safe(msr: u32) -> Option<u64> {
+    let mut v = 0u64;
+    (unsafe { rs2_rdmsr_safe(msr, &mut v) } == 0).then_some(v)
+}
+
+/// Write an MSR that may not exist or may refuse the value: false if the
+/// write faulted.
+pub fn wrmsr_safe(msr: u32, v: u64) -> bool {
+    unsafe { rs2_wrmsr_safe(msr, v) == 0 }
+}
+
+/// A kernel #GP on [`rdmsr_safe`]'s or [`wrmsr_safe`]'s instruction:
+/// skip it (both are two bytes) and report the fault in R8.
+pub fn msr_fixup(f: &mut idt::TrapFrame) -> bool {
+    let rip = f.rip as usize;
+    let (r, w) = (&raw const rs2_rdmsr_insn as usize, &raw const rs2_wrmsr_insn as usize);
+    if f.vector != 13 || (rip != r && rip != w) {
+        return false;
+    }
+    f.rip += 2;
+    f.r8 = 1;
+    true
+}
+
 pub fn cpuid(leaf: u32, sub: u32) -> (u32, u32, u32, u32) {
     let r = core::arch::x86_64::__cpuid_count(leaf, sub);
     (r.eax, r.ebx, r.ecx, r.edx)

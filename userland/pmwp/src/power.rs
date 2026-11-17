@@ -12,6 +12,10 @@
 //!   `PM_ControlPanel` `APM_BIOS_Enabled`, IBM's key);
 //! - the View page chooses whether the status view refreshes itself and
 //!   how often (wpSet/QueryAutoRefresh, wpSet/QueryRefreshRate);
+//! - the Plan page (rs2's own) chooses the processor power plan
+//!   (Performance, Balanced, Power saver: the kernel's cpupower.rs through
+//!   `Rs2PowerControl`); a choice takes effect at once and is written to
+//!   CONFIG.SYS (`POWERPLAN=`) for the next boot, as POWERCFG /SET /SAVE;
 //! - opening the object shows its status view (OPEN_STATUS): the power
 //!   source, the battery (none: rs2 does not read ACPI batteries) and
 //!   what power management can do;
@@ -330,6 +334,8 @@ const ID_SOURCE: u16 = 1301;
 const ID_BATTERY: u16 = 1302;
 const ID_STATE: u16 = 1303;
 const ID_CAN: u16 = 1304;
+const ID_PLAN: u16 = 1305;
+const ID_DRAW: u16 = 1306;
 
 fn hab() -> u32 {
     unsafe extern "C" {
@@ -340,10 +346,29 @@ fn hab() -> u32 {
 }
 
 fn fill_view(h: u32, o: usize) {
-    set_item_text(h, ID_SOURCE as u32, b"Power source: AC line");
-    set_item_text(h, ID_BATTERY as u32, b"Battery: none found");
+    // As IBM's Power object, from APM$'s power status.
+    let (source, battery) = match os2::power::apm_status(0) {
+        Some(a) => (alloc::format!("Power source: {}", a.source_text()), alloc::format!("Battery: {}", a.battery_text())),
+        None => (alloc::string::String::from("Power source: unknown"), alloc::string::String::from("Battery: unknown")),
+    };
+    set_item_text(h, ID_SOURCE as u32, source.as_bytes());
+    set_item_text(h, ID_BATTERY as u32, battery.as_bytes());
     set_item_text(h, ID_STATE as u32, if pd(o).os2_pm != 0 { b"Power management: on" } else { b"Power management: off" });
     set_item_text(h, ID_CAN as u32, b"Can turn the computer off (ACPI); cannot suspend");
+    let (plan, draw) = match os2::power::query() {
+        Some(i) => {
+            let name = os2::power::NAMES.get(i.plan as usize).copied().unwrap_or("?");
+            let draw = if i.flags & os2::power::F_RAPL_PKG != 0 {
+                alloc::format!("Processor power: {}.{:01} W", i.pkg_mw / 1000, i.pkg_mw % 1000 / 100)
+            } else {
+                alloc::string::String::from("Processor power: not measured")
+            };
+            (alloc::format!("Power plan: {name}"), draw)
+        }
+        None => (alloc::string::String::from("Power plan: unknown"), alloc::string::String::new()),
+    };
+    set_item_text(h, ID_PLAN as u32, plan.as_bytes());
+    set_item_text(h, ID_DRAW as u32, draw.as_bytes());
 }
 
 fn refresh_views(o: usize) {
@@ -403,11 +428,13 @@ fn open_status(o: usize) -> u32 {
     }
     let mut title: Vec<u8> = obj::title(o).into_iter().map(|c| if c == b'\n' { b' ' } else { c }).collect();
     title.extend_from_slice(b" - Status");
-    let mut f = dialog_frame(&title, 220, 84);
+    let mut f = dialog_frame(&title, 220, 108);
     f.ctl = (FCF_TITLEBAR | FCF_SYSMENU | FCF_TASKLIST).to_le_bytes().to_vec();
     let tpl = template(f, alloc::vec![
-        text(b"", (8, 66, 204), ID_SOURCE),
-        text(b"", (8, 54, 204), ID_BATTERY),
+        text(b"", (8, 90, 204), ID_SOURCE),
+        text(b"", (8, 78, 204), ID_BATTERY),
+        text(b"", (8, 66, 204), ID_PLAN),
+        text(b"", (8, 54, 204), ID_DRAW),
         text(b"", (8, 42, 204), ID_STATE),
         text(b"", (8, 30, 204), ID_CAN),
         item(WC_BUTTON, b"Close", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0400, (8, 6, 50, 14), 1),
@@ -605,17 +632,114 @@ extern "C" fn wpAddPowerViewPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, view_page_proc, items, b"~View\0")
 }
 
+// ---- The Plan page (rs2's own) ----
+
+const ID_PLAN_PERF: u16 = 1330;
+const ID_PLAN_BAL: u16 = 1331;
+const ID_PLAN_SAVE: u16 = 1332;
+const ID_PLAN_ABOUT: u16 = 1333;
+const ID_PLAN_HW: u16 = 1334;
+const ID_PLAN_HW2: u16 = 1335;
+
+static mut PLAN_UNDO: u32 = 1;
+
+const ABOUT: [&[u8]; 3] = [
+    b"Full speed; idle processors wait in the lightest state.",
+    b"Speed follows the load; idle processors sleep deeper.",
+    b"No turbo; idle processors sleep as deep as they can.",
+];
+
+fn plan_page_fill(h: u32) {
+    let info = os2::power::query();
+    let plan = info.map_or(1, |i| i.plan.min(2));
+    for (i, id) in [ID_PLAN_PERF, ID_PLAN_BAL, ID_PLAN_SAVE].into_iter().enumerate() {
+        check(h, id, i as u32 == plan);
+    }
+    set_item_text(h, ID_PLAN_ABOUT as u32, ABOUT[plan as usize]);
+    let (l1, l2) = match info {
+        Some(i) => {
+            let f = i.flags;
+            let speed = if f & os2::power::F_HWP != 0 {
+                alloc::format!("Speed: hardware P-states, {}-{} MHz", i.min_mhz, i.max_mhz)
+            } else if f & os2::power::F_SPEEDSTEP != 0 {
+                alloc::format!("Speed: SpeedStep, {}-{} MHz", i.min_mhz, i.max_mhz)
+            } else {
+                alloc::string::String::from("Speed: not controlled on this processor")
+            };
+            let idle = if f & os2::power::F_MWAIT != 0 { alloc::format!("Idle: down to C{}", i.cstate) } else { alloc::string::String::from("Idle: C1 (HLT)") };
+            let tick = if f & os2::power::F_TICKLESS != 0 { ", tickless" } else { "" };
+            (speed, alloc::format!("{idle}{tick}"))
+        }
+        None => (alloc::string::String::from("The kernel does not report its power management."), alloc::string::String::new()),
+    };
+    set_item_text(h, ID_PLAN_HW as u32, l1.as_bytes());
+    set_item_text(h, ID_PLAN_HW2 as u32, l2.as_bytes());
+}
+
+/// Use `plan` now and from the next boot.
+fn choose_plan(h: u32, plan: u32) {
+    if os2::power::set_plan(plan) == 0 {
+        os2::power::save(plan);
+    }
+    plan_page_fill(h);
+}
+
+extern "C" fn plan_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            unsafe { WinSetWindowULong(h, QWL_USER, b) };
+            unsafe { PLAN_UNDO = os2::power::query().map_or(1, |i| i.plan) };
+            plan_page_fill(h);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            let id = (a & 0xffff) as u16;
+            if (ID_PLAN_PERF..=ID_PLAN_SAVE).contains(&id) && checked(h, id) {
+                let plan = (id - ID_PLAN_PERF) as u32;
+                if os2::power::query().is_none_or(|i| i.plan != plan) {
+                    choose_plan(h, plan);
+                }
+            }
+            0
+        }
+        WM_COMMAND => {
+            match (a & 0xffff) as u16 {
+                ID_UNDO => choose_plan(h, unsafe { PLAN_UNDO }),
+                ID_DEFAULT => choose_plan(h, os2::power::BALANCED),
+                _ => {}
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+fn add_plan_page(o: usize, nb: u32) -> u32 {
+    let mut items = alloc::vec![
+        group(b"Power plan", (4, 50, 228, 66)),
+        radio(b"~Performance", (10, 94, 100), ID_PLAN_PERF, true),
+        radio(b"~Balanced", (10, 82, 100), ID_PLAN_BAL, false),
+        radio(b"Power ~saver", (10, 70, 100), ID_PLAN_SAVE, false),
+        text(b"", (10, 56, 218), ID_PLAN_ABOUT),
+        text(b"", (6, 38, 226), ID_PLAN_HW),
+        text(b"", (6, 28, 226), ID_PLAN_HW2),
+    ];
+    items.extend(undo_default(2));
+    add_page(o, nb, plan_page_proc, items, b"P~lan\0")
+}
+
 /// IBM's Resume page sets APM's wake-up events, which rs2 does not have;
 /// the Geyserville page is SpeedStep's.
 extern "C" fn no_page(_o: usize, _nb: u32) -> u32 {
     1
 }
 
-/// Power, then View (each inserted in front of those before it).
+/// Plan, Power, then View (each inserted in front of those before it).
 extern "C" fn power_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPPower"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     wps::call("WPPower", m::WPPower::wpAddPowerViewPage, &[o, nb as usize]);
     wps::call("WPPower", m::WPPower::wpAddPowerPage, &[o, nb as usize]);
+    add_plan_page(o, nb);
     1
 }
 

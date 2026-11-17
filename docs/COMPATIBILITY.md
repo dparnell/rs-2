@@ -562,8 +562,10 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   IBM's LVM VCU.EXE calls); 0xA
   MON_REGISTERMONITOR on KBD$ and MOUSE$; 0xB flush input/output and
   DEV_QUERYMONSUPPORT on the character devices; 0xC on `APM$` (IBM
-  APM.SYS's interface on rs2's ACPI power code: power status on line
-  with no battery, power info APM 1.2, the power-off event, and power
+  APM.SYS's interface on rs2's ACPI power code: power status from the
+  ACPI batteries and AC adapters (byte 11 selects a battery as with an
+  APM 1.2 BIOS; on line with no system battery without any), power
+  info APM 1.2, the power-off event, and power
   events for programs as APM.SYS keeps them: an event semaphore and
   mask per APM$ handle (0x41; six clients, a queue of five events each,
   a 32-bit shared event semaphore posted or a 16-bit system semaphore

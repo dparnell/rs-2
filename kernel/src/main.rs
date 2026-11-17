@@ -8,6 +8,7 @@
 extern crate alloc;
 
 mod acpi;
+mod acpipm;
 mod aml;
 mod api;
 mod apic;
@@ -21,9 +22,11 @@ mod config;
 mod conkbd;
 mod crash;
 mod console;
+mod cpupower;
 mod debug;
 mod display;
 mod drivers;
+mod ec;
 mod fs;
 mod infoseg;
 mod irq;
@@ -141,6 +144,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
 
     let cmdline = info.cmdline();
     println!("command line: {cmdline}");
+    cpupower::init(cmdline);
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
@@ -156,6 +160,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     msi::start();
     drivers::hotplug::start();
     session::start();
+    acpipm::start(cmdline);
     fs::cache::start();
     bench::start(cmdline);
     klog::start_bootlog();
@@ -241,6 +246,7 @@ pub mod boot {
         crate::config::apply_memory(&cfg);
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);
+        crate::config::apply_power(&cfg);
         crate::config::apply_cache(&cfg);
         crate::config::apply_video(&cfg);
         if let Some(lp) = &cfg.libpath {

@@ -457,14 +457,15 @@ pub fn idle_loop() -> ! {
         let seen = READY_GEN.load(Ordering::Acquire);
         schedule();
         loop {
-            // Halt unless something became ready meanwhile; `sti; hlt`
-            // lets no interrupt slip in between.
+            // Wait unless something became ready meanwhile; the wait
+            // (`sti; hlt` or `sti; mwait`, see cpupower) lets no
+            // interrupt slip in between.
             arch::disable_interrupts();
             if need_resched() || READY_GEN.load(Ordering::Acquire) != seen {
                 arch::enable_interrupts();
                 break;
             }
-            unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+            crate::cpupower::idle_wait();
         }
     }
 }

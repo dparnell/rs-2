@@ -206,6 +206,36 @@ pub fn rs2_debug_trace(c: &mut Ctx) -> u32 {
     0
 }
 
+/// Rs2PowerControl(ulFunc, ulParam, pBuf, cbBuf) (27): the processor
+/// power plan ([`crate::cpupower`]).
+///
+/// | ulFunc | |
+/// |---|---|
+/// | 0 query | RS2POWERINFO into pBuf (cut at cbBuf): ULONGs cb, plan (0 performance, 1 balanced, 2 power saver), flags (cpupower::F_*), deepest idle C-state, package/core/DRAM mW, boot CPU MHz, lowest/base/highest MHz, CPUs online, CPUs idle without a tick, timer interrupts per second |
+/// | 1 set plan | ulParam the plan; takes effect at once (not saved: CONFIG.SYS's POWERPLAN= is the plan at boot) |
+pub fn rs2_power_control(c: &mut Ctx) -> u32 {
+    let (func, param, buf, cb) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3) as usize);
+    match func {
+        0 => {
+            let info = crate::cpupower::info();
+            let bytes: alloc::vec::Vec<u8> = info.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let n = bytes.len().min(cb);
+            if !c.write(buf, &bytes[..n]) {
+                return err::INVALID_ADDRESS;
+            }
+            0
+        }
+        1 => {
+            if !crate::cpupower::set_plan(param) {
+                return err::INVALID_PARAMETER;
+            }
+            crate::trace!("power plan set to {} by process {}", crate::cpupower::PLAN_NAMES[param as usize], c.process.pid);
+            0
+        }
+        _ => err::INVALID_FUNCTION,
+    }
+}
+
 /// Rs2PowerOff(ulAction) (7): the end of a shutdown. 0 powers the
 /// machine off (ACPI S5) and returns ERROR_NOT_SUPPORTED if it is still
 /// running then; 1 restarts it. The disks' write caches are committed
