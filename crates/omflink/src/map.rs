@@ -41,7 +41,7 @@ pub fn write(l: &Linker, o: &Linked, exe: &str) -> String {
     let _ = exe;
     let mut s = String::new();
     if o.lx {
-        s.push_str(&l.msgs.log);
+        s.push_str(&l.msgs.log[..l.msgs.map_mark.unwrap_or(l.msgs.log.len())]);
     }
     s.push_str("\r\n ");
     s.push_str(&o.module_name);
@@ -66,7 +66,11 @@ pub fn write(l: &Linker, o: &Linked, exe: &str) -> String {
         }
     }
     s.push_str("\r\n Origin   Group\r\n");
-    for g in &o.groups {
+    let mut groups: Vec<&crate::link::Group> = o.groups.iter().collect();
+    if o.lx {
+        groups.sort_by_key(|g| !g.name.eq_ignore_ascii_case("FLAT"));
+    }
+    for g in groups {
         let first = g.lsegs.iter().map(|&i| &o.lsegs[i]).min_by_key(|x| (x.unit, x.offset));
         let (u, off) = match first {
             Some(f) if !(o.lx && g.name.eq_ignore_ascii_case("FLAT")) => (f.unit + 1, f.offset >> 4),

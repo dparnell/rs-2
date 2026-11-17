@@ -64,9 +64,6 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     let mut stack = l.opt.stack.or(def.stacksize).unwrap_or(0);
     let mut esp: Option<(usize, u32)> = None;
     let autodata = o.autodata;
-    if autodata.is_none() && !dll {
-        l.msgs.warn(l.host, "", 4036, "no automatic data segment");
-    }
     if !dll {
         if let Some(si) = o.lsegs.iter().position(|s| s.combine == Combine::Stack && s.absolute.is_none()) {
             let s = &o.lsegs[si];
@@ -99,6 +96,8 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             esp = Some((n, stack));
         }
     }
+    // IBM's LINK386 writes the map here: later warnings are not in it.
+    l.msgs.map_mark = Some(l.msgs.log.len());
     // Object addresses.
     let mut va = base;
     for u in o.units.iter_mut() {
@@ -486,6 +485,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         }
         AppType::Unspecified => 0,
     };
+    if autodata.is_none() && !dll {
+        l.msgs.warn(l.host, "", 4036, "no automatic data segment");
+    }
     match def.kind {
         Kind::PhysicalDevice => mflags |= 0x20000,
         Kind::VirtualDevice => mflags |= 0x28000,

@@ -16,11 +16,13 @@ pub struct Msgs {
     pub quiet_warnings: bool,
     /// Everything shown (LINK386 copies it to the top of the map file).
     pub log: String,
+    /// How much of `log` LINK386 has shown when it writes the map.
+    pub map_mark: Option<usize>,
 }
 
 impl Msgs {
     pub fn new(prog: &'static str) -> Self {
-        Msgs { prog, errors: 0, warnings: 0, fatal: false, quiet_warnings: false, log: String::new() }
+        Msgs { prog, errors: 0, warnings: 0, fatal: false, quiet_warnings: false, log: String::new(), map_mark: None }
     }
 
     fn show(&mut self, host: &mut dyn Host, file: &str, kind: &str, num: u32, text: &str) {
