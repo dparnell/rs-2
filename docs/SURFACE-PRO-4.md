@@ -595,6 +595,15 @@ A-MSDU (3), BAR (0x0a) and management (0xe5) as an ordinary frame; rs2
 now does too (A-MSDUs are not taken apart yet; they come only with
 802.11n, which rs2 does not offer).
 
+**Works** (2026-11-17, live stick at f46ac952): `WIFI CONNECT` joined
+a WPA2 network on 5 GHz (channel 136, -63 dBm) at the first try, the
+4-way handshake completed (messages 1-4), `eth0` came up and DHCP got a
+lease (address, gateway and DNS). Encrypted frames therefore go both
+ways (CCMP in the firmware, keys from KEY_MATERIAL v2). Still not done:
+802.11n/ac rates (association offers up to 54 Mbit/s), power saving,
+roaming, hidden networks, a PM applet; the keychain and WIFI.CFG on the
+live stick last until reboot only.
+
 Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 `IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
 on lines starting `wlan0` and `88W8897` (key API version, association
