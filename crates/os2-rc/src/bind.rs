@@ -1,0 +1,1 @@
+//! Binding resources into executables.

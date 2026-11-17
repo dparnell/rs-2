@@ -130,6 +130,14 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "os2-rc"
+version = "0.1.0"
+dependencies = [
+ "os2-exe",
+ "os2-rc",
+]
+
+[[package]]
 name = "parport"
 version = "0.1.0"
 
