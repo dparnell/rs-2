@@ -99,6 +99,8 @@ const CC_CMD_ABORTED: u8 = 25;
 /// time).
 const BOOT_MIN_MS: u64 = 250;
 const BOOT_MAX_MS: u64 = 8000;
+/// Enumeration attempts after the first for a device on a root port.
+const ENUM_RETRIES: u8 = 2;
 /// Hub tiers below the root ports that the route string can describe.
 const MAX_DEPTH: u8 = 5;
 /// Poll interval (ticks) and port scan interval (ms) after boot.
@@ -695,6 +697,10 @@ struct Ctrl {
     /// During boot: a command hung past the abort; reset the controller
     /// and enumerate again without its port (probe).
     restart: bool,
+    /// Enumeration retries used on each root port while connected.
+    retries: Vec<u8>,
+    /// Failed devices (index, epoch) to forget so they are found again.
+    retry: Vec<(usize, u32)>,
     /// All devices; `root` and the hubs' children index into this.
     devs: Vec<Option<Device>>,
     /// Device on each root port.
@@ -753,6 +759,9 @@ static STALL_ARMED: AtomicBool = AtomicBool::new(false);
 /// running in front of the stalled TRB, and an abort written then would
 /// move its dequeue pointer: the abort is not written).
 static STALL_HARD: AtomicBool = AtomicBool::new(false);
+/// `xhcifail`: the first device's enumeration fails once (testing the
+/// retry in QEMU).
+static FAIL_ARMED: AtomicBool = AtomicBool::new(false);
 static STALLED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Size of memory BAR 0 (sized with decoding off).
@@ -826,6 +835,9 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
         if w == "xhcistall" || w == "xhcistall=hard" {
             STALL_ARMED.store(true, Ordering::Relaxed);
             STALL_HARD.store(w.ends_with("hard"), Ordering::Relaxed);
+        }
+        if w == "xhcifail" {
+            FAIL_ARMED.store(true, Ordering::Relaxed);
         }
     }
     let Some(mut c) = start(dev) else { return Vec::new() };
@@ -1011,6 +1023,8 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         disabled: 0,
         skip: Vec::new(),
         restart: false,
+        retries: alloc::vec![0; ports],
+        retry: Vec::new(),
         devs: Vec::new(),
         root: (0..ports).map(|_| None).collect(),
         next_epoch: 1,
@@ -1153,6 +1167,7 @@ impl Ctrl {
             }
             let connected = sc & PORT_CCS != 0;
             if !connected {
+                self.retries[p] = 0;
                 if let Some(i) = self.root[p] {
                     self.remove(i);
                 }
@@ -1266,19 +1281,40 @@ impl Ctrl {
 
     fn fail(&mut self, i: usize, why: &str) {
         let name = self.name.clone();
+        // A device on a root port that fails before it runs is tried again
+        // from a port reset, up to ENUM_RETRIES times while it stays
+        // connected (Linux does too; the Surface Dock's USB 2 hub failed
+        // its first request with a transaction error).
+        let retry = self.devs[i].as_ref().and_then(|d| {
+            let p = d.root_port as usize - 1;
+            let early = d.parent.is_none() && !matches!(d.step, Step::Running | Step::Unused | Step::Failed);
+            (early && self.retries[p] < ENUM_RETRIES && !self.skip.contains(&d.root_port)).then_some((p, d.epoch))
+        });
         if let Some(d) = self.devs[i].as_mut() {
-            crate::println!("{name}: port {}: {why} (step {:?})", d.path(), d.step);
+            let again = retry.map_or(String::new(), |(p, _)| alloc::format!("; trying again ({} of {ENUM_RETRIES})", self.retries[p] + 1));
+            crate::println!("{name}: port {}: {why} (step {:?}){again}", d.path(), d.step);
             d.step = Step::Failed;
             if let Some(n) = &d.net {
                 n.state.alive.store(false, Ordering::Release);
                 crate::net::kick();
             }
         }
+        if let Some((p, epoch)) = retry {
+            self.retries[p] += 1;
+            self.retry.push((i, epoch));
+        }
     }
 
     /// Deadlines: debounce, reset completion, recovery, timeouts.
     fn timers(&mut self, now: u64) {
         self.command_watchdog(now);
+        // Failed devices to try again: forgotten here, found again by the
+        // next port scan.
+        for (i, epoch) in core::mem::take(&mut self.retry) {
+            if self.devs[i].as_ref().is_some_and(|d| d.epoch == epoch && d.step == Step::Failed) {
+                self.remove(i);
+            }
+        }
         for i in 0..self.devs.len() {
             let Some(d) = self.devs[i].as_ref() else { continue };
             let (step, deadline, p) = (d.step, d.deadline, d.root_port as usize - 1);
@@ -1312,6 +1348,7 @@ impl Ctrl {
                         self.fail(i, "port reset timed out");
                     }
                 }
+                Step::Settle(t) if now >= t && FAIL_ARMED.swap(false, Ordering::Relaxed) => self.fail(i, "failed on purpose (xhcifail)"),
                 Step::Settle(t) if now >= t => self.enable_slot(i),
                 Step::Running if hub_waiting && now >= deadline => self.fail(i, "hub request timed out"),
                 Step::Debounce(_) | Step::Settle(_) | Step::Running | Step::Unused | Step::Failed => {}

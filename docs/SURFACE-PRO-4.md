@@ -234,6 +234,21 @@ The SP4 has no serial port. Done (2026-11-15):
   - Leaving the port alone means the dock's USB 3 hub, and SuperSpeed
     devices behind it, do not work. Its USB 2 hub is on a USB 2 root
     port of its own, so slower devices behind the dock may.
+  - On the Surface (2026-11-17), live stick at 58edf14a with the dock
+    attached: **the Type Cover works.** The log is complete and was saved
+    to the stick. Port 14's Address Device hung (CRCR 0x8), disabling
+    the port did not help, and the abort got no answer (`running:
+    true`). The controller was reset with port 14 left alone, and then
+    the stick (port 1) and the Type Cover (port 7) enumerated. After
+    the reset, `port 2: control transfer failed, completion code 4
+    (step DevDesc8)`: a transaction error on the first request, most
+    likely from the dock's USB 2 hub, which the mouse behind the dock
+    hangs off. A failed device was never tried again. A root-port
+    device that fails before it runs is now dropped and found again by
+    the next port scan, from a fresh port reset, up to 2 more times
+    while it stays connected (not on a port left alone). `xhcifail`
+    fails the first device once in QEMU: port 3's stick enumerates on
+    the second try.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
