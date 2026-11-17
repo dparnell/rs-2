@@ -56,6 +56,7 @@ const CTL_WINDOWED: u32 = 2;
 const CTL_STOP: u32 = 3;
 const CTL_SELECT: u32 = 4;
 const CTL_REGISTER: u32 = 5;
+const CTL_RESIZE: u32 = 6;
 
 /// Rs2VioWait(pulGen, ulTimeout): wait until something a host shows has
 /// changed since generation *pulGen (ms, -1 = forever); stores the new
@@ -310,7 +311,10 @@ pub fn mouse(c: &mut Ctx) -> u32 {
 /// 1 focus (arg: the window has it or not), 2 windowed (arg 1) or full
 /// screen (arg 0), 3 end the session (its processes are killed),
 /// 4 select any session (a windowed one's window is activated),
-/// 5 register the caller as the host.
+/// 5 register the caller as the host, 6 the window was sized to show
+/// arg = cols | rows << 16 cells: a windowed text session's screen
+/// takes that size (ERROR_INVALID_PARAMETER for a DOS session or one in
+/// a graphics mode).
 pub fn control(c: &mut Ctx) -> u32 {
     let (sid, cmd, arg) = (c.arg(0), c.arg(1), c.arg(2));
     match cmd {
@@ -324,6 +328,17 @@ pub fn control(c: &mut Ctx) -> u32 {
         }
         CTL_WINDOWED => {
             if session::set_windowed(sid, arg != 0) { 0 } else { ERROR_SMG_SESSION_NOT_FOUND }
+        }
+        CTL_RESIZE => {
+            if !session::is_windowable(sid) || crate::vdm::is_dos(sid) {
+                return ERROR_SMG_SESSION_NOT_FOUND;
+            }
+            let (cols, rows) = ((arg & 0xffff) as usize, (arg >> 16) as usize);
+            match crate::screen::with_session(sid, |s| s.windowed.then(|| s.resize_text(cols, rows))) {
+                Some(Some(_)) => 0,
+                Some(None) => err::INVALID_PARAMETER,
+                None => ERROR_SMG_SESSION_NOT_FOUND,
+            }
         }
         CTL_SELECT => {
             if session::select(sid) { 0 } else { ERROR_SMG_SESSION_NOT_FOUND }

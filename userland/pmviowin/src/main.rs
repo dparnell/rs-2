@@ -210,6 +210,9 @@ const CTL_FOCUS: u32 = 1;
 const CTL_WINDOWED: u32 = 2;
 const CTL_STOP: u32 = 3;
 const CTL_REGISTER: u32 = 5;
+/// The window was sized to show cols | rows << 16 cells: the session's
+/// screen takes that size.
+const CTL_RESIZE: u32 = 6;
 
 unsafe extern "C" {
     #[link_name = "RS2API.10"]
@@ -385,6 +388,8 @@ static BLINK_OFF: AtomicU32 = AtomicU32::new(0);
 static HAD_WINDOWS: AtomicU32 = AtomicU32::new(0);
 static SHELL: AtomicU32 = AtomicU32::new(0);
 static CASCADE: AtomicU32 = AtomicU32::new(0);
+/// fit_window is sizing a frame (its WM_SIZE is not the user's).
+static FITTING: AtomicU32 = AtomicU32::new(0);
 
 fn wins() -> &'static mut Vec<Win> {
     unsafe { &mut *core::ptr::addr_of_mut!(WINS) }
@@ -771,7 +776,9 @@ fn fit_window(i: usize) {
     let top = pos.t.min(sh);
     let x = pos.l.min(sw - w_).max(0);
     let y = (top - h_).max(0);
+    FITTING.store(1, Ordering::Relaxed);
     unsafe { WinSetWindowPos(frame, 0, x, y, w_, h_, SWP_SIZE | SWP_MOVE) };
+    FITTING.store(0, Ordering::Relaxed);
     {
         let w = &mut wins()[i];
         w.sx = 0;
@@ -1444,6 +1451,15 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_SIZE => {
+            // The user sized the window: a text session's screen takes the
+            // size it shows (the window then fits it to whole cells).
+            let w = &wins()[i];
+            if FITTING.load(Ordering::Relaxed) == 0 && w.windowed && w.pix.is_none() && w.view.is_none() && w.flags & ST_DOS == 0 && w.cols > 0 {
+                let (vc, vr) = w.visible();
+                if (vc, vr) != (w.cols, w.rows) {
+                    unsafe { Rs2VioControl(w.sid, CTL_RESIZE, vc as u32 | (vr as u32) << 16) };
+                }
+            }
             update_scrollbars(i);
             let (sx, sy) = (wins()[i].sx, wins()[i].sy);
             scroll_to(i, sx, sy);

@@ -398,7 +398,7 @@ RS2API services for the host (32-bit, `_System`):
 | 13 | `Rs2VioQueryFont(ULONG sid, ULONG cy, PBYTE p, ULONG cb)`: the 256 glyphs at height 8, 14 or 16 for the session's code page (or its VioSetFont font) |
 | 14 | `Rs2VioKey(ULONG sid, PINPUTEVENT p)`: a key as Rs2ReadInput reports it (character, scan code, extended flag, shift state, make/break): through the session's keyboard monitors, then its input mode (Ctrl+C, Ctrl+Break, Ctrl+S, PrtSc), to its queue; Alt+Home switches it to the full screen |
 | 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)`: the pointer over a cell: events into the session's mouse queue (and monitors) if it opened the mouse |
-| 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)`: 1 focus, 2 windowed (1) or full screen (0), 3 end the session (its processes are killed), 4 select any session, 5 register as the host |
+| 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)`: 1 focus, 2 windowed (1) or full screen (0), 3 end the session (its processes are killed), 4 select any session, 5 register as the host, 6 the window was sized to show arg = cols \| rows << 16 cells (the screen takes that size, see below) |
 | 17 | `Rs2VioReadHistory(ULONG sid, ULONG ulEnd, ULONG cLines, ULONG cCols, PUSHORT pCells, ULONG cb)`: the scroll back: lines ulEnd - cLines .. ulEnd, cCols cells each, oldest first (lines are numbered from the first that ever scrolled off; lines no longer kept are blank) |
 
 The kernel keeps the last 1000 lines that scroll off a windowable
@@ -430,6 +430,15 @@ for a session:
 - the window takes the size of the text mode (the session's cell height
   unless a font size was chosen) and follows mode changes (`MODE
   CO80,43`); when it is smaller than the screen, the scroll bars scroll it;
+- sizing the window with the mouse sizes the screen (unlike OS/2, where
+  the screen stays 80 x 25 and a bigger window showed the scroll back
+  above it, so CLS seemed not to clear or home the cursor): the session's
+  screen takes the whole cells the window shows (20 to 132 columns, 4
+  rows up to what fits the display at its cell height, for Alt+Home), the
+  text stays where it is (rows above the cursor scroll into the scroll
+  back when it would fall off the bottom), and VioGetMode reports the new
+  size (IBM's CMD redraws its help line across it). DOS sessions keep
+  their mode;
 - the scroll back sits above the screen: the vertical scroll bar and
   Shift+PgUp / Shift+PgDn show it (PMWIN keeps those keys for the
   window), the view follows new output while it shows the screen (its

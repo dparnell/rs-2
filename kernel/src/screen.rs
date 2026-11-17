@@ -515,6 +515,50 @@ impl Screen {
         self.layout();
     }
 
+    /// A windowed session's window was resized to `cols` x `rows` cells:
+    /// the text follows it, keeping the font (clamped to what still fits
+    /// the framebuffer at that cell height, for a switch to the full
+    /// screen). The text stays where it is; when the cursor's row no
+    /// longer fits, the rows above it scroll up (into the scroll back,
+    /// under a status line). True if the size changed.
+    pub fn resize_text(&mut self, cols: usize, rows: usize) -> bool {
+        if self.graphics || self.pixmap.is_some() || self.surface.is_some() {
+            return false;
+        }
+        let max_c = (self.fb.width as usize / CELL_W).min(MAX_COLS);
+        let max_r = (self.fb.height as usize / self.cell_h.max(1)).min(MAX_ROWS);
+        let cols = cols.clamp(20.min(max_c), max_c);
+        let rows = rows.clamp(4.min(max_r), max_r);
+        if (cols, rows) == (self.cols, self.rows) {
+            return false;
+        }
+        let blank = (self.attr as u16) << 8 | b' ' as u16;
+        let cur = self.cursor.map_or(self.cur_row, |(r, _)| r.max(self.cur_row));
+        if cur >= rows {
+            let top = (self.status_line && rows > 1) as usize;
+            let old = self.rows;
+            self.scroll_up(top, old - 1, cur + 1 - rows, blank);
+            self.cur_row = self.cur_row.saturating_sub(cur + 1 - rows);
+            self.cursor = self.cursor.map(|(r, c)| (r.saturating_sub(cur + 1 - rows), c));
+        }
+        // Cells that come into view are blank.
+        for r in 0..rows {
+            let from = if r < self.rows { self.cols } else { 0 };
+            for c in from..cols {
+                self.cells[r][c] = blank;
+            }
+        }
+        self.cols = cols;
+        self.rows = rows;
+        self.cur_row = self.cur_row.min(rows - 1);
+        self.cur_col = self.cur_col.min(cols - 1);
+        self.cursor = self.cursor.map(|(r, c)| (r.min(rows - 1), c.min(cols - 1)));
+        self.sync_phys();
+        self.touch();
+        self.layout();
+        true
+    }
+
     /// Centre the text area and redraw everything.
     fn layout(&mut self) {
         self.x0 = (self.fb.width as usize).saturating_sub(self.cols * CELL_W) / 2;

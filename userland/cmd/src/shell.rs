@@ -145,9 +145,16 @@ impl Shell {
                 Some('D') => s.push_str(&crate::builtin::date_string()),
                 Some('T') => s.push_str(&crate::builtin::time_string()),
                 Some('I') => {
-                    // The help line at the top of the screen.
-                    s.push_str("\x1b[s\x1b[1;1H\x1b[7m");
-                    s.push_str("rs2      Ctrl+Esc = Window List        Type HELP = help                  ");
+                    // The help line at the top of the screen: bright white
+                    // on blue as IBM's, across the screen's width (a
+                    // window's screen can be any width).
+                    let cols = os2::vio::vio_get_mode().map_or(80, |m| m.col as usize).clamp(1, 132);
+                    let mut line: String = "rs2      Ctrl+Esc = Window List        Type HELP = help".chars().take(cols).collect();
+                    while line.len() < cols {
+                        line.push(' ');
+                    }
+                    s.push_str("\x1b[s\x1b[1;1H\x1b[1;37;44m");
+                    s.push_str(&line);
                     s.push_str("\x1b[0m\x1b[u");
                 }
                 _ => {}

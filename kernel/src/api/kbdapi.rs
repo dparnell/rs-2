@@ -112,7 +112,7 @@ pub fn kbd_string_in(c: &mut Ctx) -> u32 {
     }
     let echo = info.mask & mask::ECHO_OFF == 0;
     let turnaround = info.turnaround as u8;
-    let Some(mut line) = conkbd::read_line(s, cb as usize - 1, echo, turnaround) else { return err::INTERRUPT };
+    let Some(mut line) = conkbd::read_line(s, cb as usize - 1, echo, turnaround, false) else { return err::INTERRUPT };
     if echo {
         crate::console::write(b"\r");
     }

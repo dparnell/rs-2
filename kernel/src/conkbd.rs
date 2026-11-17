@@ -56,6 +56,9 @@ struct Sess {
     paused: bool,
     /// The previous input line (F1/F3 recall).
     template: Vec<u8>,
+    /// Lines read from CON (DosRead) with echo on, oldest first: Up and
+    /// Down bring them back.
+    history: VecDeque<Vec<u8>>,
     insert: bool,
     /// Rest of an edited CON line not yet consumed by DosRead.
     cooked: VecDeque<u8>,
@@ -70,6 +73,7 @@ impl Sess {
             focus: None,
             paused: false,
             template: Vec::new(),
+            history: VecDeque::new(),
             insert: false,
             cooked: VecDeque::new(),
             codepage: 0,
@@ -556,10 +560,17 @@ pub fn inject(sid: u32, bytes: &[u8]) {
 
 /// Read a line with the editing keys: Left/Right, Home/End, Ins (insert
 /// or overwrite), Del, Backspace, Esc (clear), F1/F3 (copy one/the rest
-/// from the previous line). Ends at `turnaround` (CR), which is not
-/// stored. None if interrupted (Ctrl+C, termination).
-pub fn read_line(sid: u32, max: usize, echo: bool, turnaround: u8) -> Option<Vec<u8>> {
+/// from the previous line); with `history`, Up and Down step through the
+/// lines read before (as DOSKEY does: what CMD and other programs read
+/// from CON). Ends at `turnaround` (CR), which is not stored. None if
+/// interrupted (Ctrl+C, termination).
+pub fn read_line(sid: u32, max: usize, echo: bool, turnaround: u8, history: bool) -> Option<Vec<u8>> {
     let template = with(sid, |s| s.template.clone());
+    let lines: Vec<Vec<u8>> = if history { with(sid, |s| s.history.iter().cloned().collect()) } else { Vec::new() };
+    // The history line shown (lines.len(): the line being typed, kept in
+    // `typed` while an older one is shown).
+    let mut at = lines.len();
+    let mut typed: Vec<u8> = Vec::new();
     let mut insert = with(sid, |s| s.insert);
     let mut ed = Editor { buf: Vec::new(), pos: 0, start: cursor(), echo };
     loop {
@@ -599,6 +610,20 @@ pub fn read_line(sid: u32, max: usize, echo: bool, turnaround: u8) -> Option<Vec
             }
             (_, 0x52) => insert = !insert,
             (_, 0x53) => ed.delete(),
+            // Up / Down: the previous / next line of the history.
+            (_, 0x48 | 0x50) if history => {
+                let next = if k.scan == 0x48 { at.checked_sub(1) } else { (at < lines.len()).then_some(at + 1) };
+                let Some(next) = next else { continue };
+                if at == lines.len() {
+                    typed = ed.buf.clone();
+                }
+                at = next;
+                let line = lines.get(at).unwrap_or(&typed).clone();
+                ed.clear();
+                for &c in line.iter().take(max) {
+                    ed.put(c, false);
+                }
+            }
             _ => {}
         }
     }
@@ -607,9 +632,18 @@ pub fn read_line(sid: u32, max: usize, echo: bool, turnaround: u8) -> Option<Vec
     with(sid, |s| {
         s.template = ed.buf.clone();
         s.insert = insert;
+        if history && !ed.buf.iter().all(|&c| c == b' ') && s.history.back() != Some(&ed.buf) {
+            if s.history.len() == HISTORY_LINES {
+                s.history.pop_front();
+            }
+            s.history.push_back(ed.buf.clone());
+        }
     });
     Some(ed.buf)
 }
+
+/// Lines kept for Up / Down per session.
+const HISTORY_LINES: usize = 100;
 
 fn cursor() -> (usize, usize) {
     crate::screen::with(|s| (s.cur_row, s.cur_col)).unwrap_or((0, 0))
@@ -755,7 +789,7 @@ pub fn read_cooked(len: usize) -> Vec<u8> {
     }
     if with(sid, |s| s.cooked.is_empty()) {
         let echo = info(sid, 0).map_or(true, |i| i.mask & mask::ECHO_OFF == 0);
-        let Some(mut line) = read_line(sid, 254, echo, b'\r') else { return Vec::new() };
+        let Some(mut line) = read_line(sid, 254, echo, b'\r', echo) else { return Vec::new() };
         if echo {
             crate::console::write(b"\r\n");
         }

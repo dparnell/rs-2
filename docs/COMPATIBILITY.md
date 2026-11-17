@@ -498,7 +498,10 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   character, interim flags, shift reporting), KbdXlate, KbdSetCp/GetCp,
   KbdGetHWID. Line editing for KbdStringIn and cooked DosRead from CON:
   Left/Right, Home/End, Ins (insert/overwrite), Del, Backspace, Esc,
-  F1/F3 (copy from the previous line); binary DosRead returns keys as
+  F1/F3 (copy from the previous line); cooked DosRead with echo also
+  keeps a history (the last 100 lines per session, as DOSKEY: Up/Down,
+  which is how rs2's CMD gets one; KbdStringIn has none, as on OS/2,
+  where IBM's CMD keeps its own with KEYS ON); binary DosRead returns keys as
   typed. In ASCII mode Ctrl+C raises the signal and Ctrl+S suspends
   screen output until the next key; Ctrl+Break always signals. The
   shift state includes Insert and the lock keys held down; PS/2
