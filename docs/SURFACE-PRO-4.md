@@ -206,6 +206,9 @@ The SP4 has no serial port. Done (2026-11-15):
     newest lines that fit in the space it already has. Checked in QEMU
     with an EFI partition filled to 4 KB free: "saving
     D:\RS2\LIVEBOOT.LOG failed (error 112, 0 KB free)" is in the file.
+  - Confirmed on the Surface (2026-11-17): with c311c67f installed, the
+    machine boots with the dock attached. Not checked yet: whether the
+    dock's own USB devices (its hub, a mouse behind it) work.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
