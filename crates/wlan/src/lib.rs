@@ -11,6 +11,7 @@
 //!   and scan results, without the bus transport.
 //! * [`crypto`] (the `rs2crypto` crate): SHA-1, HMAC, PBKDF2, the 802.11 PRF, AES-128 and the
 //!   RFC 3394 key wrap: what WPA2-Personal key management needs.
+//! * [`reorder`]: receive reordering for 802.11n block-ack sessions.
 //! * [`wpa`]: the WPA2-PSK supplicant (4-way and group key handshakes,
 //!   CCMP pairwise), driven by the EAPOL frames the network layer passes.
 
@@ -22,6 +23,7 @@ pub mod config;
 pub use rs2crypto as crypto;
 pub mod ie;
 pub mod mwifiex;
+pub mod reorder;
 pub mod wpa;
 
 pub use ie::Bss;

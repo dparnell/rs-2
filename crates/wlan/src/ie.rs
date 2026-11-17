@@ -9,8 +9,19 @@ pub const EID_SUPP_RATES: u8 = 1;
 pub const EID_DS_PARAMS: u8 = 3;
 pub const EID_RSN: u8 = 48;
 pub const EID_EXT_RATES: u8 = 50;
+pub const EID_HT_CAPABILITY: u8 = 45;
 pub const EID_HT_OPERATION: u8 = 61;
+pub const EID_BSS_COEX_2040: u8 = 72;
+pub const EID_EXT_CAPABILITY: u8 = 127;
+pub const EID_VHT_CAPABILITY: u8 = 191;
+pub const EID_VHT_OPERATION: u8 = 192;
+pub const EID_OPMODE_NOTIF: u8 = 199;
 pub const EID_VENDOR: u8 = 221;
+
+/// HT Capabilities and VHT Capabilities element sizes.
+pub const HT_CAP_LEN: usize = 26;
+pub const VHT_CAP_LEN: usize = 12;
+pub const VHT_OPER_LEN: usize = 5;
 
 /// Capability information bits.
 pub const CAP_ESS: u16 = 1 << 0;
@@ -217,6 +228,27 @@ impl Bss {
 
     /// The SSID for display: UTF-8 where it is, other bytes and control
     /// characters as '?'.
+    /// The contents of the first element `id`.
+    pub fn element(&self, id: u8) -> Option<&[u8]> {
+        elements(&self.ies).find(|e| e.0 == id).map(|e| e.1)
+    }
+
+    /// The WMM (QoS) parameter or information element: 802.11n needs QoS.
+    pub fn wmm(&self) -> bool {
+        elements(&self.ies).any(|(id, b)| id == EID_VENDOR && b.len() >= 5 && b[..4] == [0x00, 0x50, 0xf2, 0x02] && b[4] <= 1)
+    }
+
+    /// The fastest standard the network offers: "ac", "n" or "" (legacy).
+    pub fn standard(&self) -> &'static str {
+        if self.element(EID_VHT_CAPABILITY).is_some_and(|b| b.len() >= VHT_CAP_LEN) {
+            "ac"
+        } else if self.element(EID_HT_CAPABILITY).is_some_and(|b| b.len() >= HT_CAP_LEN) {
+            "n"
+        } else {
+            ""
+        }
+    }
+
     pub fn ssid_text(&self) -> String {
         ssid_text(&self.ssid)
     }

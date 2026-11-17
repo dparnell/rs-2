@@ -13,7 +13,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::ie::Bss;
+use crate::ie::{Bss, EID_BSS_COEX_2040, EID_EXT_CAPABILITY, EID_HT_CAPABILITY, EID_HT_OPERATION, EID_OPMODE_NOTIF, EID_VENDOR, EID_VHT_CAPABILITY, EID_VHT_OPERATION, HT_CAP_LEN, VHT_CAP_LEN, VHT_OPER_LEN};
 
 /// Interface header: u16 length, u16 type.
 pub const INTF_HDR: usize = 4;
@@ -36,6 +36,8 @@ pub const CMD_802_11_KEY_MATERIAL: u16 = 0x005e;
 pub const CMD_VERSION_EXT: u16 = 0x0097;
 pub const CMD_FUNC_INIT: u16 = 0x00a9;
 pub const CMD_FUNC_SHUTDOWN: u16 = 0x00aa;
+pub const CMD_11N_CFG: u16 = 0x00cd;
+pub const CMD_11N_ADDBA_RSP: u16 = 0x00cf;
 pub const CMD_RECONFIGURE_TX_BUFF: u16 = 0x00d9;
 pub const CMD_802_11_PS_MODE_ENH: u16 = 0x00e4;
 pub const CMD_PCIE_DESC_DETAILS: u16 = 0x00fa;
@@ -49,6 +51,11 @@ pub const EVENT_DISASSOCIATED: u32 = 0x09;
 pub const EVENT_PS_AWAKE: u32 = 0x0a;
 pub const EVENT_PS_SLEEP: u32 = 0x0b;
 pub const EVENT_PORT_RELEASE: u32 = 0x2b;
+/// The AP asks for a block-ack session (body: an ADDBA request).
+pub const EVENT_ADDBA: u32 = 0x33;
+/// A block-ack session ends (body: a DELBA).
+pub const EVENT_DELBA: u32 = 0x34;
+pub const EVENT_BA_STREAM_TIMEOUT: u32 = 0x37;
 pub const EVENT_EXT_SCAN_REPORT: u32 = 0x58;
 
 pub const TLV_SUPP_RATES: u16 = 0x0001;
@@ -177,7 +184,11 @@ pub struct HwSpec {
     pub fw_release: u32,
     pub fw_cap: u32,
     pub dot11n_cap: u32,
+    /// Spatial streams: 0x11 one, 0x22 two (low nibble: receive).
+    pub dev_mcs: u8,
     pub dot11ac_cap: u32,
+    /// VHT MCS maps: receive in the low half, transmit in the high.
+    pub dot11ac_mcs: u32,
 }
 
 impl HwSpec {
@@ -196,7 +207,9 @@ impl HwSpec {
             fw_release: le32(b, 18),
             fw_cap: le32(b, 34),
             dot11n_cap: if b.len() >= 42 { le32(b, 38) } else { 0 },
+            dev_mcs: if b.len() >= 43 { b[42] } else { 0 },
             dot11ac_cap: if b.len() >= 59 { le32(b, 55) } else { 0 },
+            dot11ac_mcs: if b.len() >= 63 { le32(b, 59) } else { 0 },
         })
     }
 
@@ -424,9 +437,9 @@ fn common_rates(bss: &Bss) -> Vec<u8> {
 /// The body of 802_11_ASSOCIATE for `bss` (from a scan just before: the
 /// firmware joins what it found). `rsn_ie` is the RSN element (id, length,
 /// body) the station offers, for WPA2 networks. Open System
-/// authentication; no 802.11n/ac elements yet (the link runs at legacy
-/// rates).
-pub fn associate_body(bss: &Bss, rsn_ie: Option<&[u8]>) -> Vec<u8> {
+/// authentication. With `caps`, 802.11n and 802.11ac are offered to a
+/// network that has them (as Linux `mwifiex_cmd_802_11_associate`).
+pub fn associate_body(bss: &Bss, rsn_ie: Option<&[u8]>, caps: Option<&Caps>) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend(bss.bssid);
     v.extend((bss.capability & !CAP_NOT_ASKED).to_le_bytes());
@@ -439,13 +452,232 @@ pub fn associate_body(bss: &Bss, rsn_ie: Option<&[u8]>) -> Vec<u8> {
     push_tlv(&mut v, 4, &[0; 6]);
     push_tlv(&mut v, TLV_SUPP_RATES, &common_rates(bss));
     push_tlv(&mut v, TLV_AUTH_TYPE, &0u16.to_le_bytes());
-    // The channel and band the network is on.
     let band = if bss.channel > 14 { 1 } else { 0 };
-    push_tlv(&mut v, TLV_CHANLIST, &[band, bss.channel, 0, 0, 0, 0, 0]);
+    let ht = caps.filter(|c| c.ht()).and_then(|c| bss.element(EID_HT_CAPABILITY).filter(|b| b.len() >= HT_CAP_LEN).map(|ap| (c, ap)));
+    if ht.is_none() {
+        // The channel and band the network is on (with 802.11n it comes
+        // below, with the secondary channel).
+        push_tlv(&mut v, TLV_CHANLIST, &[band, bss.channel, 0, 0, 0, 0, 0]);
+    }
     if let Some(ie) = rsn_ie.filter(|ie| ie.len() >= 2) {
         push_tlv(&mut v, ie[0] as u16, &ie[2..]);
     }
+    if let Some((c, ap)) = ht {
+        push_tlv(&mut v, EID_HT_CAPABILITY as u16, &c.ht_cap(ap));
+        if let Some(op) = bss.element(EID_HT_OPERATION).filter(|b| b.len() >= 2) {
+            // Primary channel, and the secondary one when both sides
+            // can use 40 MHz.
+            let mut radio = band;
+            if c.ht40() && op[1] & 1 << 2 != 0 {
+                radio |= (op[1] & 3) << 4;
+            }
+            push_tlv(&mut v, TLV_CHANLIST, &[radio, op[0], 0, 0, 0, 0, 0]);
+        }
+        if let Some(b) = bss.element(EID_BSS_COEX_2040).filter(|b| !b.is_empty()) {
+            push_tlv(&mut v, EID_BSS_COEX_2040 as u16, &b[..1]);
+        }
+        if let Some(b) = bss.element(EID_EXT_CAPABILITY) {
+            push_tlv(&mut v, EID_EXT_CAPABILITY as u16, b);
+        }
+        if c.vht() {
+            if let Some(ap) = bss.element(EID_VHT_CAPABILITY).filter(|b| b.len() >= VHT_CAP_LEN) {
+                push_tlv(&mut v, EID_VHT_CAPABILITY as u16, &c.vht_cap(ap));
+            }
+            if let Some(op) = bss.element(EID_VHT_OPERATION).filter(|b| b.len() >= VHT_OPER_LEN) {
+                let mut o = [0u8; VHT_OPER_LEN];
+                o.copy_from_slice(&op[..VHT_OPER_LEN]);
+                // Channel width: at most what the chip can (80 MHz unless
+                // it says 160 or 80+80).
+                o[0] = o[0].min(c.vht_max_width());
+                push_tlv(&mut v, EID_VHT_OPERATION as u16, &o);
+            }
+            if let Some(b) = bss.element(EID_OPMODE_NOTIF).filter(|b| !b.is_empty()) {
+                push_tlv(&mut v, EID_OPMODE_NOTIF as u16, &b[..1]);
+            }
+        }
+    }
+    if ht.is_some() && bss.wmm() {
+        // WMM information element (QoS info 0): 802.11n rates need QoS.
+        push_tlv(&mut v, EID_VENDOR as u16, &WMM_INFO);
+    }
     v
+}
+
+/// The WMM information element's contents (Linux `wmm_info_ie`).
+const WMM_INFO: [u8; 7] = [0x00, 0x50, 0xf2, 0x02, 0x00, 0x01, 0x00];
+
+/// What the chip can do in 802.11n/ac, from GET_HW_SPEC (Linux
+/// `mwifiex_setup_ht_caps`, `mwifiex_fill_cap_info`, the 11ac parts of
+/// `mwifiex_ret_get_hw_spec`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Caps {
+    pub fw_cap: u32,
+    pub dot11n_cap: u32,
+    pub dev_mcs: u8,
+    pub dot11ac_cap: u32,
+    pub dot11ac_mcs: u32,
+}
+
+/// VHT capability bits not offered (beamformer roles, sounding
+/// dimensions: `MWIFIEX_DEF_11AC_CAP_BF_RESET_MASK`).
+const VHT_CAP_BF_RESET: u32 = 1 << 11 | 1 << 19 | 1 << 20 | 7 << 16;
+/// HT transmit beamforming capabilities (`MWIFIEX_DEF_11N_TX_BF_CAP`).
+const HT_TX_BF_CAP: u32 = 0x09e1_e008;
+
+impl Caps {
+    pub fn from_spec(s: &HwSpec) -> Caps {
+        Caps { fw_cap: s.fw_cap, dot11n_cap: s.dot11n_cap, dev_mcs: s.dev_mcs, dot11ac_cap: s.dot11ac_cap, dot11ac_mcs: s.dot11ac_mcs }
+    }
+
+    pub fn ht(&self) -> bool {
+        self.fw_cap & 1 << 11 != 0
+    }
+
+    pub fn vht(&self) -> bool {
+        self.ht() && self.fw_cap & 1 << 13 != 0
+    }
+
+    pub fn ht40(&self) -> bool {
+        self.dot11n_cap & 1 << 17 != 0
+    }
+
+    /// Receive spatial streams (1 or 2).
+    pub fn streams(&self) -> usize {
+        ((self.dev_mcs & 0x0f) as usize).clamp(1, 4)
+    }
+
+    /// HT capability information field.
+    fn ht_cap_info(&self) -> u16 {
+        let d = self.dot11n_cap;
+        let mut c = 0u16;
+        let bit = |b: u32| d & 1 << b != 0;
+        if bit(22) {
+            c |= 1 << 0; // LDPC
+        }
+        if bit(17) {
+            c |= 1 << 1; // 20/40 MHz
+        }
+        c |= 3 << 2; // SM power save disabled
+        if bit(29) {
+            c |= 1 << 4; // greenfield
+        }
+        if bit(23) {
+            c |= 1 << 5; // short GI 20 MHz
+        }
+        if bit(24) {
+            c |= 1 << 6; // short GI 40 MHz
+        }
+        if bit(25) {
+            c |= 1 << 7; // TX STBC
+        }
+        c |= if self.dev_mcs == 0x22 { 2 } else { 1 } << 8; // RX STBC streams
+        if bit(8) {
+            c |= 1 << 14; // 40 MHz intolerant
+        }
+        c
+    }
+
+    /// The HT Capabilities element contents offered to a network whose
+    /// own is `ap` (its extended capabilities and antenna selection are
+    /// kept, as Linux does).
+    pub fn ht_cap(&self, ap: &[u8]) -> [u8; HT_CAP_LEN] {
+        let mut e = [0u8; HT_CAP_LEN];
+        e.copy_from_slice(&ap[..HT_CAP_LEN]);
+        e[0..2].copy_from_slice(&self.ht_cap_info().to_le_bytes());
+        // A-MPDU: 64 KB, no minimum spacing.
+        e[2] = 3;
+        // Supported MCS set: 8 MCS per receive stream, MCS 32, no highest
+        // rate given, TX set defined and equal.
+        let mcs = &mut e[3..19];
+        mcs.fill(0);
+        for m in mcs.iter_mut().take(self.streams()) {
+            *m = 0xff;
+        }
+        mcs[4] |= 1;
+        mcs[12] = 1;
+        // Extended HT capabilities: no reverse direction responder.
+        let ext = u16::from_le_bytes([e[19], e[20]]) & !(1 << 11);
+        e[19..21].copy_from_slice(&ext.to_le_bytes());
+        if self.dot11n_cap & 1 << 30 != 0 {
+            e[21..25].copy_from_slice(&HT_TX_BF_CAP.to_le_bytes());
+        }
+        e
+    }
+
+    /// The widest VHT channel width (VHT Operation's field): 1 (80 MHz),
+    /// 2 (160), 3 (80+80).
+    pub fn vht_max_width(&self) -> u8 {
+        match (self.dot11ac_cap >> 2) & 3 {
+            1 => 2,
+            2 => 3,
+            _ => 1,
+        }
+    }
+
+    /// The VHT Capabilities element contents offered to a network whose
+    /// own is `ap`: the chip's capabilities without beamformer roles, and
+    /// per stream the lower of the chip's and the network's MCS limits
+    /// (Linux `mwifiex_fill_vht_cap_tlv`).
+    pub fn vht_cap(&self, ap: &[u8]) -> [u8; VHT_CAP_LEN] {
+        let mut e = [0u8; VHT_CAP_LEN];
+        e.copy_from_slice(&ap[..VHT_CAP_LEN]);
+        e[0..4].copy_from_slice(&(self.dot11ac_cap & !VHT_CAP_BF_RESET).to_le_bytes());
+        let ours = [(self.dot11ac_mcs & 0xffff) as u16, (self.dot11ac_mcs >> 16) as u16];
+        for (k, at) in [4usize, 8].into_iter().enumerate() {
+            let theirs = u16::from_le_bytes([e[at], e[at + 1]]);
+            let mut map = 0u16;
+            for nss in 0..8 {
+                let (a, b) = (ours[k] >> (2 * nss) & 3, theirs >> (2 * nss) & 3);
+                let m = if a == 3 || b == 3 { 3 } else { a.min(b) };
+                map |= m << (2 * nss);
+            }
+            e[at..at + 2].copy_from_slice(&map.to_le_bytes());
+            // Highest long-GI rate: not given.
+            e[at + 2..at + 4].copy_from_slice(&[0, 0]);
+        }
+        e
+    }
+}
+
+/// 11N_CFG (set): what the firmware may use when it sends with 802.11n
+/// (`MWIFIEX_FW_DEF_HTTXCFG`: 20/40 MHz, greenfield, short GI 20 and 40).
+pub fn ht_cfg_body() -> Vec<u8> {
+    let mut v = Vec::new();
+    for x in [ACT_SET, 1 << 1 | 1 << 4 | 1 << 5 | 1 << 6, 0, 0] {
+        v.extend(x.to_le_bytes());
+    }
+    v
+}
+
+/// The block-ack window rs2 accepts (frames held for reordering per
+/// traffic class).
+pub const BA_WINDOW: u16 = 32;
+
+/// A block-ack session the AP asked for (EVENT_ADDBA) and the
+/// 11N_ADDBA_RSP accepting it: (command body, TID, starting sequence
+/// number, window). Linux `mwifiex_cmd_11n_addba_rsp_gen`.
+pub fn addba_accept(req: &[u8], window: u16) -> Option<(Vec<u8>, u8, u16, u16)> {
+    if req.len() < 14 {
+        return None;
+    }
+    let param = le16(req, 8);
+    let tid = (param >> 2 & 0xf) as u8;
+    let ssn = le16(req, 12) & 0xfff;
+    // Our window size in bits 6-15; A-MSDUs inside A-MPDUs are fine.
+    let param = param & 0x3f | window << 6;
+    let mut v = Vec::with_capacity(16);
+    v.push(0);
+    v.extend(&req[1..8]); // peer address, dialog token
+    v.extend(0u16.to_le_bytes()); // status: accepted
+    v.extend(param.to_le_bytes());
+    v.extend(&req[10..14]); // timeout, starting sequence number
+    Some((v, tid, ssn, window))
+}
+
+/// The TID of a block-ack session that ended (EVENT_DELBA body: result,
+/// peer address, DELBA parameters).
+pub fn delba_tid(ev: &[u8]) -> Option<u8> {
+    (ev.len() >= 9).then(|| (le16(ev, 7) >> 12) as u8)
 }
 
 /// The 802_11_ASSOCIATE response: (capability, status code, association
@@ -537,40 +769,88 @@ pub fn txpd(frame_len: usize) -> [u8; TXPD_LEN] {
 /// the WPA2 handshake's EAPOL frames type 2); as in Linux, every type but
 /// these is an ordinary frame.
 pub const PKT_TYPE_DATA: u16 = 0;
-pub const PKT_TYPE_AMSDU: u16 = 3;
-pub const PKT_TYPE_BAR: u16 = 0x0a;
 pub const PKT_TYPE_MGMT: u16 = 0xe5;
+pub const PKT_TYPE_AMSDU: u16 = 0xe6;
+/// A Block Ack Request: no frame, its sequence number moves the reorder
+/// window.
+pub const PKT_TYPE_BAR: u16 = 0xe7;
+
+/// The RxPD fields rs2 uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RxPd {
+    pub kind: u16,
+    pub len: usize,
+    pub off: usize,
+    /// 802.11 sequence number and TID, for block-ack reordering.
+    pub seq: u16,
+    pub tid: u8,
+}
+
+pub fn rxpd(b: &[u8]) -> Option<RxPd> {
+    (b.len() >= 12).then(|| RxPd { kind: le16(b, 6), len: le16(b, 2) as usize, off: le16(b, 4) as usize, seq: le16(b, 8) & 0xfff, tid: b[10] & 7 })
+}
+
+/// An 802.3 frame (or an A-MSDU subframe) as an Ethernet II frame:
+/// RFC 1042 and bridge-tunnel SNAP headers become the type field.
+fn ethernet(p: &[u8]) -> Vec<u8> {
+    let snap = p.len() >= 22 && p[14..17] == [0xaa, 0xaa, 0x03] && (p[17..20] == [0, 0, 0] || p[17..20] == [0, 0, 0xf8]);
+    let mut f = Vec::with_capacity(p.len());
+    f.extend(&p[..12]);
+    f.extend(if snap { &p[20..] } else { &p[12..] });
+    f
+}
+
+/// The subframes of an A-MSDU (destination, source, length, LLC/SNAP and
+/// payload, each padded to 4 bytes) as Ethernet II frames.
+pub fn amsdu_frames(mut b: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    while b.len() >= 14 {
+        let n = u16::from_be_bytes([b[12], b[13]]) as usize;
+        if b.len() < 14 + n || n < 8 {
+            break;
+        }
+        let mut f = Vec::with_capacity(14 + n);
+        f.extend(&b[..12]);
+        f.extend(&b[12..14]);
+        f.extend(&b[14..14 + n]);
+        out.push(ethernet(&f));
+        let step = (14 + n + 3) & !3;
+        if step >= b.len() {
+            break;
+        }
+        b = &b[step..];
+    }
+    out
+}
+
+/// A received packet (after the interface header): its RxPD and the
+/// Ethernet II frames it carries (none for a Block Ack Request, several
+/// for an A-MSDU). None: a management frame or malformed.
+pub fn rx_packet(b: &[u8]) -> Option<(RxPd, Vec<Vec<u8>>)> {
+    let pd = rxpd(b)?;
+    if pd.kind == PKT_TYPE_MGMT {
+        return None;
+    }
+    if pd.kind == PKT_TYPE_BAR {
+        return Some((pd, Vec::new()));
+    }
+    if pd.off < 12 || pd.off + 14 > b.len() {
+        return None;
+    }
+    let p = &b[pd.off..(pd.off + pd.len).min(b.len())];
+    if p.len() < 14 {
+        return None;
+    }
+    let frames = if pd.kind == PKT_TYPE_AMSDU { amsdu_frames(p) } else { alloc::vec![ethernet(p)] };
+    Some((pd, frames))
+}
 
 /// A received data packet (after the interface header: RxPD, then an
 /// 802.3 frame with an LLC/SNAP header) as an Ethernet II frame.
 /// None: not a data frame, or malformed.
 pub fn rx_frame(b: &[u8]) -> Option<Vec<u8>> {
-    if b.len() < 12 {
-        return None;
-    }
-    let len = le16(b, 2) as usize;
-    let off = le16(b, 4) as usize;
-    let kind = le16(b, 6);
-    // A-MSDUs (several frames in one) are not taken apart yet: only
-    // offered with 802.11n, which rs2 does not ask for.
-    if matches!(kind, PKT_TYPE_AMSDU | PKT_TYPE_BAR | PKT_TYPE_MGMT) || off < 12 || off + 14 > b.len() {
-        return None;
-    }
-    let p = &b[off..(off + len).min(b.len())];
-    if p.len() < 14 {
-        return None;
-    }
-    // RFC 1042 (AA AA 03 00 00 00) or bridge tunnel (AA AA 03 00 00 F8)
-    // SNAP: Ethernet II with the SNAP's type.
-    let snap = p.len() >= 22 && p[14..17] == [0xaa, 0xaa, 0x03] && (p[17..20] == [0, 0, 0] || p[17..20] == [0, 0, 0xf8]);
-    let mut f = Vec::with_capacity(p.len());
-    f.extend(&p[..12]);
-    if snap {
-        f.extend(&p[20..]);
-    } else {
-        f.extend(&p[12..]);
-    }
-    Some(f)
+    let (pd, mut f) = rx_packet(b)?;
+    (pd.kind != PKT_TYPE_AMSDU && f.len() == 1).then(|| f.remove(0))
 }
 
 pub fn command_name(cmd: u16) -> &'static str {
@@ -587,6 +867,8 @@ pub fn command_name(cmd: u16) -> &'static str {
         CMD_FUNC_INIT => "FUNC_INIT",
         CMD_FUNC_SHUTDOWN => "FUNC_SHUTDOWN",
         CMD_RECONFIGURE_TX_BUFF => "RECONFIGURE_TX_BUFF",
+        CMD_11N_CFG => "11N_CFG",
+        CMD_11N_ADDBA_RSP => "11N_ADDBA_RSP",
         CMD_802_11_PS_MODE_ENH => "PS_MODE_ENH",
         CMD_PCIE_DESC_DETAILS => "PCIE_DESC_DETAILS",
         CMD_802_11_SCAN_EXT => "SCAN_EXT",
@@ -712,7 +994,7 @@ mod tests {
         ies.extend([48, 2, 1, 0]);
         let b = Bss::new([2, 0, 0, 0, 0, 9], -50, 100, 0x0411 | 1 << 15, &ies, 6);
         let rsn = [48u8, 3, 1, 0, 7];
-        let v = associate_body(&b, Some(&rsn));
+        let v = associate_body(&b, Some(&rsn), None);
         assert_eq!(&v[..6], &[2, 0, 0, 0, 0, 9]);
         assert_eq!(&v[6..13], &[0x11, 0x04, 10, 0, 100, 0, 0]);
         let t: Vec<_> = tlvs(&v[13..]).collect();
@@ -790,6 +1072,156 @@ mod tests {
         b[6] = 2;
         b.extend(&p);
         assert_eq!(rx_frame(&b).unwrap(), p);
+    }
+
+    /// The 88W8897 on the Surface Pro 4: GET_HW_SPEC's capability words.
+    fn surface_caps() -> Caps {
+        Caps { fw_cap: 0x1878_ffa3, dot11n_cap: 0x6ff1_00c3 | 1 << 17 | 1 << 22 | 1 << 23 | 1 << 24 | 1 << 25, dev_mcs: 0x22, dot11ac_cap: 0x0390_51b2, dot11ac_mcs: 0xfffa_fffa }
+    }
+
+    fn ht_vht_network() -> Bss {
+        let mut ies = Vec::new();
+        let el = |v: &mut Vec<u8>, id: u8, b: &[u8]| {
+            v.push(id);
+            v.push(b.len() as u8);
+            v.extend(b);
+        };
+        el(&mut ies, 0, b"house");
+        el(&mut ies, 1, &[0x8c, 0x12, 0x98, 0x24, 0xb0, 0x48, 0x60, 0x6c]);
+        el(&mut ies, 3, &[36]);
+        let mut htcap = [0u8; 26];
+        htcap[0] = 0xef;
+        htcap[3] = 0xff;
+        htcap[4] = 0xff;
+        htcap[19] = 0x00;
+        htcap[20] = 0x08; // reverse direction responder (cleared in ours)
+        el(&mut ies, EID_HT_CAPABILITY, &htcap);
+        let mut htop = [0u8; 22];
+        htop[0] = 36;
+        htop[1] = 0x05; // secondary above, any width
+        el(&mut ies, EID_HT_OPERATION, &htop);
+        el(&mut ies, EID_EXT_CAPABILITY, &[0, 0, 0, 0, 0, 0, 0, 0x40]);
+        let mut vhtcap = [0u8; 12];
+        vhtcap[4..6].copy_from_slice(&0xfffau16.to_le_bytes()); // MCS 0-9 for 1 stream, 0-8 for 2? (2 bits each)
+        vhtcap[8..10].copy_from_slice(&0xfffeu16.to_le_bytes());
+        el(&mut ies, EID_VHT_CAPABILITY, &vhtcap);
+        el(&mut ies, EID_VHT_OPERATION, &[2, 42, 0, 0, 0]); // 160 MHz offered
+        el(&mut ies, EID_VENDOR, &[0x00, 0x50, 0xf2, 0x02, 0x01, 0x01, 0x80]); // WMM parameter
+        Bss::new([2, 0, 0, 0, 0, 1], -60, 100, 0x0411, &ies, 36)
+    }
+
+    #[test]
+    fn caps_from_the_88w8897() {
+        let c = surface_caps();
+        assert!(c.ht() && c.vht() && c.ht40());
+        assert_eq!(c.streams(), 2);
+        let ht = c.ht_cap(ht_vht_network().element(EID_HT_CAPABILITY).unwrap());
+        let info = u16::from_le_bytes([ht[0], ht[1]]);
+        // LDPC, 20/40, SM PS off, greenfield, SGI 20/40, TX STBC, RX
+        // STBC 2.
+        assert_eq!(info & 0x03ff, 1 | 2 | 0xc | 0x10 | 0x20 | 0x40 | 0x80 | 0x200);
+        // Beamforming (bit 30): Marvell's TX beamforming capabilities.
+        assert_eq!(&ht[21..25], &HT_TX_BF_CAP.to_le_bytes());
+        assert_eq!(ht[2], 3);
+        assert_eq!(&ht[3..8], &[0xff, 0xff, 0, 0, 1]);
+        assert_eq!(ht[15], 1);
+        assert_eq!(u16::from_le_bytes([ht[19], ht[20]]) & 1 << 11, 0);
+    }
+
+    #[test]
+    fn vht_mcs_maps_take_the_lower() {
+        let c = surface_caps();
+        let v = c.vht_cap(ht_vht_network().element(EID_VHT_CAPABILITY).unwrap());
+        assert_eq!(u32::from_le_bytes([v[0], v[1], v[2], v[3]]) & VHT_CAP_BF_RESET, 0);
+        // ours 0xfffa (2 streams MCS 0-9), theirs rx 0xfffa: 0xfffa;
+        // tx: ours 0xfffa, theirs 0xfffe (1 stream): 0xfffe.
+        assert_eq!(u16::from_le_bytes([v[4], v[5]]), 0xfffa);
+        assert_eq!(u16::from_le_bytes([v[8], v[9]]), 0xfffe);
+        assert_eq!(c.vht_max_width(), 1);
+    }
+
+    #[test]
+    fn association_offers_ht_and_vht() {
+        let b = ht_vht_network();
+        let c = surface_caps();
+        let legacy = associate_body(&b, None, None);
+        let types: Vec<u16> = tlvs(&legacy[13..]).map(|t| t.0).collect();
+        assert!(types.contains(&TLV_CHANLIST) && !types.contains(&(EID_HT_CAPABILITY as u16)));
+        let v = associate_body(&b, None, Some(&c));
+        let t: Vec<(u16, Vec<u8>)> = tlvs(&v[13..]).map(|(t, b)| (t, b.to_vec())).collect();
+        let find = |id: u16| t.iter().find(|e| e.0 == id).map(|e| e.1.clone());
+        assert_eq!(t.iter().filter(|e| e.0 == TLV_CHANLIST).count(), 1);
+        // Channel 36, 5 GHz, secondary channel above.
+        assert_eq!(find(TLV_CHANLIST).unwrap()[..2], [1 | 1 << 4, 36]);
+        assert_eq!(find(EID_HT_CAPABILITY as u16).unwrap().len(), 26);
+        assert_eq!(find(EID_EXT_CAPABILITY as u16).unwrap().len(), 8);
+        assert_eq!(find(EID_VHT_CAPABILITY as u16).unwrap().len(), 12);
+        // 160 MHz offered, 80 taken.
+        assert_eq!(find(EID_VHT_OPERATION as u16).unwrap()[0], 1);
+        assert_eq!(find(EID_VENDOR as u16).unwrap(), WMM_INFO.to_vec());
+        // Without HT in the firmware: legacy only.
+        let mut old = c;
+        old.fw_cap &= !(1 << 11);
+        assert_eq!(associate_body(&b, None, Some(&old)), legacy);
+    }
+
+    #[test]
+    fn block_ack_sessions() {
+        // ADDBA request: result, peer, token 5, TID 6 with window 64 and
+        // A-MSDU allowed, timeout 0, SSN 0x123 (in the low 12 bits).
+        let mut req = vec![0u8, 1, 2, 3, 4, 5, 6, 5];
+        req.extend((1u16 | 2 << 0 | 6 << 2 | 64 << 6).to_le_bytes());
+        req.extend(0u16.to_le_bytes());
+        req.extend(0x123u16.to_le_bytes());
+        let (rsp, tid, ssn, win) = addba_accept(&req, BA_WINDOW).unwrap();
+        assert_eq!((tid, ssn, win), (6, 0x123, 32));
+        assert_eq!(rsp.len(), 16);
+        assert_eq!(&rsp[1..8], &req[1..8]);
+        assert_eq!(&rsp[8..10], &[0, 0]);
+        assert_eq!(le16(&rsp, 10) >> 6, 32);
+        assert_eq!(le16(&rsp, 10) & 0x3f, le16(&req, 8) & 0x3f);
+        assert_eq!(&rsp[12..16], &req[10..14]);
+        let mut del = vec![0u8, 1, 2, 3, 4, 5, 6];
+        del.extend((6u16 << 12 | 1 << 11).to_le_bytes());
+        assert_eq!(delba_tid(&del), Some(6));
+        assert_eq!(ht_cfg_body(), [1, 0, 0x72, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn amsdu_and_bar() {
+        // Two subframes: an ARP payload with SNAP, then IPv4, padded.
+        let sub = |da: u8, ty: [u8; 2], body: &[u8]| {
+            let mut f = vec![da; 6];
+            f.extend([9u8; 6]);
+            let mut p = vec![0xaa, 0xaa, 3, 0, 0, 0];
+            p.extend(ty);
+            p.extend(body);
+            f.extend((p.len() as u16).to_be_bytes());
+            f.extend(p);
+            f
+        };
+        let mut a = sub(1, [0x08, 0x06], &[1, 2, 3]);
+        while a.len() % 4 != 0 {
+            a.push(0);
+        }
+        a.extend(sub(2, [0x08, 0x00], &[4, 5]));
+        let frames = amsdu_frames(&a);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0][..6], [1; 6]);
+        assert_eq!(&frames[0][12..], &[0x08, 0x06, 1, 2, 3]);
+        assert_eq!(&frames[1][12..], &[0x08, 0x00, 4, 5]);
+        let mut b = vec![0u8; 20];
+        b[2..4].copy_from_slice(&(a.len() as u16).to_le_bytes());
+        b[4] = 20;
+        b[6..8].copy_from_slice(&PKT_TYPE_AMSDU.to_le_bytes());
+        b[8..10].copy_from_slice(&0x0457u16.to_le_bytes());
+        b[10] = 5;
+        b.extend(&a);
+        let (pd, f) = rx_packet(&b).unwrap();
+        assert_eq!((pd.seq, pd.tid, f.len()), (0x457, 5, 2));
+        b[6..8].copy_from_slice(&PKT_TYPE_BAR.to_le_bytes());
+        let (pd, f) = rx_packet(&b).unwrap();
+        assert_eq!((pd.kind, f.len()), (PKT_TYPE_BAR, 0));
     }
 
     #[test]

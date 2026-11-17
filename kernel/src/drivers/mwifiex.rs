@@ -33,6 +33,7 @@ use core::sync::atomic::{fence, AtomicU32, AtomicU64, Ordering};
 
 use wlan::ie::Bss;
 use wlan::mwifiex as mw;
+use wlan::reorder::Reorder;
 
 use super::pci;
 use super::virtio::queue::Dma;
@@ -292,6 +293,14 @@ pub struct Card {
     bssid: SpinLock<Option<[u8; 6]>>,
     tx_frames: AtomicU64,
     tx_dropped: AtomicU64,
+    /// 802.11n/ac capabilities from GET_HW_SPEC.
+    caps: SpinLock<Option<mw::Caps>>,
+    /// The standard the current network was joined with ("802.11ac",
+    /// "802.11n", "802.11a/g").
+    mode: SpinLock<&'static str>,
+    /// Block-ack sessions with the AP: received frames back in order
+    /// (each entry: the frames of one MPDU, several for an A-MSDU).
+    reorder: SpinLock<Reorder<Vec<Vec<u8>>>>,
 }
 
 /// MSI interrupts taken (the handler only wakes the wlan thread).
@@ -385,6 +394,9 @@ pub fn probe(d: &pci::Device) {
         bssid: SpinLock::new(None),
         tx_frames: AtomicU64::new(0),
         tx_dropped: AtomicU64::new(0),
+        caps: SpinLock::new(None),
+        mode: SpinLock::new(""),
+        reorder: SpinLock::new(Reorder::new()),
     };
     // The interrupt only wakes the wlan thread, which reads the status;
     // without MSI that thread polls.
@@ -510,16 +522,20 @@ impl Card {
                 let len = (get16(&d.rxbuf, i * RX_BUF) as usize).clamp(mw::INTF_HDR, RX_BUF);
                 let typ = get16(&d.rxbuf, i * RX_BUF + 2);
                 let pkt = d.rxbuf.bytes(i * RX_BUF + mw::INTF_HDR, len - mw::INTF_HDR);
-                let frame = if typ == mw::TYPE_DATA { mw::rx_frame(pkt) } else { None };
+                let parsed = if typ == mw::TYPE_DATA { mw::rx_packet(pkt) } else { None };
                 // The first packets in the log: what arrives, and what
-                // becomes of it (the WPA2 handshake never saw message 1).
+                // becomes of it.
                 if RX_LOGGED.fetch_add(1, Ordering::Relaxed) < RX_LOGGED_MAX {
                     let rxpd = if pkt.len() >= 8 { alloc::format!("RxPD type {:#x}, length {}, offset {}", get16_le(pkt, 6), get16_le(pkt, 2), get16_le(pkt, 4)) } else { String::from("short") };
-                    let what = frame.as_ref().map_or(String::from("dropped"), |f| alloc::format!("ethertype {:#06x}, {} bytes", u16::from_be_bytes([f[12], f[13]]), f.len()));
+                    let what = match &parsed {
+                        Some((_, f)) if !f.is_empty() => alloc::format!("{} frame(s), ethertype {:#06x}", f.len(), u16::from_be_bytes([f[0][12], f[0][13]])),
+                        Some((pd, _)) => alloc::format!("block ack request, TID {} sequence {}", pd.tid, pd.seq),
+                        None => String::from("dropped"),
+                    };
                     crate::wlog!("{}: rx slot {i}: {len} bytes, type {typ}, {rxpd}: {what}", self.name);
                 }
-                if let Some(f) = frame {
-                    got.push(f);
+                if let Some(p) = parsed {
+                    got.push(p);
                 }
                 self.rx_frames.fetch_add(1, Ordering::Relaxed);
                 d.arm_rx(i);
@@ -532,12 +548,60 @@ impl Card {
                 r.w(WR_DATA_PTR, d.wr_ptrs());
             }
         }
-        if !got.is_empty() {
-            let mut q = self.rxq.lock();
-            for f in got {
-                if q.len() < 256 {
-                    q.push_back(f);
+        if got.is_empty() {
+            return;
+        }
+        // Frames to us of a traffic class with a block-ack session go
+        // through its reorder window; the rest straight on.
+        let mac = *self.mac.lock();
+        let now = crate::irq::uptime_ms();
+        let mut out: Vec<Vec<Vec<u8>>> = Vec::new();
+        {
+            let mut ro = self.reorder.lock();
+            for (pd, frames) in got {
+                if pd.kind == mw::PKT_TYPE_BAR {
+                    ro.bar(pd.tid, pd.seq, now, &mut out);
+                } else if frames.first().is_some_and(|f| f[..6] == mac) && ro.active(pd.tid) {
+                    ro.rx(pd.tid, pd.seq, frames, now, &mut out);
+                } else {
+                    out.push(frames);
                 }
+            }
+        }
+        self.queue_rx(out);
+    }
+
+    fn queue_rx(&self, out: Vec<Vec<Vec<u8>>>) {
+        let mut q = self.rxq.lock();
+        for f in out.into_iter().flatten() {
+            if q.len() < 256 {
+                q.push_back(f);
+            }
+        }
+    }
+
+    /// The AP asked for a block-ack session: accept it with our window.
+    fn addba(&self, req: &[u8]) {
+        let Some((body, tid, ssn, win)) = mw::addba_accept(req, mw::BA_WINDOW) else { return };
+        let mut held = Vec::new();
+        self.reorder.lock().start(tid, ssn, win, &mut held);
+        self.queue_rx(held);
+        let mut g = self.inner.lock();
+        match self.command(&mut g, mw::CMD_11N_ADDBA_RSP, &body, 2000) {
+            Ok(r) if r.first().is_some_and(|&x| x != 0) => {
+                crate::wlog!("{}: block ack on TID {tid} not set up (firmware result {})", self.name, r[0]);
+                let mut held = Vec::new();
+                self.reorder.lock().stop(tid, &mut held);
+                drop(g);
+                self.queue_rx(held);
+            }
+            Ok(_) => crate::wlog!("{}: block ack on TID {tid} (window {win}, from sequence {ssn})", self.name),
+            Err(e) => {
+                crate::wlog!("{}: block ack on TID {tid}: {e}", self.name);
+                let mut held = Vec::new();
+                self.reorder.lock().stop(tid, &mut held);
+                drop(g);
+                self.queue_rx(held);
             }
         }
     }
@@ -689,6 +753,17 @@ impl Card {
         crate::wlog!("{}: key API {kmaj}.{kmin}", self.name);
         *self.mac.lock() = spec.mac;
         *self.fw_version.lock() = spec.fw_version();
+        let caps = mw::Caps::from_spec(&spec);
+        *self.caps.lock() = Some(caps);
+        if caps.ht() {
+            crate::wlog!(
+                "{}: 802.11n ({} stream(s), {} MHz){}",
+                self.name,
+                caps.streams(),
+                if caps.ht40() { "20/40" } else { "20" },
+                if caps.vht() { " and 802.11ac" } else { "" }
+            );
+        }
         let mut txb = Vec::new();
         for v in [1u16, TX_BUF_SIZE, 0, 0] {
             txb.extend(v.to_le_bytes());
@@ -698,6 +773,12 @@ impl Card {
         }
         let mac_ctl = mw::MAC_RX_ON | mw::MAC_TX_ON | mw::MAC_ETHERNETII;
         self.command(g, mw::CMD_MAC_CONTROL, &mac_ctl.to_le_bytes(), 2000)?;
+        if caps.ht() {
+            // What the firmware may use when it sends at 802.11n rates.
+            if let Err(e) = self.command(g, mw::CMD_11N_CFG, &mw::ht_cfg_body(), 2000) {
+                crate::wlog!("{}: {e}", self.name);
+            }
+        }
         // Let the firmware deliver received frames.
         if let Some(d) = self.data.lock().as_ref() {
             r.w(WR_DATA_PTR, d.wr_ptrs());
@@ -813,6 +894,7 @@ impl WlanDriver for Card {
             ("interrupts".into(), alloc::format!("{}", IRQS.load(Ordering::Relaxed))),
             ("upload_ready".into(), alloc::format!("{}", UPLD_RDY.load(Ordering::Relaxed))),
             ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
+            ("standard".into(), String::from(*self.mode.lock())),
         ]
     }
 
@@ -821,7 +903,13 @@ impl WlanDriver for Card {
         if !g.up {
             return Err(WlanError::NotReady);
         }
-        let body = self.command(&mut g, mw::CMD_802_11_ASSOCIATE, &mw::associate_body(bss, rsn_ie), 15000)?;
+        let caps = *self.caps.lock();
+        let mode = match (caps.filter(|c| c.ht()), bss.standard()) {
+            (Some(c), "ac") if c.vht() => "802.11ac",
+            (Some(_), "ac" | "n") => "802.11n",
+            _ => if bss.channel > 14 { "802.11a" } else { "802.11g" },
+        };
+        let body = self.command(&mut g, mw::CMD_802_11_ASSOCIATE, &mw::associate_body(bss, rsn_ie, caps.as_ref()), 15000)?;
         let (cap, status, aid) = mw::associate_result(&body).ok_or(WlanError::Failed("short association response".into()))?;
         if status != 0 {
             let why = match cap {
@@ -835,6 +923,10 @@ impl WlanDriver for Card {
             return Err(WlanError::Failed(alloc::format!("{why} (status {status}, {cap:#x})")));
         }
         *self.bssid.lock() = Some(bss.bssid);
+        *self.mode.lock() = mode;
+        crate::wlog!("{}: associated as {mode}", self.name);
+        let mut held = Vec::new();
+        self.reorder.lock().clear(&mut held);
         Ok(aid)
     }
 
@@ -927,7 +1019,32 @@ impl WlanDriver for Card {
         if let Some(d) = self.data.lock().as_mut() {
             d.reclaim(&self.regs);
         }
+        // Gaps in a reorder window that the AP gave up on.
+        let mut held = Vec::new();
+        self.reorder.lock().tick(crate::irq::uptime_ms(), &mut held);
+        if !held.is_empty() {
+            self.queue_rx(held);
+        }
         for (cause, body) in events {
+            match cause {
+                mw::EVENT_ADDBA => {
+                    self.addba(&body);
+                    continue;
+                }
+                mw::EVENT_DELBA | mw::EVENT_BA_STREAM_TIMEOUT => {
+                    // DELBA: result, peer, parameters (TID in bits 12-15);
+                    // a timeout: TID, peer, whether we started it.
+                    let tid = if cause == mw::EVENT_DELBA { mw::delba_tid(&body) } else { body.first().map(|t| t & 7) };
+                    if let Some(tid) = tid {
+                        let mut held = Vec::new();
+                        self.reorder.lock().stop(tid, &mut held);
+                        self.queue_rx(held);
+                        crate::wlog!("{}: block ack on TID {tid} ended", self.name);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             let reason = if body.len() >= 2 { u16::from_le_bytes([body[0], body[1]]) } else { 0 };
             let ev = match cause {
                 mw::EVENT_LINK_LOST => WlanEvent::Disconnected { why: "link lost", reason },
@@ -937,6 +1054,9 @@ impl WlanDriver for Card {
             };
             if matches!(ev, WlanEvent::Disconnected { .. }) {
                 *self.bssid.lock() = None;
+                *self.mode.lock() = "";
+                let mut held = Vec::new();
+                self.reorder.lock().clear(&mut held);
             }
             f(ev);
         }
