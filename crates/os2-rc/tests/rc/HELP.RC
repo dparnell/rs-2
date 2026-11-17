@@ -1,0 +1,84 @@
+/* Help tables, association tables, default icon, preprocessor. */
+#include <os2.h>
+
+#define BASE 0x100
+#define SUM(a, b) ((a) + (b))
+#define STR(x) #x
+#define CAT(a, b) a ## b
+#define ID_ONE 1
+#if defined(BASE) && BASE > 0x80 && !defined(NOPE)
+#define OK 1
+#elif 1
+#define OK 2
+#else
+#define OK 3
+#endif
+#ifdef NOPE
+#error not here
+#endif
+#ifndef OK
+garbage that is not compiled
+#endif
+#if (OK == 1) || (2 * 3 == 7)
+#define WHICH 11
+#endif
+#undef BASE
+#ifdef BASE
+#define WHICH 12
+#endif
+
+HELPTABLE 1
+BEGIN
+  HELPITEM 100, 200, 300
+  HELPITEM SUM(1, 2), CAT(ID_, ONE), WHICH
+END
+
+HELPTABLE 2 PRELOAD
+BEGIN
+  HELPITEM 1, 2, 3
+END
+
+HELPSUBTABLE 200
+BEGIN
+  HELPSUBITEM 1, 2
+  HELPSUBITEM 3, 4
+END
+
+HELPSUBTABLE 201
+SUBITEMSIZE 3
+BEGIN
+  HELPSUBITEM 1, 2, 3
+  HELPSUBITEM 4, 5, 6
+END
+
+HELPSUBTABLE 202 PRELOAD
+SUBITEMSIZE 4
+BEGIN
+  HELPSUBITEM 1, 2, 3, 4
+END
+
+ASSOCTABLE 1
+BEGIN
+  "Text file", "*.TXT", EAF_DEFAULTOWNER, T.ICO
+  "Other", "*.OTH", EAF_REUSEICON, T.ICO
+  "Third", "*.3", 0, T.ICO
+  "Fourth", "*.4", 0, T.ICO
+END
+
+ASSOCTABLE 2 PRELOAD
+BEGIN
+  "Only", "X.*", EAF_UNCHANGEABLE | EAF_DEFAULTOWNER, T.ICO
+END
+
+DEFAULTICON T.ICO
+
+RCDATA 5
+BEGIN
+  STR(hello), "line one\
+continued", 'b'
+END
+
+RCDATA "NAMEDDATA"
+BEGIN
+  1
+END

@@ -1,0 +1,17 @@
+/* #include of a script (only its directives count) and RCINCLUDE. */
+#include "INCSUB.DLG"
+RCINCLUDE "RCSUB.DLG"
+RCINCLUDE rcsub2.dlg
+STRINGTABLE
+BEGIN
+  1 "x"
+END
+ICON "NAMEDICON" T.ICO
+MENU "NAMEDMENU"
+BEGIN
+  MENUITEM "a", 1
+END
+RCDATA 2
+BEGIN
+  INCSUB_VAL, RCSUB_VAL
+END

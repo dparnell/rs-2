@@ -1,0 +1,5 @@
+#define INCSUB_VAL 7
+RCDATA 100
+BEGIN
+  1
+END

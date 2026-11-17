@@ -13,3 +13,4 @@ jfs = { path = "../../crates/jfs" }
 os2-backup = { path = "../../crates/os2-backup" }
 os2-pack = { path = "../../crates/os2-pack" }
 lvm = { path = "../../crates/lvm" }
+os2-rc = { path = "../../crates/os2-rc" }
