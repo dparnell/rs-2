@@ -658,10 +658,39 @@ which apply it on their next tick or before their next idle wait.
   (`arch::msr_fixup`), so a register the CPU lacks is just absent. QEMU's
   TCG answers unknown MSRs with 0 instead of faulting, so the RAPL unit
   register must be non-zero to count.
-- Not done: the battery and AC adapter (an AML interpreter and an
-  embedded controller driver: `APM$` and the Power object still report
-  AC power and no battery), ACPI `_CST`/`_PSS` (rs2 does not run AML
-  methods), AMD's P-states (CPPC), suspend (S3).
+- **Battery and AC adapter** (`kernel/src/acpipm.rs`, `ec.rs`,
+  `crates/aml`). The "acpi" kernel thread loads the DSDT and SSDTs into
+  rs2's AML interpreter (the `aml` crate: definition blocks run as
+  module-level code, then control methods with locals, arguments,
+  `If`/`While`, integer, string, buffer and package operators, buffer
+  fields, `Field`/`IndexField`/`BankField` units on SystemMemory,
+  SystemIO, PCI_Config and EmbeddedControl regions, mutexes and events
+  that never wait (one thread runs all AML), `Notify` recorded, `_OSI`
+  answering as Windows does; no `Load`/`LoadTable`; 16 nested calls and
+  2 million operators per evaluation at most). It calls `_PIC (1)`,
+  starts the embedded controller (the ECDT's ports, else the PNP0C09
+  device's `_CRS` and `_GPE`; byte read 0x80, write 0x81, query 0x84),
+  runs `_REG` for memory, I/O, PCI and EC regions and the devices'
+  `_STA`/`_INI`. Then every 5 s, and at once after a `Notify` of the
+  device, it reads the ACPI0003 adapters' `_PSR` and the PNP0C0A
+  batteries' `_STA`, `_BST` and (when a battery appears or after Notify
+  0x81) `_BIX` or `_BIF`; every 500 ms it polls the EC's SCI_EVT and
+  runs the `_Qxx` method of each event (GPEs and the SCI are not used
+  yet). `APM$` category 0xC function 0x60 answers from the last reading
+  as IBM's APM.SYS does from the BIOS (studied with Ghidra: byte 11
+  selects a battery, 0 all of them; byte 7 the time unit, 1 minutes;
+  battery status and flags high/low/critical/charging; byte 12 the
+  number of batteries); without batteries it is still on line, no
+  system battery. POWERCFG and the Power object's status view read
+  `APM$` (`os2::power::apm_status`). `noaml` on the kernel command line
+  leaves the thread out. QEMU has no battery: `cargo run -p aml
+  --example battery_ssdt -- work/battery.aml [--discharging]` writes a
+  test SSDT for `cargo xtask run ... -- -acpitable file=work/battery.aml`.
+  The PCI interrupt routing still uses the namespace walker in
+  `kernel/src/aml.rs`.
+- Not done: ACPI `_CST`/`_PSS` and thermal zones (the interpreter could
+  run them now), lid and button events (GPEs and the SCI), AMD's
+  P-states (CPPC), suspend (S3).
 
 ## Boot
 

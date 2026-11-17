@@ -22,7 +22,7 @@ been in QEMU, VirtualBox and VMware).
 | Audio | Realtek ALC298 on HD Audio (8086:9D70) | `drivers/hda.rs` | Probably the codec's amplifier/pin setup. Low priority |
 | Buttons | Power and volume buttons on GPIOs (ACPI MSHW0040) | ACPI power-off only | Needs a real AML interpreter (GPIO controller + `_DSM`). Low priority |
 | CPU power | Skylake HWP, MWAIT C-states to C10, RAPL | `cpupower.rs`: power plans (POWERCFG, the Power object's Plan page), MWAIT idle, tickless idle APs, HWP requests, RAPL readings | Untested on the Surface: check `POWERCFG /WATCH` (package watts on each plan) |
-| Battery | ACPI control-method battery behind the EC | None | Needs an AML interpreter (`_BST`/`_BIF`). Low priority |
+| Battery | ACPI control-method battery behind the EC | AML interpreter (`crates/aml`), EC driver (`ec.rs`), PNP0C0A/ACPI0003 into `APM$`, POWERCFG and the Power object (`acpipm.rs`); checked in QEMU with a test SSDT | Not tried on the Surface: its DSDT, its EC (ECDT or PNP0C09) and the `_Qxx` events; look for `acpi: AML:` and `acpi: battery` in the boot log |
 | Cameras, sensors | IPU3-class cameras, sensor hub | None | Not planned |
 
 ## Phase 0: get any log out of the machine
@@ -412,7 +412,7 @@ Type-A port. Most are soft-MAC (Realtek, MediaTek) and need rs2 to do the
 | USB CDC-ECM/NCM Ethernet (done 2026-11-16, QEMU) | medium | yes (`usb-net`) |
 | MEI + IPTS single touch | medium | no |
 | 88W8897 WiFi + WPA2 | large | no (WPA2 part on the host) |
-| AML interpreter (battery, buttons, power/sleep) | large | yes |
+| AML interpreter (battery done 2026-11-17 in QEMU; buttons, power/sleep) | large | yes |
 
 ## References
 

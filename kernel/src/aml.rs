@@ -3,7 +3,9 @@
 //! in the DSDT and SSDTs, and the interrupts of the link devices they
 //! name.
 //!
-//! This is not an AML interpreter. The definition blocks are walked as
+//! This is not the AML interpreter (that is `crates/aml`, which the
+//! ACPI thread in `acpipm.rs` runs); it is a walk done before any AML
+//! may run, at PCI set-up. The definition blocks are walked as
 //! a tree of Scope/Device/Name/Method objects; data objects (integers,
 //! strings, buffers, packages) are decoded, methods are not run. A
 //! `_PRT` that is a method (QEMU's q35: `If (PICF) { Return (PRTA) }

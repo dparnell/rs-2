@@ -9,9 +9,10 @@ What is still to do. Everything already finished is in
   cards on real hardware (only host-tested: QEMU has none); ECP reverse
   transfers and DMA, PCI combo cards that put the parallel port behind
   other BARs (NetMos 9835/9845 serial+parallel)
-- power management: battery and AC adapter status (AML interpreter,
-  embedded controller, PNP0C0A/ACPI0003, into APM$ and the Power
-  object), a tickless boot CPU (deadlines for the per-tick pollers), an
+- power management: try the battery and the EC on the Surface Pro 4
+  (only QEMU with a test SSDT so far), the SCI and GPEs (EC events
+  without polling, the lid, power and sleep buttons), `_CST`/`_PSS`
+  and thermal zones through the AML interpreter, a tickless boot CPU (deadlines for the per-tick pollers), an
   idle governor with per-model C-state latencies, AMD CPPC; check MWAIT,
   HWP and RAPL on real Intel hardware (QEMU's TCG has none of them)
 - APM suspend and standby: ACPI S3/S1 with the firmware's waking vector
