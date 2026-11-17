@@ -1,0 +1,11 @@
+[package]
+name = "link"
+description = "LINK.EXE and LINK386.EXE: the OMF linkers (crates/omflink), docs/UTILITIES.md"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+utils = { path = "../utils" }
+omflink = { path = "../../crates/omflink" }

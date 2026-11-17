@@ -202,6 +202,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "link"
+version = "0.1.0"
+dependencies = [
+ "omflink",
+ "os2",
+ "utils",
+]
+
+[[package]]
 name = "lvm"
 version = "0.1.0"
 
@@ -358,6 +367,10 @@ dependencies = [
  "os2",
  "somsup",
 ]
+
+[[package]]
+name = "omflink"
+version = "0.1.0"
 
 [[package]]
 name = "opendoc-dll"

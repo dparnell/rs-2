@@ -118,6 +118,13 @@ name = "msgf"
 version = "0.1.0"
 
 [[package]]
+name = "omflink"
+version = "0.1.0"
+dependencies = [
+ "os2-exe",
+]
+
+[[package]]
 name = "os2-backup"
 version = "0.1.0"
 
