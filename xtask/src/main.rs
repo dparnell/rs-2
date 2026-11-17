@@ -739,6 +739,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("unpack", "OS2\\UNPACK2.EXE"),
         ("pack", "OS2\\PACK.EXE"),
         ("pack", "OS2\\PACK2.EXE"),
+        // The OMF linkers (crates/omflink).
+        ("link", "OS2\\LINK.EXE"),
+        ("link386", "OS2\\LINK386.EXE"),
         // IBM's HELP.CMD hands message numbers to HELPMSG.
         ("help", "OS2\\HELPMSG.EXE"),
         ("ping", "OS2\\PING.EXE"),
