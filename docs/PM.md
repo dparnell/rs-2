@@ -89,8 +89,11 @@ rs2's own DLLs (applications never import it):
 - `Rs2QueryProcesses(pBuf, cb)` (24), `Rs2QueryThreadReport(pBuf, cb)`
   (25), `Rs2KillProcess(pid)` (26): for the rescue screen (see
   [Programs that stop responding](#programs-that-stop-responding)).
+- `Rs2PowerControl(ulFunc, ulParam, pBuf, cb)` (27): the processor power
+  plan (ARCHITECTURE.md "Power management"), for the Power object and
+  POWERCFG.
 
-RS2API ordinals: 1-7 and 20-26 PM (above), 10-16 windowed VIO sessions
+RS2API ordinals: 1-7 and 20-27 PM (above), 10-16 windowed VIO sessions
 (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
 performance counters, 200-221 sockets (docs/NETWORK.md), 500-501 AVIO
 (see [AVIO](#avio-vio-presentation-spaces-in-windows)).
