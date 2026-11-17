@@ -28,6 +28,7 @@ both ways.
 | PRINT | Prints files to LPTn, cancels jobs | Through the kernel's LPT device into the spooler; /C and /T through PMSPL |
 | PSTAT | Processes, threads, semaphores, shared memory, libraries | DosQuerySysState; /C /S /L /M /P /A |
 | RMVIEW | The hardware as the resource manager knows it: adapters, devices, drivers, logical devices, the hardware tree; the IRQs, I/O ports, DMA channels and memory in use with their owners | RESMGR$ (WPS.md, "The Hardware Manager"); /P /D /L /HW /IRQ /IO /IOA /DMA /MEM |
+| RC | The resource compiler: `.RC` scripts to `.RES` files, resources bound into LX and NE modules | `crates/os2-rc`, below. `rc file.rc [module]`, `rc -r file.rc [file.res]`, `rc file.res [module]` (no module: the `.RES` name with `.EXE`); -d, -i, -r, -p, -x[1\|2], -cp, -cc, -n, -w2, -h; INCLUDE. The return code is the number of errors. |
 | RECOVER | Saves the readable part of a damaged file | Whole-drive recovery is CHKDSK /F's |
 | REPLACE | Replaces or adds files | /A /P /R /S /U /W /F, DosCopy (EAs kept) |
 | SETBOOT | Start-up settings and restart | rs2's UEFI loader: `/T:x` sets `bootwait` in `\RS2\CMDLINE`, `/Q` shows it, `/B` and `/IBD:d` restart; Boot Manager options answer as IBM's SETBOOT without Boot Manager |
@@ -43,7 +44,7 @@ cargo xtask run --headless --hdd work/t1.img --init "RS2\UTILTEST.EXE"
 ```
 
 Host tests cover the formats: `cargo test -p os2-backup -p os2-pack -p lvm
--p hpfs -p jfs`.
+-p hpfs -p jfs -p os2-rc`.
 
 ## Backup sets (`crates/os2-backup`)
 
@@ -58,6 +59,74 @@ followed by its file records (u16 length, flags 3, u64 size, u16 disk,
 u64 data offset, u64 part length, u16 attributes, u16 time, u16 date,
 u64 EA offset, u64 EA length, u16 name length, the name). Appending (/A)
 adds directory records. The backup date is the control file's date.
+
+## The resource compiler (`crates/os2-rc`)
+
+RC.EXE replaces Warp's `\OS2\RC.EXE` (the 16-bit RC 4.00.011, the same
+compiler as the Toolkit's RC16). The language is the Toolkit's (Tools
+Reference, "Resource Compiler"): a C preprocessor (`#define` with
+function-like macros, `#` and `##`, `#if`/`#elif` with `defined`, `#include`
+of which only the directives count, as IBM's, and `RCINCLUDE`, which takes a
+whole script), constant expressions (casts such as `(PSZ)` skipped, `NOT`
+clearing default style bits) and every statement: ICON, POINTER, BITMAP,
+FONT, DEFAULTICON, DLGINCLUDE, RESOURCE, RCDATA, MENU (SUBMENU, MENUITEM,
+SEPARATOR, PRESPARAMS), ACCELTABLE, STRINGTABLE, MESSAGETABLE,
+DLGTEMPLATE/WINDOWTEMPLATE with DIALOG, FRAME, WINDOW, CONTROL and the
+control statements, PRESPARAMS, CTLDATA, HELPTABLE, HELPSUBTABLE
+(SUBITEMSIZE), ASSOCTABLE and CODEPAGE. It also takes what IBM's takes
+without complaint: missing commas between fields, a trailing `|` or comma
+before the next statement, `;` after values.
+
+What the output follows (IBM's, where the Toolkit book says otherwise):
+
+- `.RES`: per resource `FF type`, `FF id` (or the name and a NUL), the
+  flags word, a u32 size, the data; in script order, string and message
+  bundles (16 strings each, ID / 16 + 1) at the end in the order of their
+  first string. Default flags MOVEABLE PURE DISCARDABLE (0x1030);
+  ACCELTABLE and RCDATA 0x0030; bitmaps over 4K or named in quotes lose
+  DISCARDABLE unless it is given; FIXED clears MOVEABLE and DISCARDABLE.
+  Icon 1 is also written as resource 22.22 (the default icon).
+- Strings are C strings: they end at `\0`, CR characters are dropped,
+  `""` is a quote, a line end inside quotes is a newline. RCDATA strings get
+  their NUL, RESOURCE data strings do not; numbers are 2 bytes, 4 with an
+  L anywhere in the expression.
+- Dialog templates: a 14-byte header (size, 0, code page, 14, 1, -1, 0),
+  30-byte items in tree order, then per item its class name, text (an
+  ordinal text is `FF id`), control data and presentation parameters.
+  DIALOG and FRAME always carry the frame creation flags as 4 bytes of
+  control data; DIALOG adds WS_SAVEBITS WS_CLIPSIBLINGS and FS_DLGBORDER
+  (unless a border style or FCF_BORDER/FCF_SIZEBORDER is given), FRAME
+  WS_VISIBLE. Control statements default to WS_VISIBLE and their class's
+  bits: PUSHBUTTON WS_TABSTOP, CHECKBOX BS_CHECKBOX WS_TABSTOP, LTEXT
+  SS_TEXT WS_GROUP, GROUPBOX SS_GROUPBOX WS_GROUP, COMBOBOX CBS_SIMPLE
+  WS_TABSTOP (a given style replaces CBS_SIMPLE), MLE MLS_BORDER WS_TABSTOP,
+  SPINBUTTON, CONTAINER, VALUESET, NOTEBOOK and SLIDER WS_TABSTOP only.
+- Menus: size, version (1 with PRESPARAMS), code page, 4, count, the
+  items (style, attribute, ID, text, a submenu's own template). SEPARATOR
+  is MIS_SEPARATOR, MIA_DISABLED, ID 0xFFFF; `id,` with nothing after the
+  comma gives style 0.
+- HELPITEM is (window, subtable, 0xFFFF, extended panel), the table ends
+  with 0; a HELPSUBTABLE starts with its item size in words.
+
+Binding: LX modules lose their trailing resource objects and pages; the
+resources go into new objects (PRELOAD first, one per kind of loading),
+sorted by type and ID, 4-byte aligned, pages in whole page-shift units,
+and the loader and fixup sections, non-resident names and debug
+information move behind them. NE modules get the resources as their last
+segments on sector boundaries (flags = load/memory bits | 0x0C81). `-x`
+writes iterated (EXEPACK 1) resource pages for both methods; `-p` keeps
+resources from crossing 64K. Named resources get ID 0 in NE modules (as
+IBM's) and a number with an RT_RESNAMES table in LX modules.
+
+Checked (`cargo test -p os2-rc`, `examples/rccheck.rs` with IBM's output
+from a run under rs2): the 92 Toolkit sample scripts and the 18 Borland
+C++ example scripts IBM's RC compiles give byte-identical `.RES` files,
+332 resources equal those bound into the samples' modules, the test
+scripts in `crates/os2-rc/tests/rc` match where IBM's RC accepts them, and
+a `.RES` bound into an LX DLL is byte-identical to IBM's binding (an NE
+DLL too, except the non-resident table offset IBM writes 64K too high).
+Not the same as IBM's: the numbers given to named LX resources, the
+compressed pages, and `NOT` on a combo box's or spin button's style.
 
 ## LVM drive letter tables (`crates/lvm`)
 
