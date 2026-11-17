@@ -62,28 +62,51 @@ pub fn start_bootlog() {
         let mut buf = alloc::vec![0u8; SIZE];
         let mut warned = false;
         let mut waiting = false;
+        // Saves to the boot volume that failed in a row: a live boot's
+        // stick is on USB, which may be what went wrong (the Surface Dock
+        // stopped all USB).
+        let mut failures = 0u32;
+        let mut fell_back = false;
         loop {
             let head = position();
             if head != written {
-                match boot_volume() {
+                let target = match boot_volume() {
+                    Some(v) if failures < 3 => Some((v, "RS2\\BOOT.LOG", "RS2\\BOOTPREV.LOG")),
+                    // A live boot without its stick: another rs2 EFI
+                    // partition (the internal disk's), under a name of its
+                    // own, so the installed system's log stays.
+                    _ => live_fallback().map(|v| (v, "RS2\\LIVEBOOT.LOG", "RS2\\LIVEPREV.LOG")),
+                };
+                match target {
                     // Not to a volume that was not shut down cleanly until
                     // CHKDSK /F (AUTOCHECK) has been over it.
-                    Some((d, _)) if crate::fs::unchecked(d) => {
+                    Some(((d, _), ..)) if crate::fs::unchecked(d) => {
                         if !waiting {
                             waiting = true;
                             crate::println!("bootlog: {}: was not shut down cleanly; no BOOT.LOG until CHKDSK has checked it", (b'A' + d) as char);
                         }
                     }
-                    Some((_, fs)) => {
+                    Some(((d, fs), name, prev)) => {
+                        let fallback = name.contains("LIVE");
+                        if fallback && !fell_back {
+                            fell_back = true;
+                            written = usize::MAX;
+                            crate::println!("bootlog: the boot stick cannot be written; the log goes to {}:\\{name}", (b'A' + d) as char);
+                        }
                         if written == usize::MAX {
-                            // The last boot's log stays as BOOTPREV.LOG
+                            // The last boot's log stays as the previous one
                             // (read it after a boot that went wrong).
-                            let _ = fs.delete("RS2\\BOOTPREV.LOG");
-                            let _ = fs.rename("RS2\\BOOT.LOG", "RS2\\BOOTPREV.LOG");
+                            let _ = fs.delete(prev);
+                            let _ = fs.rename(name, prev);
                         }
                         let n = tail(&mut buf);
-                        if save(&*fs, "\\RS2\\BOOT.LOG", &buf[..n]).is_ok() {
+                        if save(&*fs, &alloc::format!("\\{name}"), &buf[..n]).is_ok() {
                             written = head;
+                            if !fallback {
+                                failures = 0;
+                            }
+                        } else if !fallback {
+                            failures += 1;
                         }
                     }
                     None if !warned => {
@@ -96,6 +119,16 @@ pub fn start_bootlog() {
             crate::task::sched::sleep_ms(5000);
         }
     });
+}
+
+/// On a live boot (C: the RAM disk): the first other drive holding an rs2
+/// kernel, not the boot stick. None otherwise.
+fn live_fallback() -> Option<(u8, alloc::sync::Arc<dyn crate::fs::FileSystem>)> {
+    if !crate::fs::has_boot_image(crate::boot_info()) {
+        return None;
+    }
+    let b = crate::drivers::BOOT_DRIVE.load(core::sync::atomic::Ordering::Relaxed);
+    (3u8..26).filter(|&d| d != b).filter_map(|d| Some((d, crate::fs::drive(d)?))).find(|(_, fs)| matches!(fs.name(), "FAT" | "HPFS" | "JFS") && fs.stat("\\RS2\\KERNEL").is_ok())
 }
 
 /// `bootdiag`: if no PM program has the display 60 s after boot (and

@@ -154,6 +154,12 @@ The SP4 has no serial port. Done (2026-11-15):
   lost so). The drivers now note the partition the firmware booted from
   (by position and GPT GUID, `drivers::BOOT_DRIVE`) and bootlog writes
   only there; on a live boot where it is not known, nowhere.
+- **A live boot whose stick dies** (2026-11-17): with the dock, USB stops
+  and the stick with it, so a live boot could keep no log. After three
+  failed saves to the stick (or with no stick drive at all), bootlog
+  writes `\RS2\LIVEBOOT.LOG` (the one before: `LIVEPREV.LOG`) on another
+  drive holding an rs2 kernel, the internal disk's EFI partition. The
+  installed system's BOOT.LOG and BOOTPREV.LOG are not touched.
 - **Surface Dock at boot: all USB stops** (2026-11-17): a text-mode boot
   with the dock attached ends with `xhci 00:14.0: port 7: timed out (step
   EnableSlot)` over and over (port 7 is the Type Cover). Commands on the
