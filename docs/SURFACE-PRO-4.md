@@ -146,6 +146,14 @@ The SP4 has no serial port. Done (2026-11-15):
   stopped working) can be read on the next boot. A boot volume left
   dirty gets its log only after AUTOCHECK's CHKDSK (the installed
   CONFIG.SYS checks every drive, the EFI partition too).
+- **Which drive BOOT.LOG goes to** (2026-11-17): bootlog wrote to the
+  first drive holding `\RS2\KERNEL`. Booted from the live stick with
+  rs2 installed on the internal disk, that was the internal EFI
+  partition, not the stick: two live boots replaced the installed
+  system's BOOT.LOG and BOOTPREV.LOG (the log of a boot with the dock was
+  lost so). The drivers now note the partition the firmware booted from
+  (by position and GPT GUID, `drivers::BOOT_DRIVE`) and bootlog writes
+  only there; on a live boot where it is not known, nowhere.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints

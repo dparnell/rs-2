@@ -123,8 +123,19 @@ pub fn start_boot_watch() {
 /// number and file system): the drive holding `\RS2\KERNEL` that is not
 /// the loader's RAM image (C.IMG), a CD or a network drive.
 pub fn boot_volume() -> Option<(u8, alloc::sync::Arc<dyn crate::fs::FileSystem>)> {
+    let usable = |fs: &alloc::sync::Arc<dyn crate::fs::FileSystem>| matches!(fs.name(), "FAT" | "HPFS" | "JFS") && fs.stat("\\RS2\\KERNEL").is_ok();
+    // The partition the firmware booted from, when the drivers know it.
+    let b = crate::drivers::BOOT_DRIVE.load(core::sync::atomic::Ordering::Relaxed);
+    if b != 0 {
+        return crate::fs::drive(b).filter(usable).map(|fs| (b, fs));
+    }
+    // Not known: on a live boot (C: the RAM disk) write nowhere rather than
+    // to another system's EFI partition (the installed system's log).
     let ram_c = crate::fs::has_boot_image(crate::boot_info());
-    (2u8..26).filter(|&d| !(d == 2 && ram_c)).filter_map(|d| Some((d, crate::fs::drive(d)?))).find(|(_, fs)| matches!(fs.name(), "FAT" | "HPFS" | "JFS") && fs.stat("\\RS2\\KERNEL").is_ok())
+    if ram_c {
+        return None;
+    }
+    (2u8..26).filter_map(|d| Some((d, crate::fs::drive(d)?))).find(|(_, fs)| usable(fs))
 }
 
 fn save(fs: &dyn crate::fs::FileSystem, path: &str, data: &[u8]) -> Result<(), u32> {

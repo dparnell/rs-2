@@ -5,7 +5,7 @@
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [--desktop]
 //!                  [--type KEYS | --type-file FILE] [--type-at S]
 //!                  [--hdd IMG] [--nvme IMG] [--floppy IMG|empty]... [--usb-kbd] [--usb-mouse] [--usb-tablet] [--usb-disk IMG]...
-//!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [--usb-hub]... [--boot-hdd] [--boot-usb] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
@@ -144,6 +144,9 @@ struct Opts {
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
     boot_hdd: bool,
+    /// `run`: the firmware boots the first --usb-disk (before the --nvme
+    /// or --hdd disk, which may hold an installed system).
+    boot_usb: bool,
     /// Build the distributable system (no development files).
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
@@ -226,6 +229,7 @@ fn parse(args: &[String]) -> Opts {
         mem: "512M".into(),
         system: false,
         boot_hdd: false,
+        boot_usb: false,
         dist: false,
         hpfs: false,
         fat32: false,
@@ -301,6 +305,7 @@ fn parse(args: &[String]) -> Opts {
             }
             "--system" => o.system = true,
             "--boot-hdd" => o.boot_hdd = true,
+            "--boot-usb" => o.boot_usb = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
             "--fat32" => o.fat32 = true,
@@ -1389,7 +1394,8 @@ fn usb_devices(o: &Opts, c: &mut Command) {
     }
     for (n, d) in o.usb_disks.iter().enumerate() {
         c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
-        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
+        let boot = if n == 0 && o.boot_usb { ",bootindex=0" } else { "" };
+        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}{boot}", port()));
     }
 }
 
