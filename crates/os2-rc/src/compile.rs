@@ -118,6 +118,8 @@ struct C<'a, 'p, 'f, F: Files> {
     assoc: Option<Vec<u8>>,
     /// A statement failed: skip to the next one.
     bad: bool,
+    /// DISCARDABLE was among the last options.
+    discard_given: bool,
 }
 
 /// Compiles the script `name` (read with `files`).
@@ -151,6 +153,7 @@ pub fn compile<F: Files>(files: &mut F, name: &str, opts: &Options) -> Output {
             default_icon: None,
             assoc: None,
             bad: false,
+            discard_given: false,
         };
         c.run();
         diags.append(&mut c.diags);
@@ -377,6 +380,7 @@ impl<F: Files> C<'_, '_, '_, F> {
     /// Load and memory options and a code page after a resource name.
     fn options(&mut self, mut f: u16) -> (u16, u16) {
         let mut cp = self.cp;
+        self.discard_given = false;
         loop {
             let t = self.peek();
             let Tok::Id(w) = &t else {
@@ -388,7 +392,10 @@ impl<F: Files> C<'_, '_, '_, F> {
                 b"LOADONCALL" => f &= !flags::PRELOAD,
                 b"FIXED" => f &= !(flags::MOVEABLE | flags::DISCARDABLE),
                 b"MOVEABLE" => f |= flags::MOVEABLE,
-                b"DISCARDABLE" => f |= flags::DISCARDABLE | flags::MOVEABLE,
+                b"DISCARDABLE" => {
+                    f |= flags::DISCARDABLE | flags::MOVEABLE;
+                    self.discard_given = true;
+                }
                 b"PURE" => f |= flags::PURE,
                 b"IMPURE" => f &= !flags::PURE,
                 _ => return (f, cp),
@@ -499,8 +506,9 @@ impl<F: Files> C<'_, '_, '_, F> {
             return;
         };
         if let Some(d) = self.read_file(&file) {
-            // IBM's RC leaves bitmaps over 4K not discardable.
-            let f = if ty == rt::BITMAP && d.len() > 4096 { f & !flags::DISCARDABLE } else { f };
+            // IBM's RC leaves bitmaps over 4K, and bitmaps whose file name
+            // is in quotes, not discardable unless DISCARDABLE is given.
+            let f = if ty == rt::BITMAP && (d.len() > 4096 || self.lx.quoted) && !self.discard_given { f & !flags::DISCARDABLE } else { f };
             // Icon 1 is the program's default icon: a type 22 resource too
             // (and the .ICON extended attribute).
             let default = ty == rt::POINTER && name == Name::Id(1) && self.default_icon.is_none();
@@ -641,12 +649,16 @@ impl<F: Files> C<'_, '_, '_, F> {
             fs |= bit;
         }
         if fs & 0x0007 == 0 {
+            // A numeric key needs its kind (IBM's RC insists).
+            if !is_str {
+                self.diag(2146, "");
+                return None;
+            }
             fs |= 0x0001;
         }
         if ctl {
             fs |= 0x0010;
         }
-        let _ = is_str;
         Some((fs, key, cmd))
     }
 
@@ -741,7 +753,8 @@ impl<F: Files> C<'_, '_, '_, F> {
     fn presparam(&mut self) -> Option<(u32, Vec<u8>)> {
         let id = self.value(2151)? as u32;
         let mut data = Vec::new();
-        while self.comma() {
+        // Commas between the values may be left out on the same line.
+        while self.comma() || (self.lx.same_line() && self.starts_value()) {
             if let Tok::Str(_) = self.peek() {
                 let s = self.string()?;
                 data.extend_from_slice(&s);
@@ -1152,14 +1165,14 @@ impl<F: Files> C<'_, '_, '_, F> {
             b"RTEXT" => (Some(WC_STATIC), 1 | 0x200 | WS_GROUP | WS_VISIBLE, true),
             b"GROUPBOX" => (Some(WC_STATIC), 2 | WS_GROUP | WS_VISIBLE, true),
             b"ENTRYFIELD" | b"EDITTEXT" => (Some(WC_ENTRYFIELD), 4 | WS_TABSTOP | WS_VISIBLE, true),
-            b"COMBOBOX" => (Some(WC_COMBOBOX), 1 | WS_GROUP | WS_TABSTOP | WS_VISIBLE, true),
-            b"MLE" => (Some(WC_MLE), 0x8 | WS_GROUP | WS_TABSTOP | WS_VISIBLE, true),
+            b"COMBOBOX" => (Some(WC_COMBOBOX), 1 | WS_TABSTOP | WS_VISIBLE, true),
+            b"MLE" => (Some(WC_MLE), 0x2 | WS_TABSTOP | WS_VISIBLE, true),
             b"ICON" => (Some(WC_STATIC), 3 | WS_VISIBLE, true),
             b"LISTBOX" => (Some(WC_LISTBOX), WS_TABSTOP | WS_VISIBLE, false),
-            b"SPINBUTTON" => (Some(WC_SPINBUTTON), 0x10 | WS_TABSTOP | WS_VISIBLE, false),
+            b"SPINBUTTON" => (Some(WC_SPINBUTTON), WS_TABSTOP | WS_VISIBLE, false),
             b"VALUESET" => (Some(WC_VALUESET), WS_TABSTOP | WS_VISIBLE, false),
             b"NOTEBOOK" => (Some(WC_NOTEBOOK), WS_TABSTOP | WS_VISIBLE, false),
-            b"CONTAINER" => (Some(WC_CONTAINER), 4 | WS_TABSTOP | WS_VISIBLE, false),
+            b"CONTAINER" => (Some(WC_CONTAINER), WS_TABSTOP | WS_VISIBLE, false),
             b"SLIDER" => (Some(WC_SLIDER), WS_TABSTOP | WS_VISIBLE, false),
             _ => {
                 self.diag(2003, &lstr(kw));
@@ -1186,7 +1199,8 @@ impl<F: Files> C<'_, '_, '_, F> {
                 self.class()?
             }
         };
-        let mut style = def;
+        let mut style = if kw == b"DIALOG" { WS_SAVEBITS | WS_CLIPSIBLINGS } else { def };
+        let mut clear = 0;
         let mut framectl: Option<u32> = None;
         if self.more() {
             if self.starts_value() {
@@ -1196,7 +1210,12 @@ impl<F: Files> C<'_, '_, '_, F> {
                     Class::Ord(WC_FRAME) => 2083,
                     _ => 2081,
                 })?;
+                // A combo box's style replaces CBS_SIMPLE.
+                if kw == b"COMBOBOX" {
+                    style = WS_TABSTOP | WS_VISIBLE;
+                }
                 style = (style & !clr) | set;
+                clear = clr;
             }
             if matches!(kw, b"DIALOG" | b"FRAME" | b"WINDOW") && self.more() && self.starts_value() {
                 let (set, _) = self.style(2089)?;
@@ -1204,10 +1223,10 @@ impl<F: Files> C<'_, '_, '_, F> {
             }
         }
         match kw {
+            b"FRAME" => style |= WS_VISIBLE,
             b"DIALOG" => {
-                style |= WS_SAVEBITS | WS_CLIPSIBLINGS;
                 let fcf = framectl.unwrap_or(0);
-                if style & (FS_DLGBORDER | FS_BORDER | FS_SIZEBORDER) == 0 && fcf & (FCF_BORDER | FCF_SIZEBORDER) == 0 {
+                if style & (FS_DLGBORDER | FS_BORDER | FS_SIZEBORDER) == 0 && fcf & (FCF_BORDER | FCF_SIZEBORDER) == 0 && clear & FS_DLGBORDER == 0 {
                     style |= FS_DLGBORDER;
                 }
             }
@@ -1222,7 +1241,9 @@ impl<F: Files> C<'_, '_, '_, F> {
             cx,
             cy,
             style,
-            ctldata: framectl.map(|f| f.to_le_bytes().to_vec()),
+            // DIALOG and FRAME always have their frame creation flags as
+            // control data; WINDOW's are not kept.
+            ctldata: matches!(kw, b"DIALOG" | b"FRAME").then(|| framectl.unwrap_or(0).to_le_bytes().to_vec()),
             pres: Vec::new(),
             children: Vec::new(),
         };

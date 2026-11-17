@@ -57,11 +57,13 @@ pub struct Lexer<'a> {
     pub tok_line: usize,
     /// Set when a string had a bad escape.
     pub bad_escape: bool,
+    /// The last file name was in quotes.
+    pub quoted: bool,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(lines: &'a [Line]) -> Self {
-        Lexer { lines, li: 0, pos: 0, peeked: None, tok_line: 0, bad_escape: false }
+        Lexer { lines, li: 0, pos: 0, peeked: None, tok_line: 0, bad_escape: false, quoted: false }
     }
 
     /// (file index, line number) of the last token.
@@ -119,6 +121,7 @@ impl<'a> Lexer<'a> {
     /// A file name: a quoted string (taken as it is, `\\` read as `\`) or
     /// everything up to the next blank.
     pub fn filename(&mut self) -> Option<String> {
+        self.quoted = matches!(self.peeked, Some((Tok::Str(_), _)));
         if let Some((t, l)) = self.peeked.take() {
             // Already lexed as a token: only a string can be a whole name.
             self.tok_line = l;
@@ -144,6 +147,7 @@ impl<'a> Lexer<'a> {
         let l = self.cur();
         let mut s = String::new();
         if l[self.pos] == b'"' {
+            self.quoted = true;
             self.pos += 1;
             while self.pos < l.len() && l[self.pos] != b'"' {
                 if l[self.pos] == b'\\' && l.get(self.pos + 1) == Some(&b'\\') {
