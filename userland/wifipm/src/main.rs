@@ -517,6 +517,8 @@ fn power_text(st: &Status, setting: bool) -> String {
             alloc::format!("{}{now}", if setting { "on" } else { "still on" })
         }
         ("off", true) => String::from("not in effect yet"),
+        // "on, turning off", "off: the firmware missed a wake request"
+        (s, _) if s.starts_with("on,") || s.starts_with("off:") => String::from(s),
         _ => String::new(),
     }
 }

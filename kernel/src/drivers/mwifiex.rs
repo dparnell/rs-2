@@ -319,6 +319,14 @@ pub struct Card {
     msi: core::sync::atomic::AtomicBool,
     /// IRQS when the chip went to sleep: an interrupt since means it woke.
     sleep_irqs: AtomicU64,
+    /// Power saving is to be turned off as soon as the chip answers: it
+    /// missed a wake request (the 88W8897's firmware is unreliable with
+    /// power saving, also under Linux), or the user turned it off while
+    /// the chip could not be woken. No sleep is confirmed meanwhile.
+    ps_off_pending: core::sync::atomic::AtomicBool,
+    /// Power saving went off because the firmware missed a wake request
+    /// (until it is turned on again).
+    ps_gave_up: core::sync::atomic::AtomicBool,
 }
 
 /// Power-save states (Linux `PS_STATE_*`): awake; the firmware asked to
@@ -433,6 +441,8 @@ pub fn probe(d: &pci::Device) {
         ba_token: AtomicU32::new(0),
         msi: core::sync::atomic::AtomicBool::new(false),
         sleep_irqs: AtomicU64::new(0),
+        ps_off_pending: core::sync::atomic::AtomicBool::new(false),
+        ps_gave_up: core::sync::atomic::AtomicBool::new(false),
     };
     // The interrupt only wakes the wlan thread, which reads the status;
     // without MSI that thread polls.
@@ -747,6 +757,10 @@ impl Card {
         });
         if !woke {
             crate::wlog!("{}: the firmware did not wake up", self.name);
+            if self.ps_on.load(Ordering::Acquire) && !self.ps_off_pending.swap(true, Ordering::AcqRel) {
+                self.ps_gave_up.store(true, Ordering::Release);
+                crate::wlog!("{}: power saving goes off once the chip answers (the firmware misses wake requests)", self.name);
+            }
             return false;
         }
         self.ps.store(PS_AWAKE, Ordering::Release);
@@ -811,6 +825,25 @@ impl Card {
                     crate::wlog!("{}: sleep confirmation: {e}", self.name);
                 }
             }
+        }
+    }
+
+    /// Turn power saving off now that the chip answers (after it missed a
+    /// wake request, or the user turned it off while it slept). Only
+    /// for this start: WIFI.CFG keeps its setting.
+    fn power_save_off_now(&self) {
+        let mut g = self.inner.lock();
+        if !g.up {
+            return;
+        }
+        match self.command_raw(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::ps_mode_body(false), 2000) {
+            Ok(_) => {
+                self.ps_on.store(false, Ordering::Release);
+                self.ps_off_pending.store(false, Ordering::Release);
+                self.ps.store(PS_AWAKE, Ordering::Release);
+                crate::wlog!("{}: power saving off", self.name);
+            }
+            Err(e) => crate::wlog!("{}: turning power saving off: {e}", self.name),
         }
     }
 
@@ -1082,7 +1115,12 @@ impl WlanDriver for Card {
             ("upload_ready".into(), alloc::format!("{}", UPLD_RDY.load(Ordering::Relaxed))),
             ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
             ("standard".into(), String::from(*self.mode.lock())),
-            ("power_save".into(), String::from(if self.ps_on.load(Ordering::Relaxed) { "on" } else { "off" })),
+            ("power_save".into(), String::from(match (self.ps_on.load(Ordering::Relaxed), self.ps_off_pending.load(Ordering::Relaxed)) {
+                (true, true) => "on, turning off",
+                (true, false) => "on",
+                _ if self.ps_gave_up.load(Ordering::Relaxed) => "off: the firmware missed a wake request",
+                _ => "off",
+            })),
             ("power_state".into(), String::from(match self.ps.load(Ordering::Relaxed) {
                 PS_ASLEEP => "asleep",
                 PS_SLEEP_CFM | PS_PRE_SLEEP => "going to sleep",
@@ -1154,7 +1192,20 @@ impl WlanDriver for Card {
         if !g.up {
             return Err(WlanError::NotReady);
         }
-        self.command(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::ps_mode_body(on), 2000)?;
+        match self.command(&mut g, mw::CMD_802_11_PS_MODE_ENH, &mw::ps_mode_body(on), 2000) {
+            Ok(_) => {}
+            // The chip sleeps and does not answer: turn it off when it
+            // next wakes by itself (for a beacon or a frame).
+            Err(WlanError::Timeout(_)) if !on && self.ps_on.load(Ordering::Acquire) => {
+                self.ps_off_pending.store(true, Ordering::Release);
+                self.ps_gave_up.store(false, Ordering::Release);
+                crate::wlog!("{}: power saving goes off once the chip answers", self.name);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        self.ps_off_pending.store(false, Ordering::Release);
+        self.ps_gave_up.store(false, Ordering::Release);
         self.ps_on.store(on, Ordering::Release);
         if !on {
             self.ps.store(PS_AWAKE, Ordering::Release);
@@ -1270,7 +1321,7 @@ impl WlanDriver for Card {
         for (cause, body) in events {
             match cause {
                 mw::EVENT_PS_SLEEP => {
-                    if self.ps_on.load(Ordering::Acquire) {
+                    if self.ps_on.load(Ordering::Acquire) && !self.ps_off_pending.load(Ordering::Acquire) {
                         let _ = self.ps.compare_exchange(PS_AWAKE, PS_PRE_SLEEP, Ordering::AcqRel, Ordering::Relaxed);
                     }
                     continue;
@@ -1318,7 +1369,9 @@ impl WlanDriver for Card {
             let Some(fr) = self.rxq.lock().pop_front() else { break };
             f(WlanEvent::Frame(fr));
         }
-        if self.ps.load(Ordering::Acquire) == PS_PRE_SLEEP {
+        if self.ps_off_pending.load(Ordering::Acquire) && self.hw_ok() {
+            self.power_save_off_now();
+        } else if self.ps.load(Ordering::Acquire) == PS_PRE_SLEEP {
             self.try_sleep();
         }
     }
