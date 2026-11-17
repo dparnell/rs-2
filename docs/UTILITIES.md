@@ -182,6 +182,7 @@ differs by it):
 | Assembly (wasm) and Open Watcom C (`wcc386`, CLIB3R.LIB) LX programs, a program importing from a DLL by name and by ordinal | Identical to IBM LINK386's with `/IBMFRAMES`. Without it the Open Watcom C program runs under rs2 (IBM LINK386's crashes at start-up), also with /EXEPACK:1 and :2. |
 | The Toolkit's PM sample `samples\pm\stdwnd\hello.c` (compiled by Open Watcom `wcc386 -3s`, linked by rs2's LINK386 under rs2, resources bound by the Toolkit's RC16) | Runs: its window with icon, menu and text. |
 | A 32-bit DLL with a 16-bit code segment (16-bit, 32-bit and forwarder entries, NONAME, aliases, DATA MULTIPLE NONSHARED) and a program using it | Runs under rs2 (IBM's LINK386 refuses to forward an export to a .DEF import, L4025/L2022). |
+| Open Watcom C++ (`wpp386`: templates and inline functions in COMDATs, virtual functions, a static constructor; PLIB3R.LIB) | Runs under rs2 (`C++ on LINK386: 42 2.5 49 206`). IBM's LINK386 rejects the 32-bit COMDAT records (L1101). |
 | /EXEPACK:1 and :2 | Pages expand (os2-exe's loader code) to those of a plain link: `cargo run -p omflink --example lxcmp -- A B`. |
 
 Borland C++'s own objects (C02D.OBJ, C2.LIB) are made for TLINK: IBM's
