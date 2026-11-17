@@ -95,6 +95,8 @@ unsafe extern "C" {
     fn GpiSetBackColor(hps: u32, c: i32) -> u32;
     #[link_name = "PMGPI.404"]
     fn GpiMove(hps: u32, p: *const PointL) -> u32;
+    #[link_name = "PMGPI.441"]
+    fn GpiQueryCurrentPosition(hps: u32, p: *mut PointL) -> u32;
     #[link_name = "PMGPI.398"]
     fn GpiLine(hps: u32, p: *const PointL) -> i32;
     #[link_name = "PMGPI.415"]
@@ -471,6 +473,21 @@ fn self_checks(hab: u32) {
         GpiBox(m.hps, DRO_FILL, &pt(9, 9), 0, 0);
         check("GpiQueryPel = CLR_RED", GpiQueryPel(m.hps, &pt(5, 5)) == CLR_RED);
         check("box fill is inclusive", pel(&m, 9, 9) == 0xff0000 && pel(&m, 10, 10) == 0xffffff);
+        // World coordinates beyond 28 bits: PMERR_INV_COORDINATE, the
+        // position stays (Borland's BPMCC.DLL moves to an uninitialised y
+        // before a box); a fill reaching far outside media space is cut to
+        // it (it used to make a span for every row and ran PM out of memory).
+        let mv = GpiMove(m.hps, &pt(5, 0x1ba0_07e9));
+        let mut cp = pt(-1, -1);
+        GpiQueryCurrentPosition(m.hps, &mut cp);
+        check("GpiMove beyond 28 bits fails, the position stays", mv == 0 && cp == pt(0, 0));
+        GpiMove(m.hps, &pt(20, 0x07ff_ffff));
+        let rc = GpiBox(m.hps, DRO_FILL, &pt(25, 2), 0, 0);
+        check("a box reaching far beyond media space fills its visible part", rc == 1 && pel(&m, 22, 5) == 0xff0000);
+        // The bitmap as the checks below expect it.
+        GpiErase(m.hps);
+        GpiMove(m.hps, &pt(0, 0));
+        GpiBox(m.hps, DRO_FILL, &pt(9, 9), 0, 0);
         // Raster ops between bitmaps.
         let m2 = mem(hab, 32, 32, PU_PELS);
         let p = [pt(0, 0), pt(32, 32), pt(0, 0)];

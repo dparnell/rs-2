@@ -375,6 +375,21 @@ pub fn point(p: *const PointL) -> Option<Point> {
     read(p).map(|p| Point::new(p.x, p.y))
 }
 
+/// A world-space point for a drawing primitive: GPIF_LONG coordinates must
+/// fit in the low-order 28 bits (IBM's PMERR_INV_COORDINATE otherwise; the
+/// call fails and the current position stays). Borland's BPMCC.DLL moves
+/// to an uninitialised y (0x1ba007e9) before a box: rs2 filled it.
+pub fn world_point(p: *const PointL) -> Option<Point> {
+    const PMERR_INV_COORDINATE: u32 = 0x205b;
+    let p = point(p)?;
+    let ok = |v: i32| (-(1 << 27)..1 << 27).contains(&v);
+    if !ok(p.x) || !ok(p.y) {
+        crate::misc::set_error(0x0008_0000 | PMERR_INV_COORDINATE);
+        return None;
+    }
+    Some(p)
+}
+
 pub fn points(p: *const PointL, n: i32) -> Option<Vec<Point>> {
     if p.is_null() || n < 0 {
         return None;
@@ -1144,7 +1159,7 @@ pub extern "C" fn GpiQueryDefArcParams(hps: u32, p: *mut [i32; 4]) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiMove(hps: u32, p: *const PointL) -> u32 {
-    let Some(p) = point(p) else { return 0 };
+    let Some(p) = world_point(p) else { return 0 };
     crate::gpiseg::rec(hps, || Order::Set(Attr::Position(p)));
     let Some(e) = entry(st(), hps) else { return 0 };
     e.ps.gpi_move(p);
@@ -1164,7 +1179,7 @@ pub extern "C" fn GpiQueryCurrentPosition(hps: u32, p: *mut PointL) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiLine(hps: u32, p: *const PointL) -> i32 {
-    let Some(p) = point(p) else { return GPI_ERROR };
+    let Some(p) = world_point(p) else { return GPI_ERROR };
     if !crate::gpiseg::rec(hps, || Order::Line { at: None, pts: alloc::vec![p] }) {
         return GPI_OK;
     }
@@ -1197,7 +1212,7 @@ pub extern "C" fn GpiPolyLineDisjoint(hps: u32, n: i32, pts: *const PointL) -> i
 /// DRO_OUTLINE 2, DRO_OUTLINEFILL 3.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiBox(hps: u32, ctl: i32, p: *const PointL, h: i32, v: i32) -> i32 {
-    let Some(p) = point(p) else { return GPI_ERROR };
+    let Some(p) = world_point(p) else { return GPI_ERROR };
     let flags = match ctl & 3 {
         3 => 0x60,
         1 => 0x40,
