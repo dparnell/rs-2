@@ -217,6 +217,7 @@ pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let (code, info) = translate(f);
     if super::tracing() {
         crate::trace!("    exception {code:x} {info:x?} at {:x}:{:x} vector {} error {:x} esp {:x} ebp {:x}", f.cs, f.rip, f.vector, f.error, f.rsp, f.rbp);
+        dump_stack(f, p);
     }
     // A debugger sees it first (DBG_X_FIRST_CHANCE).
     if super::debug::exception(f, p, t, code, &info, false) {
@@ -588,8 +589,13 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         f.rbp as u32
     );
     crate::println!("DS={:04x} ES={:04x} FS={:04x} GS={:04x}", f.ds, f.es, f.fs, f.gs);
-    // For debugging, to the serial log only: the top of the stack and the
-    // return addresses along the EBP chain (32-bit code).
+    dump_stack(f, p);
+    p.exit(2, 0xffff);
+}
+
+/// For debugging, to the serial log only: the top of the stack and the
+/// return addresses along the EBP chain (32-bit code), with their modules.
+fn dump_stack(f: &TrapFrame, p: &Arc<Process>) {
     if f.ss == 0x53 {
         let mut sp = p.space.lock();
         let esp = f.rsp as u32;
@@ -605,6 +611,8 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
             let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
             chain[n] = ret;
             n += 1;
+            let arg = |sp: &mut _, k: u32| rd(sp, ebp.wrapping_add(8 + 4 * k)).unwrap_or(0);
+            crate::trace!("  frame {ebp:08x}: return {ret:08x}, arguments {:08x} {:08x} {:08x} {:08x}", arg(&mut sp, 0), arg(&mut sp, 1), arg(&mut sp, 2), arg(&mut sp, 3));
             if next <= ebp {
                 break;
             }
@@ -614,7 +622,10 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         drop(sp);
         // Which modules those are.
         for a in core::iter::once(f.rip as u32).chain(chain[..n].iter().copied()) {
-            for m in crate::loader::all_modules() {
+            // This process's executable, then the DLLs (other processes'
+            // executables share its addresses).
+            let mods = crate::loader::all_modules();
+            for m in core::iter::once(&p.exe).chain(mods.iter().filter(|m| m.is_dll)) {
                 if let Some((i, o)) = m.objects.iter().enumerate().find(|(_, o)| a >= o.base && a < o.base + o.size) {
                     crate::trace!("  {a:08x}: {} object {} + {:x}", m.name, i + 1, a - o.base);
                     break;
@@ -622,5 +633,4 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
             }
         }
     }
-    p.exit(2, 0xffff);
 }
