@@ -45,6 +45,9 @@ pub struct Config {
     pub drivers: Vec<String>,
     /// DISKCACHE=, whose block cache is the one under every volume.
     pub diskcache: Option<String>,
+    /// POWERPLAN=PERFORMANCE|BALANCED|POWERSAVER (rs2): the power plan
+    /// at boot (written by the Power object and POWERCFG /SAVE).
+    pub powerplan: Option<u32>,
 }
 
 /// `IFS=...HPFS.IFS /CACHE:n /CRECL:n`: the size of the block cache and
@@ -132,6 +135,7 @@ pub fn parse(text: &str) -> Config {
             }
             "PAUSEONERROR" => c.pause_on_error = val.eq_ignore_ascii_case("YES"),
             "PRIORITY" => c.priority_absolute = val.eq_ignore_ascii_case("ABSOLUTE"),
+            "POWERPLAN" => c.powerplan = crate::cpupower::parse_plan(val),
             "MAXWAIT" => c.maxwait = val.parse().ok().filter(|&v| (1..=255).contains(&v)),
             "TIMESLICE" => c.timeslice = val.split(',').next().and_then(|v| v.trim().parse().ok()).filter(|&v: &u32| v >= 1),
             "NETWORK" => c.network = Some(val.to_string()),
@@ -194,6 +198,13 @@ pub fn apply_memory(c: &Config) {
 /// Apply PRIORITY=, MAXWAIT= and TIMESLICE=.
 pub fn apply_sched(c: &Config) {
     crate::task::sched::configure(!c.priority_absolute, c.maxwait.unwrap_or(3), c.timeslice.unwrap_or(32));
+}
+
+/// Apply POWERPLAN=.
+pub fn apply_power(c: &Config) {
+    if let Some(p) = c.powerplan {
+        crate::cpupower::set_plan(p);
+    }
 }
 
 /// Read and parse CONFIG.SYS from drive C:, if present.

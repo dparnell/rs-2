@@ -21,6 +21,7 @@ been in QEMU, VirtualBox and VMware).
 | WiFi | Marvell AVASTAR 88W8897 (PCIe; Bluetooth on USB) | None (rs2 has wired NICs only) | New: mwifiex-style driver, 802.11 association, WPA2 (see below) |
 | Audio | Realtek ALC298 on HD Audio (8086:9D70) | `drivers/hda.rs` | Probably the codec's amplifier/pin setup. Low priority |
 | Buttons | Power and volume buttons on GPIOs (ACPI MSHW0040) | ACPI power-off only | Needs a real AML interpreter (GPIO controller + `_DSM`). Low priority |
+| CPU power | Skylake HWP, MWAIT C-states to C10, RAPL | `cpupower.rs`: power plans (POWERCFG, the Power object's Plan page), MWAIT idle, tickless idle APs, HWP requests, RAPL readings | Untested on the Surface: check `POWERCFG /WATCH` (package watts on each plan) |
 | Battery | ACPI control-method battery behind the EC | None | Needs an AML interpreter (`_BST`/`_BIF`). Low priority |
 | Cameras, sensors | IPU3-class cameras, sensor hub | None | Not planned |
 

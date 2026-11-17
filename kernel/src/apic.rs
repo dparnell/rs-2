@@ -94,6 +94,18 @@ pub fn init_ap() {
     lapic_write(0x380, TIMER_COUNT.load(Ordering::Relaxed) as u32);
 }
 
+/// Stop this CPU's timer: an idle processor other than the boot one
+/// waits for an interrupt without the periodic tick (see
+/// [`crate::cpupower`]).
+pub fn timer_stop() {
+    lapic_write(0x380, 0);
+}
+
+/// Restart this CPU's periodic timer.
+pub fn timer_start() {
+    lapic_write(0x380, TIMER_COUNT.load(Ordering::Relaxed).max(1) as u32);
+}
+
 fn icr(dest: u32, low: u32) {
     // Wait for a previous IPI to be accepted (delivery status).
     while lapic_read(0x300) & (1 << 12) != 0 {

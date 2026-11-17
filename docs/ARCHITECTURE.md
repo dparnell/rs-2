@@ -613,6 +613,56 @@ memory's per-CPU page-table copies pick up page directories added above
 1 GB on the first fault there, as they do below. `cargo xtask run --mem
 SIZE` sets QEMU's memory (512 MB by default).
 
+## Power management
+
+`kernel/src/cpupower.rs`. A **power plan** (Performance, Balanced,
+Power saver) is chosen at boot by CONFIG.SYS's `POWERPLAN=` (rs2's own
+statement; Balanced without one) and changed at run time with
+`Rs2PowerControl` (RS2API 27: 0 queries RS2POWERINFO, 1 sets the plan),
+which the Power object's Plan page and POWERCFG use; both also write
+`POWERPLAN=` (the Plan page always, POWERCFG with `/SAVE`). A change
+takes effect at once: the calling CPU applies it and kicks the others,
+which apply it on their next tick or before their next idle wait.
+
+| | Performance | Balanced | Power saver |
+|---|---|---|---|
+| Idle wait | `HLT` (C1) | `MWAIT` down to the third MWAIT C-state (C6 on Skylake) | `MWAIT` down to the deepest the CPU lists |
+| Idle CPUs other than CPU 0 | keep their 1 ms tick | stop their LAPIC timer | stop their LAPIC timer |
+| HWP request (min-max, EPP) | guaranteed-highest, 0 | lowest-highest, 0x80 | lowest-guaranteed, 0xC0 |
+| SpeedStep without HWP | highest turbo ratio | ratio from the load of the last 32 ticks | the same without turbo |
+| Energy/performance bias | 0 | 6 | 15 |
+
+- `MWAIT` is used on Intel CPUs that list sub-states in CPUID leaf 5,
+  not in a virtual machine (`mwait` on the kernel command line forces
+  it there). Below C1 needs ARAT and an invariant TSC, else C1 is the
+  limit. CPU 0 keeps its tick and goes no deeper than the third state.
+  The C-state numbering is CPUID's MWAIT numbering, which on Intel
+  client parts maps C1, C3, C6, C7s, C8, C9, C10 to hints 0x00-0x60;
+  there is no per-model table (as Linux's intel_idle has) and no
+  residency governor yet.
+- **Tickless idle.** Only the boot CPU keeps the clock, wakes sleepers
+  and polls the drivers that are polled every tick; the other CPUs' tick
+  only ends time slices. So an idle AP stops its LAPIC timer
+  (`apic::timer_stop`) and anything that needs it sends an IPI (a
+  thread made ready, a TLB shootdown); it restarts the timer when the
+  wait ends. Under QEMU with four CPUs an idle system takes ~800 timer
+  interrupts a second instead of ~3200. CPU 0 stays at 1 kHz: making it
+  tickless needs the per-tick pollers (xHCI, virtio, net, audio, screen,
+  SVGA) turned into deadlines first.
+- **Readings.** RAPL energy counters (Intel package, cores, DRAM; AMD
+  17h+ package) and CPU 0's APERF/MPERF are sampled once a second by
+  CPU 0's tick; RS2POWERINFO reports watts, CPU 0's average clock while
+  running and the timer interrupts of the last second.
+- Model-specific registers go through `arch::rdmsr_safe`/`wrmsr_safe`:
+  a #GP on their `rdmsr`/`wrmsr` is skipped by the trap handler
+  (`arch::msr_fixup`), so a register the CPU lacks is just absent. QEMU's
+  TCG answers unknown MSRs with 0 instead of faulting, so the RAPL unit
+  register must be non-zero to count.
+- Not done: the battery and AC adapter (an AML interpreter and an
+  embedded controller driver: `APM$` and the Power object still report
+  AC power and no battery), ACPI `_CST`/`_PSS` (rs2 does not run AML
+  methods), AMD's P-states (CPPC), suspend (S3).
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

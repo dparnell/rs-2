@@ -748,6 +748,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("route", "OS2\\ROUTE.EXE"),
         ("arp", "OS2\\ARP.EXE"),
         ("hostname", "OS2\\HOSTNAME.EXE"),
+        ("powercfg", "OS2\\POWERCFG.EXE"),
         ("host", "OS2\\HOST.EXE"),
         ("ftp", "OS2\\FTP.EXE"),
         ("ftpd", "OS2\\FTPD.EXE"),
