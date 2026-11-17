@@ -206,3 +206,21 @@ fn lx_program() {
     let fx = m.fixups(1).unwrap();
     assert_eq!(fx.len(), 2, "{fx:?}");
 }
+
+#[test]
+fn lidata_with_fixups() {
+    // LIDATA: 3 copies of a 4-byte block whose first word has a fix-up.
+    let mut o = rec(0x80, &name("li.asm"));
+    o.extend(rec(0x96, &names(&["", "_DATA", "DATA"])));
+    o.extend(rec(0x98, &[0x48, 12, 0, 2, 3, 1]));
+    // seg 1, offset 0, repeat 3, blocks 0, 4 content bytes.
+    o.extend(rec(0xa2, &[1, 0, 0, 3, 0, 0, 0, 4, 0x10, 0, 0xaa, 0xbb]));
+    // An offset fix-up on the content's first byte (offset 5 of the
+    // iterated data: repeat count, block count, length), to SI(1).
+    o.extend(rec(0x9c, &[0xc4, 0x05, 0x54, 0x01]));
+    o.extend(rec(0x8a, &[0]));
+    let obj = omflink::omf::Object::parse(&o).unwrap();
+    assert_eq!(obj.data[0].bytes, [0x10, 0, 0xaa, 0xbb, 0x10, 0, 0xaa, 0xbb, 0x10, 0, 0xaa, 0xbb]);
+    let offs: Vec<u32> = obj.data[0].fixups.iter().map(|f| f.offset).collect();
+    assert_eq!(offs, [0, 4, 8]);
+}
