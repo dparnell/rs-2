@@ -67,6 +67,7 @@ pub fn start_bootlog() {
         // stopped all USB).
         let mut failures = 0u32;
         let mut fell_back = false;
+        let mut save_failed = false;
         loop {
             let head = position();
             if head != written {
@@ -99,14 +100,33 @@ pub fn start_bootlog() {
                             let _ = fs.delete(prev);
                             let _ = fs.rename(name, prev);
                         }
+                        let path = alloc::format!("\\{name}");
                         let n = tail(&mut buf);
-                        if save(&*fs, &alloc::format!("\\{name}"), &buf[..n]).is_ok() {
-                            written = head;
-                            if !fallback {
-                                failures = 0;
+                        match save(&*fs, &path, &buf[..n]) {
+                            Ok(()) => {
+                                written = head;
+                                if !fallback {
+                                    failures = 0;
+                                }
                             }
-                        } else if !fallback {
-                            failures += 1;
+                            Err(e) => {
+                                // Say why, once, and keep the newest lines in
+                                // the room the file already has (a full
+                                // volume cannot extend it).
+                                if !save_failed {
+                                    save_failed = true;
+                                    let free = fs.volume().map_or(0, |v| v.free_units as u64 * v.sectors_per_unit as u64 * v.bytes_per_sector as u64 / 1024);
+                                    crate::println!("bootlog: saving {}:{path} failed (error {e}, {free} KB free); keeping the newest lines that fit", (b'A' + d) as char);
+                                }
+                                let room = fs.stat(&path).map_or(0, |i| i.alloc.max(i.size)) as usize;
+                                let n = tail(&mut buf);
+                                if room > 0 && save(&*fs, &path, &buf[n.saturating_sub(room)..n]).is_ok() {
+                                    written = head;
+                                }
+                                if !fallback {
+                                    failures += 1;
+                                }
+                            }
                         }
                     }
                     None if !warned => {

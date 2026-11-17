@@ -196,8 +196,16 @@ The SP4 has no serial port. Done (2026-11-15):
     the controller was given up 5 s later. A ring that is not running
     is now handled as stopped at once: the command is skipped, it fails
     as aborted, and the commands behind it run (the keyboard and mouse
-    enumerate). In QEMU the system keeps running and LIVEBOOT.LOG keeps
-    being written, so why the Surface's log stops is still open.
+    enumerate).
+  - That dock boot reached the prompt and the desktop: only the log
+    stopped. Both dock LIVEBOOT.LOGs (and the installed system's BOOT.LOG
+    of 2760 bytes) stopped under 4 KB, as if the internal EFI partition
+    were full: the first save fits in one cluster, and growing the file
+    fails. Failed saves were silent. Now the first failure is logged
+    with the error and the volume's free space, and the file keeps the
+    newest lines that fit in the space it already has. Checked in QEMU
+    with an EFI partition filled to 4 KB free: "saving
+    D:\RS2\LIVEBOOT.LOG failed (error 112, 0 KB free)" is in the file.
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
