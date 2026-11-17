@@ -704,8 +704,11 @@ pub fn set_focus(h: u32) {
     }
     // The frames around it remember it (QWL_HWNDFOCUSSAVE): a frame
     // inside another window (an MDI document) as well as the top-level
-    // one.
-    let mut p = st().desk.get(h).map_or(0, |w| w.parent);
+    // one; a frame that has the focus itself (no client to pass it to)
+    // remembers itself. Borland's OWL walks up the parents from a frame's
+    // QWL_HWNDFOCUSSAVE to the frame and looped for ever from 0 (PRNTPREV
+    // as soon as its menu was used).
+    let mut p = if st().frames.contains_key(&h) { h } else { st().desk.get(h).map_or(0, |w| w.parent) };
     while p != 0 && p != HWND_DESKTOP {
         if let Some(f) = st().frames.get_mut(&p) {
             f.focus_save = h;
