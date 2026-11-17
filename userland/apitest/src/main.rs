@@ -338,6 +338,14 @@ fn files() {
         let mut buf = [0u8; 64];
         DosRead(hf, buf.as_mut_ptr(), 64, &mut n);
         check("DosRead back", n == msg.len() as u32 && &buf[..n as usize] == msg);
+        // Level 1 into the OS/2 1.x FILESTATUS (22 bytes, USHORT attrFile),
+        // as IBM's DOSCALL1 allows (IBM's Jigsaw sample asks so); the
+        // bytes after it stay as they were.
+        let mut fs = [0xeeu8; 26];
+        let rc = DosQueryFileInfo(hf, 1, fs.as_mut_ptr(), 22);
+        let cb_file = u32::from_le_bytes([fs[12], fs[13], fs[14], fs[15]]);
+        check("DosQueryFileInfo level 1 into 22 bytes", rc == 0 && cb_file == msg.len() as u32 && fs[22..] == [0xee; 4]);
+        check("DosQueryFileInfo level 1 into 21 bytes overflows", DosQueryFileInfo(hf, 1, fs.as_mut_ptr(), 21) == 111);
         // A second read/write open is refused by the deny-write share mode.
         let mut hf2 = 0;
         let rc2 = DosOpen(
