@@ -102,6 +102,7 @@ const OPTIONS: &[OptDef] = &[
     OptDef { name: "HELP", min: 1 },
     OptDef { name: "HIGH", min: 2 },
     OptDef { name: "INCREMENTAL", min: 3 },
+    OptDef { name: "IBMFRAMES", min: 4 },
     OptDef { name: "INFORMATION", min: 1 },
     OptDef { name: "LINENUMBERS", min: 2 },
     OptDef { name: "MAP", min: 1 },
@@ -144,6 +145,7 @@ fn help(prog: Prog) -> String {
         "/EXEPACK          compress the executable",
         "/FARCALLTRANSLATION  turn far calls within a segment into near calls",
         "/HELP or /?       show this list",
+        "/IBMFRAMES        32-bit offsets with a segment frame relative to the object (LINK386)",
         "/INFORMATION      show what the linker is doing",
         "/LINENUMBERS      line numbers in the map file",
         "/MAP[:FULL]       public symbols in the map file",
@@ -216,6 +218,7 @@ fn apply_options(opts: &[String], o: &mut Options, prog: Prog, msgs: &mut msg::M
             "FARCALLTRANSLATION" => o.farcall = true,
             "NOFARCALLTRANSLATION" => o.farcall = false,
             "INFORMATION" => o.information = true,
+            "IBMFRAMES" => o.ibm_frames = true,
             "LINENUMBERS" => o.linenumbers = true,
             "MAP" => {
                 o.map = true;
@@ -371,6 +374,14 @@ fn link_with(host: &mut dyn Host, prog: Prog, mut o: Options, msgs: msg::Msgs, f
     }
     // Imports named in the .DEF file.
     for i in &def.imports {
+        let mut i = i.clone();
+        // LINK386 keeps the .DEF file's names in upper case unless /NOI.
+        if prog == Prog::Link386 && !l.opt.case_sensitive {
+            i.internal = i.internal.to_ascii_uppercase();
+            if let omf::ImpEntry::Name(n) = &mut i.entry {
+                *n = n.to_ascii_uppercase();
+            }
+        }
         let s = l.sym(&i.internal);
         l.syms[s].def = link::SymDef::Import { module: i.module.clone(), entry: i.entry.clone() };
         l.import_seq.push(s);
@@ -439,7 +450,22 @@ fn link_with(host: &mut dyn Host, prog: Prog, mut o: Options, msgs: msg::Msgs, f
         }
     }
     let Some(mut linked) = link::link(&mut l) else { return 4 };
+    // Without /NOIGNORECASE LINK386 exports and imports names in upper case.
+    if prog == Prog::Link386 && !l.opt.case_sensitive {
+        for e in &mut linked.exports {
+            e.name = e.name.to_ascii_uppercase();
+        }
+        for u in &mut linked.units {
+            for r in &mut u.relocs {
+                if let link::RTarget::ImportName { name, .. } = &mut r.target {
+                    *name = name.to_ascii_uppercase();
+                }
+            }
+        }
+    }
     linked.module_name = match &def.name {
+        // LINK386 writes module names in lower case.
+        Some(n) if prog == Prog::Link386 => n.to_ascii_lowercase(),
         Some(n) => n.to_ascii_uppercase(),
         None => {
             let b = cmd::base_name(&exe);

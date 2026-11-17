@@ -112,9 +112,27 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         imp_off.insert(String::from(s), o);
         o
     };
+    // Module references are numbered in the order of their last fix-up
+    // going backwards through the program (the order IBM's LINK gives).
+    let mut morder: Vec<usize> = Vec::new();
+    for u in units.iter().rev() {
+        for r in u.relocs.iter().rev() {
+            if let RTarget::ImportOrd { module, .. } | RTarget::ImportName { module, .. } = &r.target {
+                if !morder.contains(module) {
+                    morder.push(*module);
+                }
+            }
+        }
+    }
+    for m in 0..o.imports.len() {
+        if !morder.contains(&m) {
+            morder.push(m);
+        }
+    }
+    let mnum = |m: usize| morder.iter().position(|&x| x == m).unwrap() as u16 + 1;
     let mut modref: Vec<u16> = Vec::new();
-    for m in &o.imports {
-        modref.push(name_off(m, &mut imp_names));
+    for &m in &morder {
+        modref.push(name_off(&o.imports[m], &mut imp_names));
     }
     // Relocations per segment, chained as the loader expects.
     let mut seg_relocs: Vec<Vec<[u8; 8]>> = Vec::new();
@@ -137,14 +155,14 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 }
                 RTarget::ImportOrd { module, ordinal } => {
                     let mut t = [0u8; 6];
-                    t[0..2].copy_from_slice(&((*module + 1) as u16).to_le_bytes());
+                    t[0..2].copy_from_slice(&mnum(*module).to_le_bytes());
                     t[2..4].copy_from_slice(&ordinal.to_le_bytes());
                     (1, t)
                 }
                 RTarget::ImportName { module, name } => {
                     let no = name_off(name, &mut imp_names);
                     let mut t = [0u8; 6];
-                    t[0..2].copy_from_slice(&((*module + 1) as u16).to_le_bytes());
+                    t[0..2].copy_from_slice(&mnum(*module).to_le_bytes());
                     t[2..4].copy_from_slice(&no.to_le_bytes());
                     (2, t)
                 }
@@ -186,8 +204,14 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         while data.last() == Some(&0) {
             data.pop();
         }
-        // Internal references first, then imports.
-        recs.sort_by_key(|r| (r[1] & 3) != 0);
+        // The order IBM's LINK writes them in (it keeps them in a hash
+        // table): internal references first, by segment; then imports by
+        // (module * 8 + ordinal or name offset) mod 128.
+        recs.sort_by_key(|r| {
+            let a = u16::from_le_bytes([r[4], r[5]]) as u32;
+            let b = u16::from_le_bytes([r[6], r[7]]) as u32;
+            if r[1] & 3 == 0 { (0, r[4] as u32) } else { (1, (a * 8 + b) & 127) }
+        });
         // /EXEPACK: iterated data when it is smaller.
         let mut it = false;
         if l.opt.exepack > 0 && !data.is_empty() {

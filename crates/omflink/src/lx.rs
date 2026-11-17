@@ -64,6 +64,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     let mut stack = l.opt.stack.or(def.stacksize).unwrap_or(0);
     let mut esp: Option<(usize, u32)> = None;
     let autodata = o.autodata;
+    let mut stack_ignored = false;
     if !dll {
         if let Some(si) = o.lsegs.iter().position(|s| s.combine == Combine::Stack && s.absolute.is_none()) {
             let s = &o.lsegs[si];
@@ -84,16 +85,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             u.size += stack;
             esp = Some((a, u.size));
         } else {
-            // No data object at all: a stack object of its own.
-            o.units.push(crate::link::Unit {
-                size: stack,
-                name: String::from("STACK"),
-                class: String::from("STACK"),
-                use32: true,
-                ..Default::default()
-            });
-            let n = o.units.len() - 1;
-            esp = Some((n, stack));
+            // No automatic data object to put it in (as IBM's).
+            stack_ignored = true;
+            stack = 0;
         }
     }
     // IBM's LINK386 writes the map here: later warnings are not in it.
@@ -157,7 +151,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         data: Vec<u8>,
         fix: Vec<u8>,
         /// Records: source type, flags, target bytes, source offsets.
-        recs: Vec<(u8, u8, Vec<u8>, Vec<i16>)>,
+        recs: Vec<(u8, u8, Vec<u8>, Vec<i16>, (bool, u32))>,
         /// Page table flags: 0 data as is, 1 iterated, 5 compressed.
         kind: u16,
     }
@@ -221,6 +215,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             };
             let mut tail: Vec<u8> = Vec::new();
             let mut flags: u8;
+            let key: (bool, u32);
             match &r.target {
                 RTarget::Internal { unit, offset } => {
                     if *unit == usize::MAX {
@@ -233,6 +228,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                         continue;
                     }
                     flags = 0;
+                    key = (true, if r.kind == RelocKind::Selector { 0 } else { offset & 63 });
                     let obj = (*unit + 1) as u16;
                     if obj > 255 {
                         flags |= 0x40;
@@ -255,6 +251,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 }
                 RTarget::ImportOrd { module, ordinal } => {
                     flags = 1;
+                    key = (false, *ordinal as u32 & 63);
                     let m = (*module + 1) as u16;
                     if m > 255 {
                         flags |= 0x40;
@@ -279,6 +276,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                         tail.push(m as u8);
                     }
                     let po = proc_name(name, &mut procs);
+                    key = (false, po & 63);
                     if po > 0xffff {
                         flags |= 0x10;
                         put32(&mut tail, po);
@@ -310,13 +308,16 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
                 // list) as in IBM's output.
                 match pg.recs.iter_mut().find(|x| x.0 == st && x.1 == flags && x.2 == tail && x.3.len() < 255) {
                     Some(x) => x.3.push(srcoff),
-                    None => pg.recs.push((st, flags, tail.clone(), vec![srcoff])),
+                    None => pg.recs.push((st, flags, tail.clone(), vec![srcoff], key)),
                 }
             }
         }
     }
     for pg in &mut pages {
-        for (st, flags, tail, srcs) in &pg.recs {
+        // IBM's order (a hash table of 64 chains): imports, then internal
+        // targets, each by ordinal, name offset or target offset mod 64.
+        pg.recs.sort_by_key(|r| r.4);
+        for (st, flags, tail, srcs, _) in &pg.recs {
             if srcs.len() == 1 {
                 pg.fix.push(*st);
                 pg.fix.push(*flags);
@@ -383,7 +384,7 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
             for e in &exports[i..j] {
                 let mut fl = 1u8;
                 if k.0 != 4 {
-                    if !e.nodata && (k.0 == 1 || k.0 == 2) {
+                    if !e.nodata && dll {
                         fl |= 2;
                     }
                     fl |= (e.pwords & 0x1f) << 3;
@@ -434,11 +435,12 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
         pstr(&mut nonres, &o.description);
         put16(&mut nonres, 0);
     }
-    for e in &exports {
+    for e in &o.exports {
         if e.noname {
             continue;
         }
-        if e.resident {
+        // Names exported without an ordinal are resident.
+        if e.resident || !e.explicit {
             pstr(&mut resident, &e.name);
             put16(&mut resident, e.ordinal);
         } else {
@@ -511,6 +513,9 @@ pub fn write(l: &mut Linker, o: &mut Linked) -> Option<Vec<u8>> {
     };
     if autodata.is_none() && !dll {
         l.msgs.warn(l.host, "", 4036, "no automatic data segment");
+    }
+    if stack_ignored {
+        l.msgs.warn(l.host, "", 4049, "no automatic data segment for the stack; stack size ignored");
     }
     match def.kind {
         Kind::PhysicalDevice => mflags |= 0x20000,
