@@ -981,6 +981,15 @@ name = "vt100"
 version = "0.1.0"
 
 [[package]]
+name = "wifipm"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+ "wlan",
+]
+
+[[package]]
 name = "win16-dll"
 version = "0.1.0"
 dependencies = [

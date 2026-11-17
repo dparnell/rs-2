@@ -774,6 +774,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("talkd", "OS2\\TALKD.EXE"),
         ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
         ("wifi", "OS2\\WIFI.EXE"),
+        ("wifipm", "OS2\\WIFIPM.EXE"),
         ("keychain", "OS2\\KEYCHAIN.EXE"),
         ("net", "OS2\\NET.EXE"),
         ("lantest", "RS2\\LANTEST.EXE"),
@@ -930,7 +931,7 @@ const APP_DATA: &[(&str, &str)] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmslow", "pmbench", "pmviowin", "rs2shell", "e", "view", "winhelp", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "vmagent", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmslow", "pmbench", "pmviowin", "rs2shell", "e", "view", "winhelp", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "vmagent", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell", "wifipm"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

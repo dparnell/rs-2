@@ -11,7 +11,7 @@
 //! rs2 has no INI.RC from IBM: the first start writes rs2's own entries
 //! (the desktop, drives, the Startup, Programs and Command Prompts
 //! folders, the Minimized Window Viewer, Window List, System Setup with
-//! System, System Clock and Display, Shut Down, the Shredder, Connections
+//! System, System Clock, Display and WiFi, Shut Down, the Shredder, Connections
 //! with Network and Printers, the programs rs2 has) unless OS2.INI says the desktop was
 //! made (`PM_Workplace` `Rs2Desktop`).
 
@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"15";
+const DESKTOP_VERSION: &[u8] = b"16";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -116,6 +116,8 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"OS2\\E.EXE", b"System Editor", b"<WP_SYSED>", b"<WP_PROGRAMSFOLDER>", b"ASSOCFILTER=*.TXT,*.DOC,*.LOG,*.ME,*.CFG,*.SYS,*.INI,*.CMD;"),
         (b"OS2\\APPINST.EXE", b"Install OS/2 Applications", b"<RS2_APPINST>", b"<WP_PROGRAMSFOLDER>", b""),
         (b"OS2\\DISPLAY.EXE", b"Display", b"<RS2_DISPLAY>", b"<WP_CONFIG>", b""),
+        // Version 16: WiFi (WIFIPM.EXE, the window of WIFI.EXE).
+        (b"OS2\\WIFIPM.EXE", b"WiFi", b"<RS2_WIFI>", b"<WP_CONFIG>", b""),
         (b"OS2\\PMINSTAL.EXE", b"Install rs2", b"<RS2_INSTALL>", b"<WP_PROGRAMSFOLDER>", b""),
         (b"OS2\\APPS\\PKGMGR.EXE", b"Package Manager", b"<RS2_PKGMGR>", b"<WP_PROGRAMSFOLDER>", b""),
         // rs2's applets (version 12): IBM's titles, object IDs, folders,
@@ -292,7 +294,7 @@ pub fn run() {
     // version 11 the Command Reference and Start Here books;
     // version 12 the applets (Utilities, Games, Locale, Mahjongg's folder);
     // version 13 the TCP/IP and Multimedia folders and the multimedia
-    // classes;
+    // classes; version 15 the Hardware Manager; version 16 WiFi;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         // rs2's multimedia classes (mm.rs) in the class table, unless

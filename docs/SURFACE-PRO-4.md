@@ -599,15 +599,81 @@ now does too (A-MSDUs are not taken apart yet; they come only with
 a WPA2 network on 5 GHz (channel 136, -63 dBm) at the first try, the
 4-way handshake completed (messages 1-4), `eth0` came up and DHCP got a
 lease (address, gateway and DNS). Encrypted frames therefore go both
-ways (CCMP in the firmware, keys from KEY_MATERIAL v2). Still not done:
-802.11n/ac rates (association offers up to 54 Mbit/s), power saving,
-roaming, hidden networks, a PM applet; the keychain and WIFI.CFG on the
-live stick last until reboot only.
+ways (CCMP in the firmware, keys from KEY_MATERIAL v2). 802.11n/ac
+and a PM window followed (round 3, below). The keychain and WIFI.CFG on
+the live stick last until reboot only.
 
 Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 `IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
 on lines starting `wlan0` and `88W8897` (key API version, association
 result, handshake failures).
+
+### Round 3: 802.11n and 802.11ac (written 2026-11-17, not yet run on the chip)
+
+Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
+`11n_rxreorder.c`, `11n_aggr.c`):
+
+- GET_HW_SPEC's 802.11n/ac capability words and stream count become
+  `wlan::mwifiex::Caps`; the log says what the chip offers ("802.11n
+  (2 stream(s), 20/40 MHz) and 802.11ac"). 11N_CFG at start-up lets
+  the firmware send at HT rates.
+- ASSOCIATE to a network that has them adds HT Capabilities (the
+  chip's), the channel with its secondary channel for 40 MHz, the
+  network's 20/40 coexistence and extended capabilities, VHT
+  Capabilities and Operation (at most 80 MHz unless the chip says
+  more), operating mode notification, and the WMM information element
+  (802.11n needs QoS). A network that refuses that association is
+  joined again at legacy rates. `associated as 802.11ac` (or n, a, g)
+  is logged, and `WIFI STATUS` shows `standard=`.
+- Block-ack sessions the AP asks for (EVENT_ADDBA) are accepted
+  (11N_ADDBA_RSP, window 32). Received frames to us of such a traffic
+  class go through a reorder window (`wlan::reorder`): duplicates and
+  old frames are dropped, a gap is skipped after 50 ms, a Block Ack
+  Request moves the window, DELBA or a timeout ends it.
+- A-MSDUs (RxPD type 0xe6) are split into their frames; BARs are 0xe7.
+- Host tests use the Surface's own capability words.
+
+Not done: transmit aggregation (A-MPDU/A-MSDU from rs2), power saving,
+roaming, hidden networks.
+
+### The WiFi window (WIFIPM.EXE)
+
+`C:\OS2\WIFIPM.EXE` (userland/wifipm) is the Presentation Manager
+counterpart of WIFI.EXE, on the same calls (RS2API 620-624, the
+keychain's 630 and 633). Its object, **WiFi**, is in the System Setup
+folder next to Display (`<RS2_WIFI>`; desktop version 16 adds it to
+existing desktops); from a command prompt, `START WIFIPM` or just
+`WIFIPM`. One window:
+
+- Connection: the adapter, the state (disconnected, joining, checking
+  the passphrase, connected, or failed with the kernel's reason while
+  it keeps trying), the network's signal (dBm and a word for it),
+  channel, security and the standard the link runs (802.11ac, n, a or
+  g), and the IP address of the adapter's interface
+  (found by its MAC address; "Waiting for DHCP..." until the lease).
+  Read again every 3 seconds; a line under it says what the last action
+  did.
+- Networks: one line per SSID (its strongest access point), strongest
+  first, with signal bars, the security and "Saved", "Joining" or
+  "Connected". Hidden networks are left out and counted in the heading.
+  The list shows the last scan's results at once and starts a new scan
+  (on a second thread: the window stays usable); Scan does it again.
+- Connect (or a double click): an open network is joined at once; a
+  WPA2 network not saved yet, or saved without a passphrase in the
+  keychain, first asks for its passphrase (8-63 characters, typed as
+  asterisks). As WIFI CONNECT, the network goes first in WIFI.CFG and
+  the kernel keeps the passphrase in the keychain; the status then
+  follows the join. WEP, WPA1, WPA3-only and Enterprise networks get a
+  "not supported" message.
+- Disconnect (as WIFI DISCONNECT); Forget (asks first) removes the
+  selected saved network from WIFI.CFG and its passphrase from the
+  keychain, and leaves it when connected to it.
+
+Without an adapter (QEMU has none) it says "No WiFi adapter found" and
+offers only Close. On the serial port it writes one line, `[wifipm]
+started: ...`, with what it found. `WIFIPM /DEMO` shows made-up networks
+and a connection without asking the kernel (to try the window in QEMU;
+its Connect, Disconnect and Forget only say what they would do).
 
 ### The first driver: Marvell 88W8897
 
