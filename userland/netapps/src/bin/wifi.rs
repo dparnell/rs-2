@@ -12,6 +12,9 @@
 //! `WIFI DISCONNECT`: leave the network (until the next CONNECT or boot).
 //! `WIFI FORGET ssid`: remove a network from WIFI.CFG and its passphrase
 //! from the keychain.
+//! `WIFI POWERSAVE [ON|OFF]`: let the chip sleep between beacons (the
+//! `POWERSAVE=` line of WIFI.CFG, applied at once); without ON or OFF,
+//! the setting and what the adapter does now.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -147,15 +150,17 @@ fn bytes(s: &str) -> Vec<u8> {
     s.chars().map(|c| c as u32 as u8).collect()
 }
 
-fn read_config() -> Vec<wlan::config::Profile> {
+/// The whole file (settings and networks): a writer changes only its part
+/// and writes all of it back, so the other settings are kept.
+fn read_config() -> wlan::config::Config {
     match utils::files::read_file(CONFIG) {
-        Ok(d) => wlan::config::parse(&d.iter().map(|&b| b as char).collect::<String>()).profiles,
-        Err(_) => Vec::new(),
+        Ok(d) => wlan::config::parse(&d.iter().map(|&b| b as char).collect::<String>()),
+        Err(_) => wlan::config::Config::default(),
     }
 }
 
-fn write_config(p: &[wlan::config::Profile]) -> bool {
-    let t = wlan::config::write(p);
+fn write_config(c: &wlan::config::Config) -> bool {
+    let t = wlan::config::write_config(c);
     match utils::files::write_file(CONFIG, &bytes(&t)) {
         Ok(()) => true,
         Err(rc) => {
@@ -192,14 +197,15 @@ fn connect(ssid: &str, pass: Option<&str>) -> u32 {
     // Save it first in WIFI.CFG. The passphrase is not written there: the
     // kernel keeps it in the system keychain (a passphrase still in the
     // file is moved there when it is read again).
-    let mut ps = read_config();
+    let mut c = read_config();
+    let ps = &mut c.profiles;
     let mut p = ps.iter().position(|p| p.ssid == bytes(ssid)).map(|i| ps.remove(i)).unwrap_or_else(|| wlan::config::Profile::new(&bytes(ssid), None));
     if pass.is_some() {
         p.passphrase = None;
     }
     p.autoconnect = true;
     ps.insert(0, p);
-    if write_config(&ps) {
+    if write_config(&c) {
         unsafe { Rs2WlanReload() };
     }
     let (s, k) = (cstr(ssid), pass.map(cstr));
@@ -242,6 +248,61 @@ fn connect(ssid: &str, pass: Option<&str>) -> u32 {
     2
 }
 
+/// `WIFI POWERSAVE [ON|OFF]`.
+fn powersave(arg: Option<String>) -> u32 {
+    let on = match arg.as_deref() {
+        None => {
+            let c = read_config();
+            outln(&alloc::format!(
+                "Power saving in {CONFIG}: {}",
+                match c.powersave {
+                    Some(true) => "on",
+                    Some(false) => "off",
+                    None => "off (not set)",
+                }
+            ));
+            // What each adapter does now: (adapter, power_save, power_state),
+            // lines an older kernel does not give.
+            let t = query();
+            let mut ad: Vec<(&str, Option<&str>, Option<&str>)> = Vec::new();
+            for l in t.lines() {
+                let Some((k, v)) = l.split_once('=') else { continue };
+                match (k, ad.last_mut()) {
+                    ("adapter", _) => ad.push((v, None, None)),
+                    ("power_save", Some(a)) => a.1 = Some(v),
+                    ("power_state", Some(a)) => a.2 = Some(v),
+                    _ => {}
+                }
+            }
+            if ad.is_empty() {
+                outln("No WiFi adapter found.");
+            }
+            for (n, save, state) in ad {
+                match save {
+                    Some(v) => outln(&alloc::format!("Adapter {n}: power saving {v}{}", state.map(|s| alloc::format!(" ({s})")).unwrap_or_default())),
+                    None => outln(&alloc::format!("Adapter {n}: power saving not reported (the adapter is not up, or the kernel is older)")),
+                }
+            }
+            return 0;
+        }
+        Some("ON") => true,
+        Some("OFF") => false,
+        Some(_) => {
+            eprint("Usage: WIFI POWERSAVE [ON|OFF]\r\n");
+            return 1;
+        }
+    };
+    let mut c = read_config();
+    c.powersave = Some(on);
+    if !write_config(&c) {
+        return 2;
+    }
+    unsafe { Rs2WlanReload() };
+    let s = if on { "on" } else { "off" };
+    outln(&alloc::format!("Power saving {s} (saved in {CONFIG})."));
+    0
+}
+
 fn main(s: &os2::Startup) -> u32 {
     let a = args(s);
     let cmd = a.first().map(|c| c.to_ascii_uppercase()).unwrap_or_default();
@@ -271,11 +332,11 @@ fn main(s: &os2::Startup) -> u32 {
                 eprint("Usage: WIFI FORGET ssid\r\n");
                 return 1;
             };
-            let mut ps = read_config();
-            let before = ps.len();
-            ps.retain(|p| p.ssid != bytes(ssid));
+            let mut c = read_config();
+            let before = c.profiles.len();
+            c.profiles.retain(|p| p.ssid != bytes(ssid));
             let in_keychain = unsafe { Rs2KeyDelete(cstr("wifi").as_ptr(), cstr(ssid).as_ptr()) } == 0;
-            if ps.len() == before {
+            if c.profiles.len() == before {
                 if in_keychain {
                     outln(&alloc::format!("The passphrase of {ssid} removed from the keychain."));
                     return 0;
@@ -283,19 +344,20 @@ fn main(s: &os2::Startup) -> u32 {
                 eprint(&alloc::format!("WIFI: {ssid} is not in {CONFIG}\r\n"));
                 return 1;
             }
-            if !write_config(&ps) {
+            if !write_config(&c) {
                 return 2;
             }
             unsafe { Rs2WlanReload() };
             outln(&alloc::format!("{ssid} removed from {CONFIG}."));
             0
         }
+        "POWERSAVE" => powersave(a.get(1).map(|v| v.to_ascii_uppercase())),
         "RELOAD" => {
             unsafe { Rs2WlanReload() };
             status()
         }
         _ => {
-            eprint("Usage: WIFI [STATUS | SCAN [n] | LIST [n] | CONNECT ssid [passphrase] | DISCONNECT | FORGET ssid | RELOAD]\r\n");
+            eprint("Usage: WIFI [STATUS | SCAN [n] | LIST [n] | CONNECT ssid [passphrase] | DISCONNECT | FORGET ssid | POWERSAVE [ON|OFF] | RELOAD]\r\n");
             1
         }
     }

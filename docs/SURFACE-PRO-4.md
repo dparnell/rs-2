@@ -644,8 +644,32 @@ rates; the firmware's codes are now named as Linux names them
 (`wlan::mwifiex::assoc_failure`), and only a real refusal (the AP's
 status code, or the firmware refusing the command) falls back.
 
-Not done: transmit aggregation (A-MPDU/A-MSDU from rs2), power saving,
-roaming, hidden networks.
+### Round 4: transmit aggregation and power saving (written 2026-11-17, not yet run on the chip)
+
+- **Transmit aggregation.** Once the link carries data on 802.11n/ac
+  (a second after the pairwise key, or after joining an open network),
+  the driver asks the AP for a block-ack session on TID 0, which is all
+  rs2 sends (11N_ADDBA_REQ, window 64, as Linux `mwifiex_send_addba`).
+  When the AP accepts, the firmware sends A-MPDUs by itself; the log
+  says `transmit block ack on TID 0` or gives the AP's status. rs2 does
+  not build A-MSDUs.
+- **Power saving.** Off unless `\MPTN\ETC\WIFI.CFG` says `POWERSAVE=ON`
+  (a line before the first `SSID=`): this firmware is known to crash
+  with power save on, and after a crash only a D3cold cycle of the slot
+  through ACPI brings the card back, which rs2 cannot do yet. Turn it
+  on with `WIFI POWERSAVE ON` or the window's Power saving checkbox;
+  the kernel applies the file's setting at boot and on `Rs2WlanReload`.
+  The flow is Linux's for PCIe: PS_MODE_ENH turns station power save on
+  (wake for every DTIM, sleep 1000 ms after activity); the firmware asks
+  to sleep (EVENT_PS_SLEEP) and rs2 confirms (sleep confirmation command,
+  then CPU_INTR_SLEEP_CFM_DONE) only with nothing to send, receive or
+  ask; before a command or a frame rs2 wakes the chip by writing
+  FIRMWARE_READY to the firmware status register until it interrupts.
+  `WIFI STATUS` shows `power_save`, `power_state`, `sleeps` and `wakes`;
+  `WIFI POWERSAVE` alone shows the setting and what each adapter does.
+
+Not done: A-MSDUs from rs2, roaming, hidden networks, recovering the card
+after a firmware crash.
 
 ### The WiFi window (WIFIPM.EXE)
 
@@ -663,7 +687,9 @@ existing desktops); from a command prompt, `START WIFIPM` or just
   g), and the IP address of the adapter's interface
   (found by its MAC address; "Waiting for DHCP..." until the lease).
   Read again every 3 seconds; a line under it says what the last action
-  did.
+  did. The **Power saving** check box sets `POWERSAVE=` in WIFI.CFG (as
+  WIFI POWERSAVE ON/OFF) and has the kernel apply it at once; beside it,
+  whether the chip is awake or asleep now.
 - Networks: one line per SSID (its strongest access point), strongest
   first, with signal bars, the security and "Saved", "Joining" or
   "Connected". Hidden networks are left out and counted in the heading.
