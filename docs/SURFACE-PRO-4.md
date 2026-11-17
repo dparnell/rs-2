@@ -258,6 +258,18 @@ The SP4 has no serial port. Done (2026-11-15):
     hardware wants it"); QEMU does not care. Now the first request
     waits 10 ms (step Addressed). A root-port failure line also carries
     PORTSC (speed, link state, enabled), for the next log.
+  - **Working** (2026-11-17, live stick at c64eb097, dock attached): the
+    Type Cover and the mouse behind the dock both work. Port 14 still
+    hangs, and the controller is reset without it (about 11 s more at
+    boot). Port 2 then enumerates on the first try: the dock's USB 2
+    hub 045e:09b3, a second hub 045e:09b4 on 2.1, the mouse 1c59:0027
+    on 2.1.3, and HID interfaces without mouse or keyboard reports on
+    2.3, 2.5 and 2.1.5. The log was written to the end.
+  - Still open: the dock's USB 3 hub (port 14) is left alone, so
+    devices behind the dock run at USB 2 speed at most. Why its Address
+    Device never completes is not known; the controller reset costs
+    about 11 s of boot. The installed system needs this kernel too
+    (`rs2-kernel-c64eb097.elf`).
 - **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
   volume said nothing between the volume label and its totals, which on
   the Surface's large C: looked like a boot that stopped. It now prints
