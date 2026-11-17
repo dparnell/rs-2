@@ -166,7 +166,7 @@ pub fn run() {
     let mut got = 0;
     let rc = unsafe { DosWaitChild(DCWA_PROCESS, DCWW_NOWAIT, &mut res, &mut got, pid) };
     check("DosWaitChild NOWAIT on a running child", rc == 129);
-    unsafe { DosKillProcess(0, pid) };
+    unsafe { DosKillProcess(1, pid) };
     wait_child(pid);
     check("DosWaitChild unknown pid", wait_child(9999).0 == 303);
 

@@ -148,6 +148,13 @@ fn exec(c: &mut Ctx) -> u32 {
     };
     if mode == EXEC_SYNC {
         child.exit_waiters.wait_until(None, || child.finished.load(Ordering::Acquire));
+        // Interrupted (the caller is being ended): the child runs on and
+        // is collected when it ends. Reaping it now dropped a running
+        // process: its threads went on on freed page tables (closing the
+        // command window a PM program was started from wedged a CPU).
+        if !child.finished.load(Ordering::Acquire) {
+            return err::INTERRUPT;
+        }
         let info = child.exit_info().unwrap_or(process::ExitInfo { cause: 0, code: 0 });
         process::reap(child.pid);
         write_result(c, pres, info.cause, info.code);
@@ -233,8 +240,10 @@ pub fn dos_kill_process(c: &mut Ctx) -> u32 {
     if p.pid != c.process.pid && p.ppid != c.process.pid && !pm {
         return err::NOT_DESCENDANT;
     }
-    // DKP_PROCESSTREE (1): the descendants too, deepest first.
-    if scope & 1 != 0 {
+    // DKP_PROCESSTREE (0, Toolkit bsedos.h): the descendants too, deepest
+    // first; DKP_PROCESS (1) the process alone. rs2 had them the other way
+    // round (its own callers too), so killing a program ended its children.
+    if scope & 1 == 0 {
         let mut tree = alloc::vec![p.pid];
         let mut i = 0;
         while i < tree.len() {

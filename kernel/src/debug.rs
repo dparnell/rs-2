@@ -43,7 +43,19 @@ pub fn dump_cpu(f: &crate::arch::idt::TrapFrame) {
     let (id, top) = cur.as_ref().map_or((0, 0), |t| (t.id, t.kstack_top()));
     let here = f as *const _ as u64;
     let stack = if top != 0 && (top - 0x10_0000..top).contains(&here) { stack_line(here, top) } else { alloc::string::String::from(" (not on a thread stack)") };
-    crate::trace!("cpu {} thread {} at {:04x}:{:x} rflags {:x}\n    kernel:{}", me.index(), id, f.cs, f.rip, f.rflags, stack);
+    // Whose thread it is: a thread whose process is gone shows pid 0.
+    let who = cur.as_ref().map_or(alloc::string::String::new(), |t| {
+        let pid = t.process().map_or(0, |p| p.pid);
+        alloc::format!(
+            " (pid {} tid {} {:?} exit_requested {} must_complete {})",
+            pid,
+            t.tid,
+            t.state(),
+            t.exit_requested(),
+            t.must_complete.load(core::sync::atomic::Ordering::Relaxed)
+        )
+    });
+    crate::trace!("cpu {} thread {}{} at {:04x}:{:x} rflags {:x}\n    kernel:{}", me.index(), id, who, f.cs, f.rip, f.rflags, stack);
 }
 
 /// Print all threads (from the keyboard interrupt); every CPU, this one

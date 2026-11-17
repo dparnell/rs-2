@@ -63,6 +63,12 @@ fn main(s: &Startup) -> u32 {
     if s.args().trim_ascii() == b"dllrn" {
         return dll_renamed_child();
     }
+    if s.args().trim_ascii() == b"syncparent" {
+        return sync_parent();
+    }
+    if s.args().trim_ascii() == b"orphan" {
+        return orphan_child();
+    }
     // First: it checks the PM server that the child starts.
     pm_server_handles();
     info_blocks();
@@ -94,6 +100,7 @@ fn main(s: &Startup) -> u32 {
     messages();
     nls();
     console::run();
+    killed_sync_parent();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -937,6 +944,72 @@ fn exe_formats() {
 unsafe extern "C" fn on_exit(code: u32) {
     println!("exit list routine ran (termination code {code})");
     unsafe { DosExitList(EXLST_EXIT, on_exit) };
+}
+
+/// This program's path, and arguments "PATH\0WORD\0\0" to start it again.
+fn self_args(word: &[u8]) -> ([u8; 260], [u8; 300]) {
+    let mut pib = null_mut();
+    let mut tib = null_mut();
+    let mut path = [0u8; 260];
+    unsafe {
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr());
+    }
+    let n = path.iter().position(|&c| c == 0).unwrap_or(0);
+    let mut args = [0u8; 300];
+    args[..n].copy_from_slice(&path[..n]);
+    args[n + 1..n + 1 + word.len()].copy_from_slice(word);
+    (path, args)
+}
+
+/// `APITEST syncparent`: runs `APITEST orphan` with EXEC_SYNC (as CMD runs
+/// a program) and is killed while it waits.
+fn sync_parent() -> u32 {
+    let (path, args) = self_args(b"orphan");
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    unsafe { DosExecPgm(null_mut(), 0, EXEC_SYNC, args.as_ptr(), null(), &mut res, path.as_ptr()) }
+}
+
+/// `APITEST orphan`: runs on for a while, then leaves C:\ORPHAN.OK.
+fn orphan_child() -> u32 {
+    for _ in 0..20 {
+        unsafe { DosSleep(100) };
+    }
+    let mut h = 0;
+    let mut act = 0;
+    // OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, write.
+    if unsafe { DosOpen(b"C:\\ORPHAN.OK\0".as_ptr(), &mut h, &mut act, 0, 0, 0x12, 0x41, null_mut()) } == 0 {
+        unsafe { DosClose(h) };
+    }
+    0
+}
+
+/// A program killed while it waits for a child it started with EXEC_SYNC:
+/// the child runs on to its end. rs2 removed the running child from the
+/// process table when the wait was interrupted, which freed its address
+/// space under its threads (closing the command window that a PM program
+/// was started from wedged a CPU on freed page tables).
+fn killed_sync_parent() {
+    let _ = unsafe { DosDelete(b"C:\\ORPHAN.OK\0".as_ptr()) };
+    let (path, args) = self_args(b"syncparent");
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    // EXEC_ASYNC: codeTerminate is the PID.
+    let rc = unsafe { DosExecPgm(null_mut(), 0, 1, args.as_ptr(), null(), &mut res, path.as_ptr()) };
+    unsafe { DosSleep(800) };
+    let krc = unsafe { DosKillProcess(1, res.code_terminate) };
+    let mut ok = false;
+    for _ in 0..60 {
+        unsafe { DosSleep(100) };
+        let mut h = 0;
+        let mut act = 0;
+        if unsafe { DosOpen(b"C:\\ORPHAN.OK\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x40, null_mut()) } == 0 {
+            unsafe { DosClose(h) };
+            ok = true;
+            break;
+        }
+    }
+    check(&alloc::format!("a child started with EXEC_SYNC runs on when its parent is killed (exec {rc}, kill {krc})"), rc == 0 && krc == 0 && ok);
+    let _ = unsafe { DosDelete(b"C:\\ORPHAN.OK\0".as_ptr()) };
 }
 
 fn exit_list() {

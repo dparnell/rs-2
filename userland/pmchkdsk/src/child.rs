@@ -204,7 +204,7 @@ impl Child {
     /// End the program (Stop).
     pub fn kill(&self) {
         // DKP_PROCESSTREE.
-        unsafe { os2::DosKillProcess(0, self.pid) };
+        unsafe { os2::DosKillProcess(1, self.pid) };
     }
 
     pub fn close(&mut self) {

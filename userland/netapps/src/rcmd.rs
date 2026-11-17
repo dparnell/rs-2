@@ -228,7 +228,7 @@ unsafe extern "C" fn watchdog(p: u32) {
     let (pid, secs) = *unsafe { alloc::boxed::Box::from_raw(p as *mut (u32, u32)) };
     unsafe {
         DosSleep(secs * 1000);
-        DosKillProcess(0, pid);
+        DosKillProcess(1, pid);
     }
 }
 
@@ -257,7 +257,7 @@ pub fn run(s: &Sock, err: Option<&Sock>, cmd: &str, extra_env: &[String], timeou
             break;
         }
         if s.send(&buf[..n as usize]).is_err() {
-            unsafe { DosKillProcess(0, child.pid) };
+            unsafe { DosKillProcess(1, child.pid) };
             break;
         }
     }

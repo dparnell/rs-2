@@ -1790,7 +1790,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let (t, _f) = (a.w(), a.w());
             match task_pid(t).filter(|&p| t != 0 && p != pid()) {
                 Some(p) => {
-                    unsafe { os2::DosKillProcess(1, p) };
+                    unsafe { os2::DosKillProcess(0, p) };
                     // It may not say so itself: NFY_EXITTASK for it here,
                     // and it leaves the registry.
                     deliver(NFY_EXITTASK as u32 | p << 16, 0xff);

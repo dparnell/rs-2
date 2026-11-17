@@ -488,7 +488,7 @@ fn serve_pipes(s: &Sock, inp: &mut Input) {
                 Ok(n) if n > 0 => n,
                 _ => {
                     unsafe {
-                        DosKillProcess(0, child.pid);
+                        DosKillProcess(1, child.pid);
                         DosClose(child.stdin);
                     }
                     break 'session;
@@ -517,7 +517,7 @@ fn serve_pipes(s: &Sock, inp: &mut Input) {
                         let _ = s.send(b"^C\r\n");
                         restarting.store(true, Ordering::Release);
                         unsafe {
-                            DosKillProcess(0, child.pid);
+                            DosKillProcess(1, child.pid);
                             DosClose(child.stdin);
                         }
                         unsafe { DosSleep(200) };

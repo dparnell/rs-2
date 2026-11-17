@@ -152,7 +152,7 @@ pub fn run() {
             }
             total += n;
         }
-        let krc = DosKillProcess(0, pid);
+        let krc = DosKillProcess(1, pid);
         // After the writer is gone the read reaches end of file.
         let mut eof = false;
         for _ in 0..1000 {
