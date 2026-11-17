@@ -198,7 +198,7 @@ pub fn run() {
             let pid = start_child(mode);
             DosSleep(200);
             let t0 = ms();
-            let rc = DosKillProcess(0, pid);
+            let rc = DosKillProcess(1, pid);
             let (wrc, cause, _code, got) = wait_child(pid);
             let el = ms() - t0;
             check(
@@ -206,16 +206,16 @@ pub fn run() {
                 pid != 0 && rc == 0 && wrc == 0 && got == pid && cause == 3 && el < 2000,
             );
         }
-        // A whole tree (DKP_PROCESSTREE).
+        // A whole tree (DKP_PROCESSTREE, 0).
         let pid = start_child("tree-block 2");
         DosSleep(600);
         let before = crate::counters().processes;
-        let rc = DosKillProcess(1, pid);
+        let rc = DosKillProcess(0, pid);
         let (wrc, cause, _, _) = wait_child(pid);
         DosSleep(300);
         let after = crate::counters().processes;
         check("DosKillProcess process tree", rc == 0 && wrc == 0 && cause == 3 && after + 7 == before);
-        check("kill unknown process fails", DosKillProcess(0, 9999) == 303);
+        check("kill unknown process fails", DosKillProcess(1, 9999) == 303);
         let _ = null_mut::<u8>();
         DosCloseEventSem(ev);
         DosCloseMutexSem(mtx);

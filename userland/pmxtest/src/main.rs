@@ -147,6 +147,22 @@ fn main(s: &Startup) -> u32 {
         WinSetFocus(HWND_DESKTOP, client);
     }
     pump(hab);
+    if args.is_empty() {
+        // A frame that has the focus itself is its own QWL_HWNDFOCUSSAVE
+        // (Borland's OWL walks up from it to the frame); its client, once
+        // focused, is.
+        let mut fcf2 = 1u32; // FCF_TITLEBAR, no client
+        let mut none = 0;
+        let f2 = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0x8000_0000, &mut fcf2, core::ptr::null(), b"No client\0".as_ptr(), 0, 0, 2, &mut none) };
+        unsafe { WinSetFocus(HWND_DESKTOP, f2) };
+        let own = unsafe { (WinQueryFocus(HWND_DESKTOP), WinQueryWindowULong(f2, 0x18)) };
+        unsafe {
+            WinDestroyWindow(f2);
+            WinSetFocus(HWND_DESKTOP, client);
+        }
+        let cl = unsafe { WinQueryWindowULong(frame, 0x18) };
+        check("QWL_HWNDFOCUSSAVE: a frame without a client that has the focus is its own; a frame's focused client", f2 != 0 && own == (f2, f2) && cl == client);
+    }
     if args.starts_with(b"CHILD") {
         let r = hooks::child(hab, client);
         unsafe {

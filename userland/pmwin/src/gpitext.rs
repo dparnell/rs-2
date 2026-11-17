@@ -332,6 +332,15 @@ const FONTS: &[(&[u8], bool)] = &[
     (b"System Proportional", false),
     (b"System Monospaced", false),
     (b"WarpSans", false),
+    // Warp 4's other outline faces (after the others: lMatch numbers stay).
+    // Borland's OWL maps "Arial Italic" and the like to them (PRNTPREV's
+    // fonts: "GDI failure" when one was missing).
+    (b"Helvetica Italic", true),
+    (b"Helvetica Bold Italic", true),
+    (b"Times New Roman Italic", true),
+    (b"Times New Roman Bold Italic", true),
+    (b"Courier Italic", true),
+    (b"Courier Bold Italic", true),
 ];
 const FATTR_FONTUSE_OUTLINE: u16 = 4;
 const FATTR_SEL_OUTLINE: u16 = 8;
@@ -506,7 +515,10 @@ fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, 
     let mut m = [0u8; 228];
     let n = face.len();
     m[32..32 + n].copy_from_slice(face);
-    let family = face.strip_suffix(b" Bold").unwrap_or(face);
+    let italic = face.ends_with(b" Italic");
+    let bold = face.ends_with(b" Bold") || face.ends_with(b" Bold Italic");
+    let family = face.strip_suffix(b" Italic").unwrap_or(face);
+    let family = family.strip_suffix(b" Bold").unwrap_or(family);
     m[0..family.len()].copy_from_slice(family);
     let p16 = |m: &mut [u8; 228], o: usize, v: i32| m[o..o + 2].copy_from_slice(&(v as i16).to_le_bytes());
     let p32 = |m: &mut [u8; 228], o: usize, v: i32| m[o..o + 4].copy_from_slice(&v.to_le_bytes());
@@ -526,7 +538,7 @@ fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, 
     p32(&mut m, 104, x(maxw)); // lMaxCharInc
     p32(&mut m, 108, x(f.width)); // lEmInc
     p32(&mut m, 112, y(h)); // lMaxBaselineExt
-    p16(&mut m, 122, if face.ends_with(b"Bold") { 7 } else { 5 }); // usWeightClass
+    p16(&mut m, 122, if bold { 7 } else { 5 }); // usWeightClass
     p16(&mut m, 124, 5); // usWidthClass
     p16(&mut m, 126, 96); // sXDeviceRes
     p16(&mut m, 128, 96);
@@ -539,6 +551,7 @@ fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, 
     p16(&mut m, 142, if outline { 7200 } else { 120 });
     p16(&mut m, 144, fixed as i32); // fsType: FM_TYPE_FIXED
     p16(&mut m, 146, outline as i32); // fsDefn: FM_DEFN_OUTLINE
+    p16(&mut m, 148, italic as i32 | if bold { 0x20 } else { 0 }); // fsSelection: FM_SEL_ITALIC, FM_SEL_BOLD
     p32(&mut m, 152, x(f.width / 2)); // subscript x size
     p32(&mut m, 156, y(h / 2));
     p32(&mut m, 164, y(d / 2));

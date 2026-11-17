@@ -95,6 +95,8 @@ unsafe extern "C" {
     fn GpiSetBackColor(hps: u32, c: i32) -> u32;
     #[link_name = "PMGPI.404"]
     fn GpiMove(hps: u32, p: *const PointL) -> u32;
+    #[link_name = "PMGPI.441"]
+    fn GpiQueryCurrentPosition(hps: u32, p: *mut PointL) -> u32;
     #[link_name = "PMGPI.398"]
     fn GpiLine(hps: u32, p: *const PointL) -> i32;
     #[link_name = "PMGPI.415"]
@@ -275,6 +277,8 @@ unsafe extern "C" {
     fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32;
     #[link_name = "PMGPI.480"]
     fn GpiQueryRealColors(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32;
+    #[link_name = "PMGPI.597"]
+    fn GpiQueryPaletteInfo(hpal: u32, hps: u32, opts: u32, start: u32, n: u32, out: *mut u32) -> i32;
     #[link_name = "PMGPI.577"]
     fn GpiDeletePalette(h: u32) -> u32;
     #[link_name = "PMWIN.941"]
@@ -283,6 +287,12 @@ unsafe extern "C" {
     fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
     #[link_name = "PMWIN.757"]
     fn WinGetPS(h: u32) -> u32;
+    #[link_name = "PMGPI.471"]
+    fn GpiQueryPS(hps: u32, size: *mut i32) -> u32;
+    #[link_name = "PMGPI.472"]
+    fn GpiQueryPageViewport(hps: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMGPI.539"]
+    fn GpiSetPS(hps: u32, size: *const i32, opts: u32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -465,6 +475,21 @@ fn self_checks(hab: u32) {
         GpiBox(m.hps, DRO_FILL, &pt(9, 9), 0, 0);
         check("GpiQueryPel = CLR_RED", GpiQueryPel(m.hps, &pt(5, 5)) == CLR_RED);
         check("box fill is inclusive", pel(&m, 9, 9) == 0xff0000 && pel(&m, 10, 10) == 0xffffff);
+        // World coordinates beyond 28 bits: PMERR_INV_COORDINATE, the
+        // position stays (Borland's BPMCC.DLL moves to an uninitialised y
+        // before a box); a fill reaching far outside media space is cut to
+        // it (it used to make a span for every row and ran PM out of memory).
+        let mv = GpiMove(m.hps, &pt(5, 0x1ba0_07e9));
+        let mut cp = pt(-1, -1);
+        GpiQueryCurrentPosition(m.hps, &mut cp);
+        check("GpiMove beyond 28 bits fails, the position stays", mv == 0 && cp == pt(0, 0));
+        GpiMove(m.hps, &pt(20, 0x07ff_ffff));
+        let rc = GpiBox(m.hps, DRO_FILL, &pt(25, 2), 0, 0);
+        check("a box reaching far beyond media space fills its visible part", rc == 1 && pel(&m, 22, 5) == 0xff0000);
+        // The bitmap as the checks below expect it.
+        GpiErase(m.hps);
+        GpiMove(m.hps, &pt(0, 0));
+        GpiBox(m.hps, DRO_FILL, &pt(9, 9), 0, 0);
         // Raster ops between bitmaps.
         let m2 = mem(hab, 32, 32, PU_PELS);
         let p = [pt(0, 0), pt(32, 32), pt(0, 0)];
@@ -577,8 +602,16 @@ fn self_checks(hab: u32) {
         check("LCOLF_CONSECRGB", GpiQueryRGBColor(m.hps, 0, 1) == 0x123456 && GpiQueryColorIndex(m.hps, 0, 0x123456) == 1);
         GpiCreateLogColorTable(m.hps, 0, 3, 0, 0, null());
         check("LCOLF_RGB", GpiQueryRGBColor(m.hps, 0, 0x00abcdef) == 0xabcdef);
+        // No palette handle, none selected: the default palette (Borland's
+        // OWL reads its colours so).
+        let mut dp = [0u32; 16];
+        let ndef = GpiQueryPaletteInfo(0, m.hps, 0, 0, 0, null_mut());
+        let got = GpiQueryPaletteInfo(0, m.hps, 0, 0, 16, dp.as_mut_ptr());
+        check("GpiQueryPaletteInfo of a PS without a palette: the default palette", ndef == 256 && got == 16 && dp[0] == 0 && dp[15] != 0);
         let pal = GpiCreatePalette(hab, 0, 2, 3, [0x010203u32, 0x040506, 0x070809].as_ptr());
         check("GpiCreatePalette/SelectPalette", pal != 0 && GpiSelectPalette(m.hps, pal) == 0);
+        let mut sp = [0u32; 3];
+        check("GpiQueryPaletteInfo of a PS: its palette", GpiQueryPaletteInfo(0, m.hps, 0, 0, 3, sp.as_mut_ptr()) == 3 && sp == [0x010203, 0x040506, 0x070809]);
 
         free(m);
         let m = mem(hab, 8, 8, PU_PELS);
@@ -600,11 +633,16 @@ fn self_checks(hab: u32) {
         GpiQueryCharStringPos(m.hps, 0, 3, b"abc".as_ptr(), null(), cp.as_mut_ptr());
         check("GpiQueryCharStringPos", cp[0] == pt(10, 0) && cp[3] == pt(10 + tb[4].x, 0) && cp[1].x > 10 && cp[2].x > cp[1].x);
         let mut req = 0;
-        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 12);
+        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 18);
         let mut fms = [0u8; 228 * 2];
         req = 2;
         let left = GpiQueryFonts(m.hps, 1, b"Helvetica Bold\0".as_ptr(), &mut req, 228, fms.as_mut_ptr());
         check("GpiQueryFonts by face", left == 0 && req == 1 && &fms[32..46] == b"Helvetica Bold" && &fms[0..10] == b"Helvetica\0");
+        // The italic outline faces (Borland's OWL asks for them by name).
+        req = 2;
+        let left = GpiQueryFonts(m.hps, 1, b"Times New Roman Bold Italic\0".as_ptr(), &mut req, 228, fms.as_mut_ptr());
+        let sel = u16::from_le_bytes([fms[148], fms[149]]);
+        check("GpiQueryFonts: an italic face (family, FM_SEL_ITALIC | FM_SEL_BOLD)", left == 0 && req == 1 && &fms[0..16] == b"Times New Roman\0" && sel == 0x21);
         let mut fat = [0u8; 56];
         fat[0] = 56;
         fat[54] = 4; // FATTR_FONTUSE_OUTLINE
@@ -719,6 +757,27 @@ fn display_checks(hab: u32) {
         // SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ACTIVATE
         WinSetWindowPos(frame, 0, 10, 10, 200, 100, 0x1 | 0x2 | 0x8 | 0x80);
         let hps = WinGetPS(client);
+        // A cached PS's page is the device's default size (the screen) in
+        // pels, and its page viewport covers it; Borland's OWL sets its
+        // mapping modes from them (GpiQueryPS, GpiSetPS with PS_NORESET,
+        // GpiQueryPageViewport) and divides by the viewport's size.
+        let (sw, sh) = (WinQuerySysValue(1, 20), WinQuerySysValue(1, 21));
+        let mut size = [0i32; 2];
+        let opts = GpiQueryPS(hps, size.as_mut_ptr());
+        check("cached PS: GpiQueryPS is the screen in pels", size == [sw, sh] && opts & 0xfc == 8);
+        let mut vp = RectL::default();
+        check("cached PS: GpiQueryPageViewport covers the screen", GpiQueryPageViewport(hps, &mut vp) != 0 && vp == rect(0, 0, sw, sh));
+        let ok = GpiSetPS(hps, size.as_ptr(), 8 | 0x8000) != 0;
+        let mut vp = RectL::default();
+        GpiQueryPageViewport(hps, &mut vp);
+        check("GpiSetPS PU_PELS | PS_NORESET keeps the page viewport", ok && vp == rect(0, 0, sw, sh));
+        let zero = [0i32; 2];
+        let ok = GpiSetPS(hps, zero.as_ptr(), 0x0c) != 0;
+        GpiQueryPS(hps, size.as_mut_ptr());
+        let mut vp = RectL::default();
+        GpiQueryPageViewport(hps, &mut vp);
+        check("GpiSetPS 0 x 0 PU_LOMETRIC: the screen's size in 0.1 mm", ok && size[0] > sw && size[1] > sh && vp.r - vp.l >= sw - 1 && vp.t - vp.b >= sh - 1);
+        GpiSetPS(hps, zero.as_ptr(), 8);
         GpiCreateLogColorTable(hps, 0, 3, 0, 0, null());
         GpiSetColor(hps, 0x123456);
         GpiMove(hps, &pt(0, 0));

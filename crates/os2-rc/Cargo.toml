@@ -1,0 +1,23 @@
+[package]
+name = "os2-rc"
+description = "no_std OS/2 resource compiler: the .RC language, .RES files, binding resources into LX and NE modules (RC.EXE)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2-exe = { path = "../os2-exe" }
+
+[dev-dependencies]
+os2-rc = { path = ".", features = ["host"] }
+
+[features]
+host = []
+
+[[example]]
+name = "rccheck"
+required-features = ["host"]
+
+[[example]]
+name = "rc"
+required-features = ["host"]

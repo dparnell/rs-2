@@ -1,0 +1,11 @@
+[package]
+name = "omflink"
+description = "no_std OMF object/library reader and the linker behind rs2's LINK.EXE (NE) and LINK386.EXE (LX)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+os2-exe = { path = "../os2-exe" }

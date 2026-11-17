@@ -224,7 +224,9 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
         let p = t.process();
         return !p.is_some_and(|p| crate::api::exceptions::exit_unwind(f, &p, &t));
     }
-    let Some(p) = t.process() else { return false };
+    // A thread whose process is gone (it must never happen) ends here:
+    // its address space has been freed.
+    let Some(p) = t.process() else { return true };
     crate::api::proc::hold_if_needed(&t, &p);
     // A debuggee stops while its debugger has it stopped.
     crate::api::debug::hold(&t, &p, f);

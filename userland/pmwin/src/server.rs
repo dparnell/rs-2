@@ -859,7 +859,7 @@ fn end_task(e: Option<Entry>) {
     let Some(x) = s.queues.get(&q) else { return };
     if x.hung {
         let p = x.pid;
-        lock::unlocked(|| unsafe { DosKillProcess(0, p) });
+        lock::unlocked(|| unsafe { DosKillProcess(1, p) });
     } else {
         msg::post(f, WM_SYSCOMMAND, frame::SC_CLOSE, 0);
     }

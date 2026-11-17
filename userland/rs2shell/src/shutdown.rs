@@ -169,7 +169,7 @@ pub fn tick() {
             pids.sort();
             pids.dedup();
             for p in pids {
-                unsafe { os2::DosKillProcess(1, p) };
+                unsafe { os2::DosKillProcess(0, p) };
             }
             unsafe { os2::DosSleep(500) };
             finish();

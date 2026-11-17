@@ -30,8 +30,11 @@ pub fn scan(figs: &[Vec<Pf>], winding: bool, out: &mut Spans) {
     let ymin = edges.iter().map(|e| e.0.1.min(e.1.1)).fold(f64::MAX, f64::min);
     let ymax = edges.iter().map(|e| e.0.1.max(e.1.1)).fold(f64::MIN, f64::max);
     let mut xs: Vec<(f64, i32)> = Vec::new();
-    let y0 = ceil(ymin - 0.5) as i32;
-    let y1 = ceil(ymax - 0.5) as i32;
+    // Only the rows of media space (IBM's device coordinates are limited
+    // to it): a figure with a far-off point (an application's garbage
+    // coordinates) must not cost a row each down to it.
+    let y0 = (ceil(ymin - 0.5) as i64).clamp(MEDIA[1], MEDIA[3] + 1) as i32;
+    let y1 = (ceil(ymax - 0.5) as i64).clamp(MEDIA[1], MEDIA[3] + 1) as i32;
     for y in y0..y1 {
         let yc = y as f64 + 0.5;
         xs.clear();
@@ -70,6 +73,10 @@ pub fn scan(figs: &[Vec<Pf>], winding: bool, out: &mut Spans) {
 pub fn line(a: (i32, i32), b: (i32, i32), mut f: impl FnMut(i32, i32)) {
     line_clip(a, b, ALL, |_, x, y| f(x, y));
 }
+
+/// Media space: the device coordinates IBM's GPI handles (-32768 to
+/// 32767); rasterising never goes beyond it.
+pub const MEDIA: [i64; 4] = [-32768, -32768, 32767, 32767];
 
 /// A window covering every i32 point.
 pub const ALL: [i64; 4] = [i32::MIN as i64, i32::MIN as i64, i32::MAX as i64, i32::MAX as i64];
@@ -132,7 +139,7 @@ pub fn outline(figs: &[Vec<Pf>], closed: bool, out: &mut Spans) {
         }
         let n = if closed && f.len() > 2 { f.len() } else { f.len().saturating_sub(1) };
         for i in 0..n {
-            line(ipt(f[i]), ipt(f[(i + 1) % f.len()]), |x, y| out.add(y, x, x + 1));
+            line_clip(ipt(f[i]), ipt(f[(i + 1) % f.len()]), MEDIA, |_, x, y| out.add(y, x, x + 1));
         }
     }
 }
@@ -275,6 +282,16 @@ pub fn wide_stroke(pts: &[Pf], closed: bool, width: f64, out: &mut Vec<Vec<Pf>>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn far_off_figures_stay_in_media_space() {
+        // Borland's BPMCC boxes from an uninitialised current position
+        // (y 0x1ba007e9): the fill used to make a span for every row.
+        let f = vec![(5.0, 0x1ba0_07e9 as f64), (447.0, 0x1ba0_07e9 as f64), (447.0, 93.0), (5.0, 93.0)];
+        let g = fill_region(&[f], false, true);
+        let b = g.bounds();
+        assert!(b.top <= 32768 && b.bottom == 93, "{b:?}");
+    }
     use crate::rect::{Point, Rect};
     use alloc::vec;
 

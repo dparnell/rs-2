@@ -76,6 +76,8 @@ pub struct MenuItemT {
 pub const MIS_TEXT: u16 = 0x0001;
 pub const MIS_BITMAP: u16 = 0x0002;
 pub const MIS_SUBMENU: u16 = 0x0010;
+pub const MIS_SEPARATOR: u16 = 0x0004;
+pub const MIS_OWNERDRAW: u16 = 0x0008;
 
 /// Parse a menu template: cb, version, code page, reserved, item count,
 /// then the items (style, attribute, id, text for MIS_TEXT/MIS_BITMAP,
@@ -93,7 +95,13 @@ pub fn parse_menu(b: &[u8]) -> Option<Vec<MenuItemT>> {
         let (style, attr, id) = (u16_at(b, at), u16_at(b, at + 2), u16_at(b, at + 4));
         at += 6;
         let mut text = Vec::new();
-        if style & (MIS_TEXT | MIS_BITMAP) != 0 {
+        // Every item has its text but separators and owner-drawn items
+        // (unless they also say MIS_TEXT or MIS_BITMAP), as IBM's RC writes
+        // them: an item given an explicit style without MIS_TEXT (Jigsaw's
+        // `SUBMENU "Size", IDM_SIZE_MENU, 0, MIA_DISABLED`, style 0x10)
+        // still has one. Reading it only with MIS_TEXT lost the place and
+        // the whole pull-down (Jigsaw's Options never dropped down).
+        if style & (MIS_SEPARATOR | MIS_OWNERDRAW) == 0 || style & (MIS_TEXT | MIS_BITMAP) != 0 {
             (text, at) = string_at(b, at);
         }
         let mut sub = None;

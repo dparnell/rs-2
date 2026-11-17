@@ -964,7 +964,15 @@ fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32, eas: im
             } else {
                 4
             };
-            let b = status_bytes(info, c.is16, level, cb_list);
+            let mut b = status_bytes(info, c.is16, level, cb_list);
+            // Level 1 for 32-bit callers: IBM's DOSCALL1 makes it the 16-bit
+            // call, which needs only the old FILESTATUS (22 bytes, a USHORT
+            // attrFile), and then clears attrFile's high word. Programs built
+            // with the OS/2 1.x headers pass 22 (IBM's Jigsaw sample, also
+            // in Borland C++: "Error reading file" for every bitmap).
+            if level == 1 && !c.is16 && (22..24).contains(&cb) {
+                b.truncate(22);
+            }
             if (cb as usize) < b.len() {
                 return err::BUFFER_OVERFLOW;
             }
