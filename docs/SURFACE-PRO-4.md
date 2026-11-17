@@ -586,6 +586,15 @@ yet tried on the chip. WiFi log lines are also kept in memory since
 then: `WIFI STATUS` shows the last 40, and a failed `WIFI CONNECT`
 prints the frame counts and what happened.
 
+Second try (b5ae0880, then 4384d6fc with every received packet logged):
+still reason 15, and no WPA2 message was logged. The AP's message 1 did
+arrive, three or four times per try: 113 bytes (an Ethernet II header
+and a 99-byte EAPOL-Key), RxPD type 2, offset 90. The parser took only
+RxPD type 0 as data and dropped them. Linux handles every type but
+A-MSDU (3), BAR (0x0a) and management (0xe5) as an ordinary frame; rs2
+now does too (A-MSDUs are not taken apart yet; they come only with
+802.11n, which rs2 does not offer).
+
 Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 `IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
 on lines starting `wlan0` and `88W8897` (key API version, association

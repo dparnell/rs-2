@@ -533,8 +533,12 @@ pub fn txpd(frame_len: usize) -> [u8; TXPD_LEN] {
     t
 }
 
-/// RxPD packet types.
+/// RxPD packet types. Data comes as several of them (the 88W8897 gave
+/// the WPA2 handshake's EAPOL frames type 2); as in Linux, every type but
+/// these is an ordinary frame.
 pub const PKT_TYPE_DATA: u16 = 0;
+pub const PKT_TYPE_AMSDU: u16 = 3;
+pub const PKT_TYPE_BAR: u16 = 0x0a;
 pub const PKT_TYPE_MGMT: u16 = 0xe5;
 
 /// A received data packet (after the interface header: RxPD, then an
@@ -547,7 +551,9 @@ pub fn rx_frame(b: &[u8]) -> Option<Vec<u8>> {
     let len = le16(b, 2) as usize;
     let off = le16(b, 4) as usize;
     let kind = le16(b, 6);
-    if kind != PKT_TYPE_DATA || off < 12 || off + 14 > b.len() {
+    // A-MSDUs (several frames in one) are not taken apart yet: only
+    // offered with 802.11n, which rs2 does not ask for.
+    if matches!(kind, PKT_TYPE_AMSDU | PKT_TYPE_BAR | PKT_TYPE_MGMT) || off < 12 || off + 14 > b.len() {
         return None;
     }
     let p = &b[off..(off + len).min(b.len())];
@@ -765,8 +771,25 @@ mod tests {
         let f = rx_frame(&b).unwrap();
         assert_eq!(f.len(), 16);
         assert_eq!(&f[12..], &[0x08, 0x06, 1, 2]);
-        b[6] = 0xe5;
-        assert_eq!(rx_frame(&b), None);
+        // Other packet types are data too (the 88W8897's EAPOL frames
+        // came as type 2), A-MSDU, BAR and management frames are not.
+        b[6] = 2;
+        assert_eq!(rx_frame(&b).unwrap(), f);
+        for t in [PKT_TYPE_AMSDU, PKT_TYPE_BAR, PKT_TYPE_MGMT] {
+            b[6..8].copy_from_slice(&t.to_le_bytes());
+            assert_eq!(rx_frame(&b), None);
+        }
+        // An Ethernet II frame as the 88W8897 delivered it (MAC_CONTROL
+        // asks for Ethernet II): no SNAP, at offset 90, EAPOL-Key.
+        let mut b = vec![0u8; 90];
+        let mut p = vec![0x98, 0x5f, 0xd3, 0xc8, 0xed, 0x12, 0xe0, 0x63, 0xda, 0xb1, 0x61, 0x6a, 0x88, 0x8e];
+        p.extend([2, 3, 0, 95]);
+        p.extend([0u8; 95]);
+        b[2..4].copy_from_slice(&(p.len() as u16).to_le_bytes());
+        b[4] = 90;
+        b[6] = 2;
+        b.extend(&p);
+        assert_eq!(rx_frame(&b).unwrap(), p);
     }
 
     #[test]
