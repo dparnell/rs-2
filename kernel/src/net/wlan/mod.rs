@@ -464,6 +464,8 @@ fn event(i: usize, a: &Arc<Adapter>, e: WlanEvent) {
             let mut c = a.conn.lock();
             if c.link != Link::Idle {
                 crate::wlog!("wlan{i}: {why} (reason {reason})");
+                let d: Vec<String> = a.drv.diagnostics().into_iter().filter(|(k, _)| k != "firmware" && k != "revision").map(|(k, v)| alloc::format!("{k}={v}")).collect();
+                crate::wlog!("wlan{i}: {}", d.join(" "));
                 lost(a, &mut c, alloc::format!("{why} (reason {reason})"), 2000);
             }
         }
@@ -656,8 +658,15 @@ fn join(i: usize, a: &Arc<Adapter>, p: &Profile) -> Result<(), String> {
 fn eapol(i: usize, a: &Arc<Adapter>, pkt: &[u8]) {
     let (mut s, bssid) = {
         let mut c = a.conn.lock();
-        let Some(s) = c.supp.take() else { return };
-        let Some(b) = c.bss.as_ref().map(|b| b.bssid) else { return };
+        let Some(s) = c.supp.take() else {
+            crate::wlog!("wlan{i}: EAPOL frame ({} bytes) with no WPA2 handshake under way; dropped", pkt.len());
+            return;
+        };
+        let Some(b) = c.bss.as_ref().map(|b| b.bssid) else {
+            crate::wlog!("wlan{i}: EAPOL frame with no network joined; dropped");
+            c.supp = Some(s);
+            return;
+        };
         (s, b)
     };
     let what = match wlan::wpa::KeyFrame::parse(pkt) {

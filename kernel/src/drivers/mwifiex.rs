@@ -135,6 +135,10 @@ fn put64(d: &Dma, off: usize, v: u64) {
     d.write(off, &v.to_le_bytes());
 }
 
+fn get16_le(b: &[u8], off: usize) -> u16 {
+    u16::from_le_bytes([b[off], b[off + 1]])
+}
+
 fn get16(d: &Dma, off: usize) -> u16 {
     let b = d.bytes(off, 2);
     u16::from_le_bytes([b[0], b[1]])
@@ -294,6 +298,11 @@ pub struct Card {
 static IRQS: AtomicU64 = AtomicU64::new(0);
 /// Transmitted frames the firmware has handed back.
 static TX_DONE: AtomicU64 = AtomicU64::new(0);
+/// Upload-ready interrupt causes seen (received packets waiting).
+static UPLD_RDY: AtomicU64 = AtomicU64::new(0);
+/// Received packets described in the log so far (the first RX_LOGGED).
+static RX_LOGGED: AtomicU32 = AtomicU32::new(0);
+const RX_LOGGED_MAX: u32 = 24;
 
 fn interrupt(_ctx: usize) {
     IRQS.fetch_add(1, Ordering::Relaxed);
@@ -471,6 +480,7 @@ impl Card {
         }
         r.w(HOST_INT_STATUS, !ireg);
         if ireg & HOST_INTR_UPLD_RDY != 0 {
+            UPLD_RDY.fetch_add(1, Ordering::Relaxed);
             self.drain_rx();
         }
         if ireg & HOST_INTR_EVENT_RDY != 0 {
@@ -499,10 +509,17 @@ impl Card {
                 fence(Ordering::SeqCst);
                 let len = (get16(&d.rxbuf, i * RX_BUF) as usize).clamp(mw::INTF_HDR, RX_BUF);
                 let typ = get16(&d.rxbuf, i * RX_BUF + 2);
-                if typ == mw::TYPE_DATA {
-                    if let Some(f) = mw::rx_frame(d.rxbuf.bytes(i * RX_BUF + mw::INTF_HDR, len - mw::INTF_HDR)) {
-                        got.push(f);
-                    }
+                let pkt = d.rxbuf.bytes(i * RX_BUF + mw::INTF_HDR, len - mw::INTF_HDR);
+                let frame = if typ == mw::TYPE_DATA { mw::rx_frame(pkt) } else { None };
+                // The first packets in the log: what arrives, and what
+                // becomes of it (the WPA2 handshake never saw message 1).
+                if RX_LOGGED.fetch_add(1, Ordering::Relaxed) < RX_LOGGED_MAX {
+                    let rxpd = if pkt.len() >= 8 { alloc::format!("RxPD type {:#x}, length {}, offset {}", get16_le(pkt, 6), get16_le(pkt, 2), get16_le(pkt, 4)) } else { String::from("short") };
+                    let what = frame.as_ref().map_or(String::from("dropped"), |f| alloc::format!("ethertype {:#06x}, {} bytes", u16::from_be_bytes([f[12], f[13]]), f.len()));
+                    crate::wlog!("{}: rx slot {i}: {len} bytes, type {typ}, {rxpd}: {what}", self.name);
+                }
+                if let Some(f) = frame {
+                    got.push(f);
                 }
                 self.rx_frames.fetch_add(1, Ordering::Relaxed);
                 d.arm_rx(i);
@@ -794,6 +811,7 @@ impl WlanDriver for Card {
             ("tx_done".into(), alloc::format!("{}", TX_DONE.load(Ordering::Relaxed))),
             ("tx_dropped".into(), alloc::format!("{}", self.tx_dropped.load(Ordering::Relaxed))),
             ("interrupts".into(), alloc::format!("{}", IRQS.load(Ordering::Relaxed))),
+            ("upload_ready".into(), alloc::format!("{}", UPLD_RDY.load(Ordering::Relaxed))),
             ("key_api".into(), alloc::format!("{}", self.key_api.load(Ordering::Relaxed))),
         ]
     }
