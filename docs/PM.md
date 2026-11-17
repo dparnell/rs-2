@@ -278,6 +278,13 @@ offered: a 16-colour display is a different driver (IBM's VGA), whose
 capabilities and bitmap formats were not studied. On a 256-colour
 display RS2COLORS changes nothing.
 
+`RS2COLORS=24` (or `16M`) instead gives a program a 24-bit true-colour
+view: CAPS_COLOR_BITCOUNT 24 and the 24-bit bitmap format first in
+`GpiQueryDeviceBitmapFormats`, as the display drivers of OS/2's first
+years reported true colour (drawing still goes to the 32-bit screen).
+Borland C++'s OWL knows only 1, 4, 8 and 24-bit devices: its PAINT and
+PEEPER examples need it (or `RS2COLORS=256`).
+
 ## Processes and input
 
 **Shared state.** PMWIN keeps everything in one named shared memory

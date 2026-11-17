@@ -926,18 +926,38 @@ static WANTS256: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::
 /// starting it), as some programs written for one need (VisualAge
 /// Smalltalk takes only 1, 4 or 8-bit device bitmaps).
 pub fn wants256() -> bool {
+    colors_wanted() == 2
+}
+
+/// RS2COLORS=24 (or 16M): the process sees a true-colour display of 24
+/// bits a pel (CAPS_COLOR_BITCOUNT 24, the 24-bit bitmap format first), as
+/// the display drivers of OS/2's first years reported one. Borland C++'s
+/// OWL knows only 1, 4, 8 and 24-bit devices: on the 32 bits rs2 reports
+/// (as Panorama and SNAP do) its bitmaps' colour tables overran (PAINT,
+/// PEEPER).
+pub fn wants24() -> bool {
+    colors_wanted() == 3
+}
+
+/// RS2COLORS in this process's environment: 1 none, 2 "256", 3 "24".
+fn colors_wanted() -> u32 {
     use core::sync::atomic::Ordering;
     match WANTS256.load(Ordering::Relaxed) {
         0 => {
             let mut v: *const u8 = core::ptr::null();
-            let on = unsafe { os2::DosScanEnv(b"RS2COLORS\0".as_ptr(), &mut v) } == 0 && !v.is_null() && {
-                let t = unsafe { core::ffi::CStr::from_ptr(v as *const core::ffi::c_char) }.to_bytes();
-                t.trim_ascii() == b"256"
-            };
-            WANTS256.store(if on { 2 } else { 1 }, Ordering::Relaxed);
-            on
+            let mut w = 1;
+            if unsafe { os2::DosScanEnv(b"RS2COLORS\0".as_ptr(), &mut v) } == 0 && !v.is_null() {
+                let t = unsafe { core::ffi::CStr::from_ptr(v as *const core::ffi::c_char) }.to_bytes().trim_ascii();
+                if t == b"256" {
+                    w = 2;
+                } else if t == b"24" || t.eq_ignore_ascii_case(b"16M") {
+                    w = 3;
+                }
+            }
+            WANTS256.store(w, Ordering::Relaxed);
+            w
         }
-        v => v == 2,
+        v => v,
     }
 }
 
@@ -989,7 +1009,7 @@ fn caps(i: i32) -> i32 {
         11 | 13 | 36 => 16,
         14 | 33 => 1 << 24,                    // COLORS, PHYS_COLORS
         15 => 1,                               // COLOR_PLANES
-        16 => 32,                              // COLOR_BITCOUNT
+        16 => if wants24() { 24 } else { 32 },  // COLOR_BITCOUNT
         17 => 1 | 4,                           // COLOR_TABLE_SUPPORT: RGB_8, TRUE_MIX
         18 => 3,                               // MOUSE_BUTTONS
         19 => 1 | 2 | 8 | 16 | 32 | 64,        // FOREGROUND_MIX_SUPPORT
@@ -1283,7 +1303,13 @@ pub extern "C" fn GpiQueryDeviceBitmapFormats(_hps: u32, n: i32, out: *mut i32) 
     // True colour is the 32 bits a pixel the screen has (as Panorama and
     // SNAP report it): Qt draws with its 24-bit format in red, green, blue
     // order, so on a 24-bit device its reds and blues traded places.
-    let f: &[i32] = if palette8().is_some() { &[1, 8, 1, 24, 1, 4, 1, 1] } else { &[1, 32, 1, 24, 1, 8, 1, 4, 1, 1] };
+    let f: &[i32] = if palette8().is_some() {
+        &[1, 8, 1, 24, 1, 4, 1, 1]
+    } else if wants24() {
+        &[1, 24, 1, 8, 1, 4, 1, 1]
+    } else {
+        &[1, 32, 1, 24, 1, 8, 1, 4, 1, 1]
+    };
     if out.is_null() || n < 2 {
         return 0;
     }
