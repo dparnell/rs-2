@@ -3461,7 +3461,9 @@ syntax lines. rs2's CMD takes its error texts from OSO001.MSG
   rs2's utilities; `VIEW CMDREF XCOPY` opens a command's panel (the help
   manager's topic search now prefers a title or index entry that is the
   topic itself, so `VIEW CMDREF E` finds E, not the first title with an
-  "e").
+  "e"). With books joined, it searches them one at a time in the order
+  given: `VIEW 4OS2+CMDREF COPY` (4OS2's HELP) shows 4OS2's "COPY - Copy
+  files" rather than CMDREF's COPY.
 - `START.INF`: Start Here, a short introduction.
 
 The desktop (version 11 of PMWP's objects) has Command Reference in

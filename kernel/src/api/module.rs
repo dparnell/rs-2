@@ -383,7 +383,7 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 
 // ---- APIs ----
 
-fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
+pub(super) fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
     if super::tracing() {
         crate::trace!("    load {name}");

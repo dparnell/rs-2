@@ -1051,35 +1051,41 @@ fn find_module_handle(name: &str) -> Option<u16> {
 }
 
 /// A loaded module's handle if the calling process uses it (its program,
-/// what it loaded, their imports): a module only another process uses is
-/// not mapped here, so programs that look a module up before loading it
-/// (IBM's REXXUTIL SysIni: DosQueryModuleHandle, else DosLoadModule) must
-/// load it.
+/// what it loaded, their imports).
 fn find_module_handle_here(c: &Ctx, name: &str) -> Option<u16> {
     let h = find_module_handle(name)?;
     super::module::term_order(&c.process).iter().any(|x| x.module.hmte == h).then_some(h)
 }
 
-fn dos_query_module_handle(c: &mut Ctx) -> u32 {
-    let Some(name) = c.read_str(c.arg(0), 260) else { return err::INVALID_PARAMETER };
-    match find_module_handle_here(c, &name) {
-        Some(h) => {
-            c.write_u32(c.arg(1), h as u32);
-            0
-        }
-        None => err::MOD_NOT_FOUND,
+/// DosQueryModuleHandle / DosGetModHandle: the handle of a module loaded
+/// anywhere in the system, as IBM's kernel answers it (w_getmodhandle:
+/// ldrFindModule walks the global module list and does not ask whether
+/// the caller uses the module). On OS/2 a DLL's code is in the shared
+/// arena, so callers use such a handle without loading the module (IBM's
+/// REXXUTIL calls PMWIN that way; 4OS2 looks for PMCTLS to know PM is
+/// running). Here a module only other processes use is not mapped in the
+/// caller, so it is loaded into the caller first, as DosLoadModule would
+/// (mapped, its initialisation run, kept until the process ends).
+fn query_module_handle(c: &mut Ctx, pname: u32, phmod: u32) -> u32 {
+    let Some(name) = c.read_str(pname, 260) else { return err::INVALID_PARAMETER };
+    if let Some(h) = find_module_handle_here(c, &name) {
+        if c.is16 { c.write_u16(phmod, h) } else { c.write_u32(phmod, h as u32) };
+        return 0;
     }
+    if find_module_handle(&name).is_none() {
+        return err::MOD_NOT_FOUND;
+    }
+    super::module::load(c, 0, 0, pname, phmod)
+}
+
+fn dos_query_module_handle(c: &mut Ctx) -> u32 {
+    let (pname, phmod) = (c.arg(0), c.arg(1));
+    query_module_handle(c, pname, phmod)
 }
 
 fn dos16_get_mod_handle(c: &mut Ctx) -> u32 {
-    let Some(name) = c.read_str(c.ptr(0), 260) else { return err::INVALID_PARAMETER };
-    match find_module_handle_here(c, &name) {
-        Some(h) => {
-            c.write_u16(c.ptr(1), h);
-            0
-        }
-        None => err::MOD_NOT_FOUND,
-    }
+    let (pname, phmod) = (c.ptr(0), c.ptr(1));
+    query_module_handle(c, pname, phmod)
 }
 
 // ---- System information ----
