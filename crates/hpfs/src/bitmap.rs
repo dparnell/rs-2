@@ -73,6 +73,40 @@ impl<D: BlockDevice> Volume<D> {
         Ok(())
     }
 
+    /// Mark the sectors `secs` free or used, then write each changed bitmap
+    /// sector once (CHKDSK's repair: one write per sector would be one
+    /// disk write per wrong bit). Returns how many bits changed.
+    pub(crate) fn set_list(&mut self, secs: &[u32], free: bool) -> Result<u32> {
+        let mut dirty = alloc::collections::BTreeSet::new();
+        let mut n = 0;
+        for &s in secs {
+            if s >= self.total {
+                continue;
+            }
+            let band = (s / BAND) as usize;
+            let bit = (s % BAND) as usize;
+            let byte = &mut self.bitmaps[band][bit / 8];
+            let mask = 1u8 << (bit % 8);
+            if (*byte & mask != 0) == free {
+                continue;
+            }
+            if free {
+                *byte |= mask;
+                self.free += 1;
+            } else {
+                *byte &= !mask;
+                self.free -= 1;
+            }
+            n += 1;
+            dirty.insert((band, bit / 8 / SECTOR));
+        }
+        for (band, sec) in dirty {
+            let data = &self.bitmaps[band][sec * SECTOR..(sec + 1) * SECTOR];
+            self.write_secs(self.bitmap_secs[band] + sec as u32, data)?;
+        }
+        Ok(n)
+    }
+
     pub(crate) fn free_run(&mut self, start: u32, n: u32) -> Result<()> {
         self.set_bits(start, n, true)
     }

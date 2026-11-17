@@ -146,6 +146,10 @@ The SP4 has no serial port. Done (2026-11-15):
   stopped working) can be read on the next boot. A boot volume left
   dirty gets its log only after AUTOCHECK's CHKDSK (the installed
   CONFIG.SYS checks every drive, the EFI partition too).
+- **CHKDSK progress** (2026-11-17): AUTOCHECK's CHKDSK of an HPFS
+  volume said nothing between the volume label and its totals, which on
+  the Surface's large C: looked like a boot that stopped. It now prints
+  a line per stage and one every 3 seconds.
 - **Boot watch** (`bootdiag`): if no PM program has the display 60 s
   after boot (and the boot is not `textmode` or `init=`), the kernel
   logs the Ctrl+Alt+F12 thread report once, now with the kernel threads
