@@ -9,6 +9,10 @@
 //! SSID=Cafe
 //! ```
 //!
+//! Lines before the first `SSID=` are settings for every network:
+//! `POWERSAVE=ON` lets the chip sleep between beacons (off when the line
+//! is missing or says OFF).
+//!
 //! Each `SSID=` line starts a network; the lines after it until the
 //! next `SSID=` belong to it: `PASSPHRASE=` (8-63 characters; none for
 //! an open network), `BSSID=` (join only that access point),
@@ -37,6 +41,8 @@ impl Profile {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Config {
     pub profiles: Vec<Profile>,
+    /// `POWERSAVE=`: None when the file does not say.
+    pub powersave: Option<bool>,
     /// Lines that could not be used: (line number, why).
     pub errors: Vec<(usize, String)>,
 }
@@ -83,7 +89,13 @@ pub fn parse(text: &str) -> Config {
             continue;
         }
         let Some(p) = c.profiles.last_mut() else {
-            c.errors.push((n, alloc::format!("{k} before the first SSID=")));
+            match k.as_str() {
+                "POWERSAVE" => match on_off(v) {
+                    Some(b) => c.powersave = Some(b),
+                    None => c.errors.push((n, "POWERSAVE is ON or OFF".to_string())),
+                },
+                _ => c.errors.push((n, alloc::format!("{k} before the first SSID="))),
+            }
             continue;
         };
         match k.as_str() {
@@ -100,7 +112,7 @@ pub fn parse(text: &str) -> Config {
                 Some(m) => p.bssid = Some(m),
                 None => c.errors.push((n, "BSSID is six hex bytes, aa:bb:cc:dd:ee:ff".to_string())),
             },
-            "AUTOCONNECT" => p.autoconnect = !matches!(v.to_ascii_uppercase().as_str(), "NO" | "0" | "OFF" | "FALSE"),
+            "AUTOCONNECT" => p.autoconnect = on_off(v) != Some(false),
             _ => c.errors.push((n, alloc::format!("unknown setting {k}"))),
         }
     }
@@ -108,9 +120,26 @@ pub fn parse(text: &str) -> Config {
     c
 }
 
-/// The file text for `profiles` (CR LF line ends).
+fn on_off(v: &str) -> Option<bool> {
+    match v.to_ascii_uppercase().as_str() {
+        "ON" | "YES" | "1" | "TRUE" => Some(true),
+        "OFF" | "NO" | "0" | "FALSE" => Some(false),
+        _ => None,
+    }
+}
+
+/// The file text for `profiles` (CR LF line ends), without settings.
 pub fn write(profiles: &[Profile]) -> String {
+    write_config(&Config { profiles: profiles.to_vec(), ..Config::default() })
+}
+
+/// The file text for a whole configuration: settings, then networks.
+pub fn write_config(c: &Config) -> String {
+    let profiles = &c.profiles;
     let mut s = String::from("; Networks rs2 joins: the first one found wins (WIFI CONNECT adds them).\r\n");
+    if let Some(on) = c.powersave {
+        s += &alloc::format!("POWERSAVE={}\r\n", if on { "ON" } else { "OFF" });
+    }
     for p in profiles {
         let ssid: String = p.ssid.iter().map(|&b| b as char).collect();
         let quote = |v: &str| if v.starts_with([' ', '\t', '"']) || v.ends_with([' ', '\t', '"']) { alloc::format!("\"{v}\"") } else { v.to_string() };
@@ -166,5 +195,26 @@ mod tests {
         let c = parse(&write(&ps));
         assert_eq!(c.errors, alloc::vec![]);
         assert_eq!(c.profiles, ps);
+        assert_eq!(c.powersave, None);
+    }
+
+    #[test]
+    fn power_save_setting() {
+        let c = parse("powersave=on
+SSID=a
+");
+        assert_eq!((c.powersave, c.errors.len()), (Some(true), 0));
+        assert_eq!(parse("POWERSAVE=maybe
+").errors.len(), 1);
+        // After an SSID= it is not a network setting.
+        assert_eq!(parse("SSID=a
+POWERSAVE=ON
+").errors.len(), 1);
+        let mut c = parse("SSID=a
+SSID=b
+");
+        c.powersave = Some(false);
+        let back = parse(&write_config(&c));
+        assert_eq!((back.powersave, back.profiles.len()), (Some(false), 2));
     }
 }

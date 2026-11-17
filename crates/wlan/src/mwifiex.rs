@@ -37,6 +37,7 @@ pub const CMD_VERSION_EXT: u16 = 0x0097;
 pub const CMD_FUNC_INIT: u16 = 0x00a9;
 pub const CMD_FUNC_SHUTDOWN: u16 = 0x00aa;
 pub const CMD_11N_CFG: u16 = 0x00cd;
+pub const CMD_11N_ADDBA_REQ: u16 = 0x00ce;
 pub const CMD_11N_ADDBA_RSP: u16 = 0x00cf;
 pub const CMD_RECONFIGURE_TX_BUFF: u16 = 0x00d9;
 pub const CMD_802_11_PS_MODE_ENH: u16 = 0x00e4;
@@ -674,6 +675,75 @@ pub fn addba_accept(req: &[u8], window: u16) -> Option<(Vec<u8>, u8, u16, u16)> 
     Some((v, tid, ssn, window))
 }
 
+/// The transmit block-ack window rs2 asks for
+/// (`MWIFIEX_STA_AMPDU_DEF_TXWINSIZE`).
+pub const BA_TX_WINDOW: u16 = 64;
+
+/// 11N_ADDBA_REQ: ask `peer` for a block-ack session for frames rs2
+/// sends on `tid` (the firmware then aggregates them into A-MPDUs).
+/// Immediate block ack, no A-MSDUs inside (rs2 does not build them),
+/// no timeout (Linux `mwifiex_send_addba`).
+pub fn addba_req_body(peer: [u8; 6], token: u8, tid: u8, window: u16) -> Vec<u8> {
+    let mut v = Vec::with_capacity(14);
+    v.push(0);
+    v.extend(peer);
+    v.push(token);
+    v.extend(((tid as u16 & 0xf) << 2 | window << 6 | 2).to_le_bytes());
+    v.extend(0xffffu16.to_le_bytes());
+    v.extend(0u16.to_le_bytes());
+    v
+}
+
+/// 11N_ADDBA_REQ's response: (TID, window) when the peer accepted, or
+/// the 802.11 status code it gave.
+pub fn addba_req_result(rsp: &[u8]) -> Result<(u8, u16), u16> {
+    if rsp.len() < 12 {
+        return Err(u16::MAX);
+    }
+    let status = le16(rsp, 8);
+    let param = le16(rsp, 10);
+    if rsp[0] != 0 || status != 0 {
+        return Err(if status != 0 { status } else { rsp[0] as u16 });
+    }
+    Ok(((param >> 2 & 0xf) as u8, param >> 6))
+}
+
+/// PS_MODE_ENH actions and bitmap.
+const PS_SLEEP_CONFIRM: u16 = 5;
+const PS_EN_AUTO: u16 = 0xff;
+const PS_DIS_AUTO: u16 = 0xfe;
+const PS_BITMAP_STA: u16 = 0x10;
+pub const TLV_PS_PARAM: u16 = 0x0172;
+
+/// PS_MODE_ENH: let the firmware power-save on its own between beacons
+/// (station power save with Linux's defaults: wake for every DTIM,
+/// beacon-miss timeout 5, go to sleep 1000 ms after the last activity,
+/// automatic mode), or stop it.
+pub fn ps_mode_body(on: bool) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend((if on { PS_EN_AUTO } else { PS_DIS_AUTO }).to_le_bytes());
+    v.extend(PS_BITMAP_STA.to_le_bytes());
+    if on {
+        let mut p = Vec::new();
+        // null packet interval, multiple DTIMs, beacon miss timeout, local
+        // listen interval, ad hoc wake period, mode (auto), delay to PS.
+        for x in [0u16, 1, 5, 0, 0, 1, 1000] {
+            p.extend(x.to_le_bytes());
+        }
+        push_tlv(&mut v, TLV_PS_PARAM, &p);
+    }
+    v
+}
+
+/// The sleep confirmation (a PS_MODE_ENH command with action SLEEP_CONFIRM
+/// and a response asked for): the answer to EVENT_PS_SLEEP when the host
+/// has nothing left for the chip.
+pub fn sleep_confirm_body() -> Vec<u8> {
+    let mut v = PS_SLEEP_CONFIRM.to_le_bytes().to_vec();
+    v.extend(1u16.to_le_bytes());
+    v
+}
+
 /// The TID of a block-ack session that ended (EVENT_DELBA body: result,
 /// peer address, DELBA parameters).
 pub fn delba_tid(ev: &[u8]) -> Option<u8> {
@@ -681,12 +751,31 @@ pub fn delba_tid(ev: &[u8]) -> Option<u8> {
 }
 
 /// The 802_11_ASSOCIATE response: (capability, status code, association
-/// ID). Status 0 is success; the firmware puts its own reason in the
-/// capability field when the status is not 0 (1: authentication failed,
-/// 2: the AP did not answer the authentication, 3: association timeout,
-/// 4: association refused, 5: station failure).
+/// ID). Status 0 is success; see [`assoc_failure`] for the rest.
 pub fn associate_result(body: &[u8]) -> Option<(u16, u16, u16)> {
     (body.len() >= 6).then(|| (le16(body, 0), le16(body, 2), le16(body, 4) & 0x3fff))
+}
+
+/// Why an association failed, from the response's capability and status
+/// fields (Linux `mwifiex_ret_802_11_associate`): the reason, and whether
+/// the access point itself refused (rather than the firmware giving up
+/// waiting for it). The firmware puts its own error in the capability
+/// field: 0xfffc no answer (status 1: to the association, 2: to the
+/// authentication, 3: joining), 0xfffd authentication refused, 0xfffe
+/// an authentication frame it could not handle, 0xfffb or 0xffff a
+/// failure of its own. Otherwise the status is the AP's 802.11 status
+/// code.
+pub fn assoc_failure(cap: u16, status: u16) -> (String, bool) {
+    let why = match (cap, status) {
+        (0xfffc, 1) => "no answer to the association request",
+        (0xfffc, 2) => "no answer to authentication",
+        (0xfffc, _) => "no answer from the access point",
+        (0xfffd, _) => return (alloc::format!("authentication refused (status {status})"), true),
+        (0xfffe, _) => "an authentication frame the firmware could not handle",
+        (0xfffb | 0xffff, _) => "station failure in the firmware",
+        _ => return (alloc::format!("refused by the access point (status {status})"), true),
+    };
+    (String::from(why), false)
 }
 
 /// 802_11_DEAUTHENTICATE: leave `bssid` with `reason` (3: leaving).
@@ -868,6 +957,7 @@ pub fn command_name(cmd: u16) -> &'static str {
         CMD_FUNC_SHUTDOWN => "FUNC_SHUTDOWN",
         CMD_RECONFIGURE_TX_BUFF => "RECONFIGURE_TX_BUFF",
         CMD_11N_CFG => "11N_CFG",
+        CMD_11N_ADDBA_REQ => "11N_ADDBA_REQ",
         CMD_11N_ADDBA_RSP => "11N_ADDBA_RSP",
         CMD_802_11_PS_MODE_ENH => "PS_MODE_ENH",
         CMD_PCIE_DESC_DETAILS => "PCIE_DESC_DETAILS",
@@ -1222,6 +1312,38 @@ mod tests {
         b[6..8].copy_from_slice(&PKT_TYPE_BAR.to_le_bytes());
         let (pd, f) = rx_packet(&b).unwrap();
         assert_eq!((pd.kind, f.len()), (PKT_TYPE_BAR, 0));
+    }
+
+    #[test]
+    fn transmit_block_ack_and_power_save() {
+        let b = addba_req_body([1, 2, 3, 4, 5, 6], 7, 0, BA_TX_WINDOW);
+        assert_eq!(b.len(), 14);
+        assert_eq!(&b[1..8], &[1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(le16(&b, 8), 64 << 6 | 2);
+        assert_eq!(le16(&b, 10), 0xffff);
+        // Response: result, peer, token, status, parameters.
+        let mut r = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 0, 0];
+        r.extend((32u16 << 6 | 2).to_le_bytes());
+        r.extend([0xff, 0xff, 0, 0]);
+        assert_eq!(addba_req_result(&r), Ok((0, 32)));
+        r[8] = 37; // request declined
+        assert_eq!(addba_req_result(&r), Err(37));
+        let on = ps_mode_body(true);
+        assert_eq!(&on[..4], &[0xff, 0, 0x10, 0]);
+        let t: Vec<(u16, Vec<u8>)> = tlvs(&on[4..]).map(|(t, v)| (t, v.to_vec())).collect();
+        assert_eq!(t.len(), 1);
+        assert_eq!((t[0].0, t[0].1.len()), (TLV_PS_PARAM, 14));
+        assert_eq!(le16(&t[0].1, 12), 1000);
+        assert_eq!(ps_mode_body(false), [0xfe, 0, 0x10, 0]);
+        assert_eq!(sleep_confirm_body(), [5, 0, 1, 0]);
+    }
+
+    #[test]
+    fn association_failures() {
+        assert_eq!(assoc_failure(0xfffc, 1), (String::from("no answer to the association request"), false));
+        assert_eq!(assoc_failure(0xfffc, 2), (String::from("no answer to authentication"), false));
+        assert_eq!(assoc_failure(0x0411, 17), (String::from("refused by the access point (status 17)"), true));
+        assert!(assoc_failure(0xfffd, 13).1);
     }
 
     #[test]

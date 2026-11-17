@@ -149,6 +149,10 @@ pub trait WlanDriver: Send + Sync {
     }
     /// Leave the network (deauthenticate).
     fn disconnect(&self) {}
+    /// Let the chip sleep between beacons (WIFI.CFG `POWERSAVE=`).
+    fn set_power_save(&self, _on: bool) -> Result<(), WlanError> {
+        Err(WlanError::Unsupported)
+    }
     /// Install a pairwise or group key (the chip encrypts).
     fn set_key(&self, _key: &Key) -> Result<(), WlanError> {
         Err(WlanError::Unsupported)
@@ -238,6 +242,8 @@ pub struct Adapter {
     port_open: AtomicBool,
     /// Received frames for the network stack.
     rxq: SpinLock<VecDeque<Vec<u8>>>,
+    /// The power-save setting the chip has: 0 off, 1 on (it starts off).
+    power_save: core::sync::atomic::AtomicU8,
 }
 
 static ADAPTERS: SpinLock<Vec<Arc<Adapter>>> = SpinLock::new(Vec::new());
@@ -255,6 +261,7 @@ pub fn kick() {
 pub fn register(drv: Arc<dyn WlanDriver>) {
     crate::wlog!("wlan: {} found", drv.name());
     let a = Adapter {
+        power_save: core::sync::atomic::AtomicU8::new(0),
         drv,
         state: SpinLock::new(State { status: Status::Found, info: String::new(), results: Vec::new(), last_scan_ms: 0 }),
         busy: Mutex::new(()),
@@ -315,13 +322,39 @@ pub fn load_config() {
         }
     }
     if moved {
-        let t: alloc::vec::Vec<u8> = wlan::config::write(&plain).chars().map(|c| c as u32 as u8).collect();
+        let keep = wlan::config::Config { profiles: plain, powersave: c.powersave, errors: Vec::new() };
+        let t: alloc::vec::Vec<u8> = wlan::config::write_config(&keep).chars().map(|c| c as u32 as u8).collect();
         if let Err(e) = crate::fs::write_file(CONFIG_FILE, &t) {
             crate::wlog!("wlan: cannot rewrite {CONFIG_FILE} (error {e})");
         }
     }
     *PROFILES.lock() = c.profiles;
+    POWERSAVE.store(c.powersave == Some(true), Ordering::Release);
+    apply_power_save();
     kick();
+}
+
+/// WIFI.CFG's `POWERSAVE=` (off unless it says ON).
+static POWERSAVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Give the running adapters the power-save setting, where it changed.
+fn apply_power_save() {
+    let on = POWERSAVE.load(Ordering::Acquire);
+    for i in 0..count() {
+        let Some(a) = adapter(i) else { continue };
+        if a.state.lock().status != Status::Up || a.power_save.load(Ordering::Acquire) == on as u8 {
+            continue;
+        }
+        let r = {
+            let _g = a.busy.lock();
+            a.drv.set_power_save(on)
+        };
+        match r {
+            Ok(()) => a.power_save.store(on as u8, Ordering::Release),
+            Err(WlanError::Unsupported) => a.power_save.store(on as u8, Ordering::Release),
+            Err(e) => crate::wlog!("wlan{i}: power saving {}: {e}", if on { "on" } else { "off" }),
+        }
+    }
 }
 
 /// The keychain service of WiFi passphrases (account: the SSID).
@@ -407,6 +440,7 @@ pub fn start() {
                     continue;
                 }
             }
+            apply_power_save();
             let nic = WlanNic { a: a.clone(), name: alloc::format!("wlan{i} {}", a.drv.name()), mac: a.drv.mac_address() };
             super::register(Arc::new(nic));
             match scan(i, &ScanRequest::default()) {
