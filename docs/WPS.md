@@ -137,7 +137,7 @@ SOMObject
    │  ├─ WPProgram
    │  ├─ WPShadow ── WPNetLink
    │  ├─ WPDisk
-   │  ├─ WPLaunchPad
+   │  ├─ WPLaunchPad ── SmartCenter (the WarpCenter)
    │  └─ WPShredder
    ├─ WPFileSystem
    │  ├─ WPDataFile
@@ -621,6 +621,7 @@ The rest comes from the class modules:
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
 | `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad: RS2Shutdown (opening it shuts down), RS2WindowList (the window list) |
 | `launchpad.rs` | WPLaunchPad (IBM's setup strings FPOBJECTS, DRAWEROBJECTS, LPCLOSEDRAWER, LPACTIONSTYLE, LPVERTICAL, LPTEXT, LPDRAWERTEXT, LPSMALLICONS, LPHIDECTLS, LPFLOAT, and its query/set methods): the action buttons (Window list, Find, Shut down; as text, small or normal icons, or none), object buttons with drawers above them, objects that open on a click, drops that add objects to the bar or a drawer, Remove from LaunchPad, moving by dragging; the Options and Buttons pages. rs2's own: LPAUTOHIDE ("Hide automatically": a second after the pointer leaves, the bar goes off the nearest screen edge, leaving a 3-pixel strip that brings it back on top); rs2 makes it with LPFLOAT=NO (and once turns floating off on desktops made earlier: PM_Workplace Rs2LaunchPadNoFloat); Close LaunchPad takes its shadow out of the Startup folder and sets PM_Workplace Rs2LaunchPadClosed (new desktop versions do not put it back), opening it puts the shadow back |
+| `warpcenter.rs` | SmartCenter, the WarpCenter (`<WP_WARPCENTER>` in System Setup, open at each start from its shadow in Startup; IBM's SCENTER.DLL, studied with Ghidra; derives from WPLaunchPad as IBM's does): a bar across the top (or bottom) of the screen, 22 pixels high with small icons, 38 with large ones. From the left: the Desktop button (a menu of the desktop's objects, folders one level deep as submenus), the window list (a menu of the switch list's windows), Lockup, Find, Shut down; the monitor, one of the battery (APM$ every 2 s: a plug or battery icon and the charge as a dark blue gauge with its percentage, "+" while charging; only where there is a battery), the processors' activity (DosPerfSysCall every 500 ms, a line for each) or a fixed disk's free space, a click going on to the next; the tray button (a menu of up to 16 trays, Add, Rename, Delete) and the current tray's objects (drops add objects, the pop-up menu removes them); at the right end the Assistance button and the clock (time or, after a click, the date, as the country conventions write them). Bubble help after the pointer rests 750 ms. Shown on top of maximized windows it keeps its strip out of the desktop's work area (WinSetDesktopWorkArea, [PM.md](PM.md#minimizing)); it can hide until the pointer reaches its edge. IBM's setup strings ADDOBJECT, ADDTRAY, ADDTOTRAY, SAVENOW and rs2's WCPOSITION, WCMONITOR, WCAUTOHIDE, WCONTOP, WCLARGEICONS; settings pages Display, Monitors and Trays. Its settings are kept with the object (IBM's in SCENTER.CFG); closing it takes its shadow out of Startup (`Rs2WarpCenterClosed`). Not there: IBM's stopwatch in the clock, its process list (Ctrl+click on the window list) and per-drive choice of disks |
 | `setup.rs` | WPCONFIG's settings objects: WPMouse (Timing: the double-click time; Setup: right- or left-handed), WPKeyboard (Timing: the repeat rate and delay through KBD$'s KBD_SETTYPAMATICRATE, the cursor blink rate), WPSound (Warning beep), WPColorPalette (colours dragged onto a folder become its background, with Shift its text; onto other windows PP_BACKGROUNDCOLOR or PP_FOREGROUNDCOLOR) WPSchemePalette (a scheme dropped on any window becomes the system's colours, WinSetSysColors) and WPFontPalette (a font dropped on a folder becomes its font, kept as WPFolder key 6 and set on its views as PP_FONTNAMESIZE; on another window, that window's PP_FONTNAMESIZE). The settings are kept in OS2.INI as IBM's PM keeps them (`PM_ControlPanel` DoubleClickSpeed, SwapMouseButton, CursorBlinkRate, KeyRepeatRate, KeyRepeatDelay, Beep; `PM_Colors` "R G B" by colour name) and applied when the shell starts |
 | `viewset.rs` | A folder's View tab, IBM's three pages: wpAddFolderView1Page (the view it opens in, the icon view's format: as placed, flowed, non-flowed; icon size: normal, small, invisible; the folder's font: Font... opens the Font Palette, whose fonts dropped on the folder set it, as on IBM's page, and System font drops it), wpAddFolderView2Page (tree view lines and icon size), wpAddFolderView3Page (the details view's columns: Icon, Title, Object class, Real name, Size, Last write date and time) |
 | `arrange.rs` | The View menu's Arrange submenu (IBM's ProcessCnrViewMenuItems, CnrViewSetupUndoData and PMWPMRI's menu 101, studied with Ghidra): Standard (733, as Arrange, 309), From top, left, right and bottom (734-737: the view's grid filled from that edge), Perimeter (739: round the edges, then inwards), Selected horizontally and vertically (740, 741: the selected icons in a row or column from the first); before an arrange or a sort each view keeps where its icons were (one undo per view, as IBM's), and its menus offer Undo arrange (310) or Undo sort (319) |
@@ -854,7 +855,10 @@ below); the rescue screen lists both.
     with the Glossary (`<WP_GLOSS>`), and "rs2 on the Internet" (a WPUrl
     to the project's page), then the LaunchPad (`<WP_LAUNCHPAD>`: Drives,
     OS/2 Window with OS/2 Full Screen in its drawer, the System Editor,
-    the Assistance Center) with its shadow in Startup. `PM_Workplace`
+    the Assistance Center) with its shadow in Startup, and the WarpCenter
+    (`<WP_WARPCENTER>` in System Setup; its first tray holds Drives,
+    Printers, the volume control, System Setup, Command Prompts and
+    Connections, where they are) with its shadow in Startup (version 18). `PM_Workplace`
     `Rs2Desktop` holds the version made (10: the Spooler; 12: rs2's applets in
     Utilities, Games and System Setup, [PM.md](PM.md#rs2s-pm-applets)); a desktop of an earlier
     version gets the entries again, and PRESERVEOLD keeps what it has
@@ -1282,8 +1286,7 @@ WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
   without refresh rates), and its Fonts page has only the icon text font
   (IBM's Sys*FontDlgProc pages set the device, video and text-mode fonts
   of DBCS systems);
-- Power cannot suspend (rs2's ACPI only turns the computer off) and
-  reads no batteries; WIN-OS/2 Setup's data exchange and fast load are
+- Power cannot suspend (rs2's ACPI only turns the computer off); WIN-OS/2 Setup's data exchange and fast load are
   kept but have nothing to act on yet (WINOS2.md); Special Needs has no
   sticky keys (IBM's has none either in Warp 4's page) and its time-out
   only applies when the next key comes; Touch and

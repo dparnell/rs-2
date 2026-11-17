@@ -57,7 +57,17 @@ pub const CONNECTIONS: u32 = 28;
 /// The Printers folder (a folder with a printer).
 pub const PRINTERS: u32 = 29;
 /// Highest icon id.
-pub const LAST: u32 = 29;
+/// The WarpCenter: a bar across the top of a screen.
+pub const WARPCENTER: u32 = 30;
+/// Lockup: a padlock.
+pub const LOCKUP: u32 = 31;
+/// A WarpCenter tray: a row of small objects on a ledge.
+pub const TRAY: u32 = 32;
+/// Running on battery.
+pub const BATTERY: u32 = 33;
+/// On external power: a plug.
+pub const PLUG: u32 = 34;
+pub const LAST: u32 = 34;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -73,6 +83,11 @@ fn hard_disk(p: &mut Pen, dx: f64, dy: f64, s: f64) {
     p.rect(e.0, e.1, f.0, f.1, DARK);
     let led = r(25.5, 16.5);
     p.disc(led.0, led.1, 1.8 * s.max(0.6), rgb(0x30d040), rgb(0x107020));
+}
+
+/// A small folder (12 x 9) at (x, y).
+fn folder_at(p: &mut Pen, x: f64, y: f64) {
+    p.polygon(&[(x, y), (x + 9.0, y), (x + 9.0, y + 7.0), (x + 4.0, y + 7.0), (x + 3.0, y + 8.5), (x, y + 8.5)], rgb(0xf0c040), rgb(0x806020));
 }
 
 fn folder(p: &mut Pen) {
@@ -215,6 +230,49 @@ fn draw(id: u32, size: i32) -> Option<Image> {
             p.disc(13.0, 19.0, 9.5, rgb(0x404040), DARK);
             p.disc(13.0, 19.0, 7.0, rgb(0xc8e0f8), rgb(0xa0c0e0));
             p.line((9.0, 22.0), (12.0, 25.0), 1.5, WHITE);
+        }
+        WARPCENTER => {
+            // A screen with a bar along its top, buttons and a clock on it.
+            p.rect(2.0, 4.0, 30.0, 28.0, rgb(0x3a7aa8));
+            p.frame(2.0, 4.0, 30.0, 28.0, DARK);
+            p.rect(3.0, 21.0, 29.0, 27.0, FACE);
+            p.rect(3.0, 20.0, 29.0, 21.0, DARK);
+            for (i, c) in [rgb(0x2050c0), rgb(0x20a060), rgb(0xd09020)].into_iter().enumerate() {
+                let x = 4.5 + i as f64 * 5.0;
+                p.rect(x, 22.0, x + 3.5, 26.0, c);
+            }
+            p.rect(22.0, 22.0, 28.0, 26.0, BLACK);
+            p.rect(23.0, 23.5, 27.0, 24.5, rgb(0x30d040));
+        }
+        LOCKUP => {
+            // The shackle: two legs and an arch over them.
+            let arch = [(11.0, 16.0), (11.0, 23.0), (12.5, 26.5), (16.0, 28.0), (19.5, 26.5), (21.0, 23.0), (21.0, 16.0)];
+            for w in arch.windows(2) {
+                p.line(w[0], w[1], 3.0, rgb(0x707880));
+            }
+            p.rect(6.0, 3.0, 26.0, 17.0, rgb(0xd8b030));
+            p.frame(6.0, 3.0, 26.0, 17.0, rgb(0x705010));
+            p.disc(16.0, 11.5, 2.2, DARK, DARK);
+            p.rect(15.2, 6.0, 16.8, 11.0, DARK);
+        }
+        TRAY => {
+            p.polygon(&[(1.0, 6.0), (31.0, 6.0), (27.0, 11.0), (5.0, 11.0)], rgb(0xb08850), rgb(0x604020));
+            p.rect(6.0, 11.0, 13.0, 20.0, rgb(0x2050c0));
+            p.frame(6.0, 11.0, 13.0, 20.0, DARK);
+            folder_at(&mut p, 15.0, 11.0);
+            p.disc(26.0, 15.0, 3.5, rgb(0xd03828), DARK);
+        }
+        BATTERY => {
+            p.rect(3.0, 9.0, 27.0, 23.0, WHITE);
+            p.frame(3.0, 9.0, 27.0, 23.0, DARK);
+            p.rect(27.0, 13.0, 30.0, 19.0, DARK);
+            p.rect(5.0, 11.0, 19.0, 21.0, rgb(0x30a040));
+        }
+        PLUG => {
+            p.line((10.0, 22.0), (10.0, 29.0), 2.5, DARK);
+            p.line((22.0, 22.0), (22.0, 29.0), 2.5, DARK);
+            p.polygon(&[(5.0, 22.0), (27.0, 22.0), (27.0, 14.0), (20.0, 8.0), (12.0, 8.0), (5.0, 14.0)], rgb(0x404850), BLACK);
+            p.line((16.0, 8.0), (16.0, 2.0), 3.0, BLACK);
         }
         LAUNCHPAD => {
             // A bar of buttons with a drawer open above one.
