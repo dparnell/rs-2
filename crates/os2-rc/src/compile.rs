@@ -371,8 +371,9 @@ impl<F: Files> C<'_, '_, '_, F> {
     /// A resource name: a number or a quoted string.
     fn res_name(&mut self) -> Option<Name> {
         if let Tok::Str(_) = self.peek() {
+            // Names are kept in upper case.
             let s = self.string()?;
-            return Some(Name::Str(s));
+            return Some(Name::Str(s.to_ascii_uppercase()));
         }
         let v = self.value(2088)?;
         Some(Name::Id(v as u16))
@@ -414,7 +415,13 @@ impl<F: Files> C<'_, '_, '_, F> {
 
     fn add(&mut self, ty: u16, name: Name, flags: u16, data: Vec<u8>) {
         if self.res.iter().any(|r| r.ty == ty && r.name == name) {
-            self.diag(2034, &alloc::format!("{ty}, ID {}", name.describe()));
+            // A name given twice is a warning (the first counts), as in
+            // IBM's RC; a number twice is an error.
+            if let Name::Str(_) = name {
+                self.diag(3030, &alloc::format!("{ty}, ID {}", name.describe()));
+            } else {
+                self.diag(2034, &alloc::format!("{ty}, ID {}", name.describe()));
+            }
             return;
         }
         self.res.push(Resource { ty, name, flags, data });
@@ -507,9 +514,9 @@ impl<F: Files> C<'_, '_, '_, F> {
             return;
         };
         if let Some(d) = self.read_file(&file) {
-            // IBM's RC leaves bitmaps over 4K, and bitmaps whose file name
-            // is in quotes, not discardable unless DISCARDABLE is given.
-            let f = if ty == rt::BITMAP && (d.len() > 4096 || self.lx.quoted) && !self.discard_given { f & !flags::DISCARDABLE } else { f };
+            // IBM's RC leaves bitmaps over 4K, and bitmaps with a quoted name
+            // or file name, not discardable unless DISCARDABLE is given.
+            let f = if ty == rt::BITMAP && (d.len() > 4096 || self.lx.quoted || matches!(name, Name::Str(_))) && !self.discard_given { f & !flags::DISCARDABLE } else { f };
             // Icon 1 is the program's default icon: a type 22 resource too
             // (and the .ICON extended attribute).
             let default = ty == rt::POINTER && name == Name::Id(1) && self.default_icon.is_none();

@@ -57,39 +57,51 @@ pub fn is_ne(exe: &[u8]) -> bool {
 pub fn bind(exe: &[u8], res: &[Resource], o: BindOptions) -> Result<Vec<u8>, BindError> {
     let ne_file = is_ne(exe);
     let mut list: Vec<(u16, u16, u16, &[u8])> = Vec::new();
-    // Named resources: NE modules get ID 0 (as IBM's RC); LX modules get
-    // a number and an RT_RESNAMES table per type (count, then ID and name).
-    let mut names: Vec<(u16, Vec<(u16, Vec<u8>)>)> = Vec::new();
-    let mut next_id: u16 = 0xffff;
-    for r in res {
-        let id = match &r.name {
+    // Named resources: NE modules get ID 0 (as IBM's RC). LX modules get a
+    // number from the name (see `name_id`) and an RT_RESNAMES resource per
+    // type: the count, the IDs and the names (u32, u32 each, NUL-ended).
+    let mut ids: Vec<u16> = vec![0; res.len()];
+    let mut names: Vec<(u16, Vec<(u16, &[u8])>)> = Vec::new();
+    // IBM's RC numbers the names from the last resource to the first.
+    for (i, r) in res.iter().enumerate().rev() {
+        ids[i] = match &r.name {
             Name::Id(id) => *id,
             Name::Str(_) if ne_file => 0,
             Name::Str(s) => {
-                while list.iter().any(|x| x.1 == next_id) || res.iter().any(|x| x.name == Name::Id(next_id)) {
-                    next_id -= 1;
-                }
-                let id = next_id;
-                next_id -= 1;
-                match names.iter_mut().find(|n| n.0 == r.ty) {
-                    Some(n) => n.1.push((id, s.clone())),
-                    None => names.push((r.ty, vec![(id, s.clone())])),
+                let mut id = name_id(s);
+                let taken = |id: u16, ids: &[u16]| {
+                    res.iter().enumerate().any(|(j, x)| x.ty == r.ty && (x.name == Name::Id(id) || (j > i && matches!(x.name, Name::Str(_)) && ids[j] == id)))
+                };
+                while id == 0 || taken(id, &ids) {
+                    id = id.wrapping_add(1);
                 }
                 id
             }
         };
+    }
+    for (i, r) in res.iter().enumerate() {
+        if let Name::Str(s) = &r.name {
+            if !ne_file {
+                match names.iter_mut().find(|n| n.0 == r.ty) {
+                    Some(n) => n.1.push((ids[i], s)),
+                    None => names.push((r.ty, vec![(ids[i], s)])),
+                }
+            }
+        }
         // Later duplicates are dropped (the first is bound).
-        if list.iter().any(|x| x.0 == r.ty && x.1 == id) {
+        if list.iter().any(|x| x.0 == r.ty && x.1 == ids[i]) {
             continue;
         }
-        list.push((r.ty, id, r.flags, &r.data));
+        list.push((r.ty, ids[i], r.flags, &r.data));
     }
     let mut tables: Vec<(u16, Vec<u8>)> = Vec::new();
     for (ty, n) in &names {
         let mut t = Vec::new();
         t.extend_from_slice(&(n.len() as u32).to_le_bytes());
-        for (id, s) in n {
+        for (id, _) in n {
             t.extend_from_slice(&(*id as u32).to_le_bytes());
+        }
+        for (_, s) in n {
             t.extend_from_slice(s);
             t.push(0);
         }
@@ -103,6 +115,23 @@ pub fn bind(exe: &[u8], res: &[Resource], o: BindOptions) -> Result<Vec<u8>, Bin
         Ok(os2_exe::Format::Ne { header }) => ne(exe, header, &list),
         _ => Err(BindError::Format),
     }
+}
+
+/// The number IBM's RC gives a named resource: the name's bytes in
+/// pairs, the 1st, 3rd... pair added as a little-endian word, the 2nd,
+/// 4th... subtracted as a big-endian one (16-bit arithmetic); 0 becomes
+/// 0x8000. Taken numbers move up by one.
+pub fn name_id(s: &[u8]) -> u16 {
+    let mut h: u16 = 0;
+    for (i, p) in s.chunks(2).enumerate() {
+        let (a, b) = (p[0] as u16, p.get(1).copied().unwrap_or(0) as u16);
+        if i % 2 == 0 {
+            h = h.wrapping_add(a | b << 8);
+        } else {
+            h = h.wrapping_sub(a << 8 | b);
+        }
+    }
+    if h == 0 { 0x8000 } else { h }
 }
 
 // ---- LX ----
@@ -206,7 +235,8 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
     }
 
     // New resource objects: one per kind of loading, sorted by (type, ID).
-    list.sort_by_key(|r| (r.0, r.1));
+    // By type and ID; the RT_RESNAMES tables last, highest type first.
+    list.sort_by_key(|r| if r.0 == crate::rt::RESNAMES { (1u8, 0xffff - r.1 as u32) } else { (0u8, (r.0 as u32) << 16 | r.1 as u32) });
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
     for (i, r) in list.iter().enumerate() {
         let k = lx_obj_flags(r.2);
@@ -243,7 +273,7 @@ fn lx(d: &[u8], h: usize, list: &mut Vec<(u16, u16, u16, &[u8])>, o: BindOptions
         objs.push(NewObj { flags: *k, data });
     }
     // Resource table in (type, ID) order.
-    entries.sort_by_key(|e| (e.0, e.1));
+    entries.sort_by_key(|e| if e.0 == crate::rt::RESNAMES { (1u8, 0xffff - e.1 as u32) } else { (0u8, (e.0 as u32) << 16 | e.1 as u32) });
 
     // Loader section: object, page and resource tables, then the rest.
     let new_npages = kept_pages + objs.iter().map(|ob| ob.data.len().div_ceil(page_size)).sum::<usize>();
