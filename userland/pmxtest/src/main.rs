@@ -162,6 +162,26 @@ fn main(s: &Startup) -> u32 {
         }
         let cl = unsafe { WinQueryWindowULong(frame, 0x18) };
         check("QWL_HWNDFOCUSSAVE: a frame without a client that has the focus is its own; a frame's focused client", f2 != 0 && own == (f2, f2) && cl == client);
+        // A click on an inactive frame's scroll bar activates the frame,
+        // also when it has nothing to scroll (a VIO window's).
+        unsafe extern "C" {
+            #[link_name = "PMWIN.899"]
+            fn WinWindowFromID(h: u32, id: u32) -> u32;
+        }
+        let mut fcf3 = 1u32 | 0x40; // FCF_TITLEBAR | FCF_VERTSCROLL
+        let mut none = 0;
+        let f3 = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0x8000_0000, &mut fcf3, core::ptr::null(), b"Scroll bar\0".as_ptr(), 0, 0, 3, &mut none) };
+        unsafe { WinSetFocus(HWND_DESKTOP, client) };
+        let before = unsafe { WinQueryActiveWindow(HWND_DESKTOP) };
+        let sb = unsafe { WinWindowFromID(f3, 0x8006) }; // FID_VERTSCROLL
+        unsafe { WinSendMsg(sb, 0x0071, 5 | 5 << 16, 0) }; // WM_BUTTON1DOWN
+        let after = unsafe { WinQueryActiveWindow(HWND_DESKTOP) };
+        unsafe {
+            WinSendMsg(sb, 0x0072, 5 | 5 << 16, 0); // WM_BUTTON1UP
+            WinDestroyWindow(f3);
+            WinSetFocus(HWND_DESKTOP, client);
+        }
+        check(&alloc::format!("a click on an inactive frame's scroll bar with nothing to scroll activates the frame (scroll bar {sb:#x}, active {before:#x} then {after:#x}, frames {frame:#x} {f3:#x})"), sb != 0 && before == frame && after == f3);
     }
     if args.starts_with(b"CHILD") {
         let r = hooks::child(hab, client);

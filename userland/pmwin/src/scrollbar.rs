@@ -151,6 +151,13 @@ pub extern "C" fn scrollbar_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_BUTTON1DOWN | WM_BUTTON1DBLCLK => {
+            // A click activates the scroll bar's frame, as a click
+            // anywhere in a window does (WinDefWindowProc), even when there
+            // is nothing to scroll: clicking an inactive VIO window's scroll
+            // bar left it behind.
+            if msg == WM_BUTTON1DOWN {
+                crate::win::WinSetActiveWindow(pmwin::HWND_DESKTOP, h);
+            }
             if !ctl::enabled(h) || data(h).last <= data(h).first {
                 return 1;
             }
