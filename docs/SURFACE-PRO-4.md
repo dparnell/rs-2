@@ -576,6 +576,16 @@ Written, not yet run on the chip:
   54 Mbit/s), power saving (kept off on purpose), hidden networks, roaming
   between access points of one network, a PM applet.
 
+First try on the Surface: association worked, but the AP gave up the
+4-way handshake (deauthenticated, reason 15) because no frame ever left.
+The 88W8897's transmit read pointer starts at 0 with the rollover bit
+set; rs2 compared it the other way, so the first reclaim took back all
+32 slots and the ring looked full from then on, and WPA2 message 2 was
+refused. Fixed in b5ae0880 (frames in flight counted, at most 31), not
+yet tried on the chip. WiFi log lines are also kept in memory since
+then: `WIFI STATUS` shows the last 40, and a failed `WIFI CONNECT`
+prints the frame counts and what happened.
+
 Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 `IFCONFIG` (or `PING`) once it says connected. `BOOT.LOG` has every step
 on lines starting `wlan0` and `88W8897` (key API version, association
