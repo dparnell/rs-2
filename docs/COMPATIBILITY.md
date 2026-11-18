@@ -131,10 +131,14 @@ BC_OS2.ISO`; the CD is drive D:).
 | All 123 example makefiles (`EXAMPLES\*`, `OWL\*`, `CLASSLIB\*`, `TASM\*`) | works | A batch running `make` in every example directory builds all of them under rs2: BCC, TLINK, TASM, BRCC, IMPLIB, TLIB, IPFC, rs2's RC.EXE and LINK.EXE. The text-mode programs run (CLASSLIB's BIDSAPI containers, TASM's DLL, thread, VIO and pop-up examples, TDDEMO, USEBLACK). QUEUETST prints dates in 2032: Borland's TTime takes `tm_year` (126) as the year 126 (its own Y2K bug, the arithmetic gives exactly that date). |
 | PM examples (CLOCK, CLIPBRD, COMPARE, DIAL, DIALOG, DLLAPI, DRAGDROP, HANOI, JIGSAW, NPIPE, PMHELLO, PMHELLO2, SF4, SORT, STYLE, TEMPLATE, XCPTC, XCPTCPP, TDDEMOPM) | works | Each starts, draws and closes; checked further: COMPARE's file comparison, DIAL's modem probe on COM1 ("No modem"), DIALOG's dialog, JIGSAW loading, cutting and jumbling YOSEMITE.BMP, NPIPE's tic-tac-toe client against its server over a named pipe, XCPTC's exit through BPMCC's message box. Fixed for them: DosQueryFileInfo level 1 into the OS/2 1.x FILESTATUS (22 bytes, Jigsaw's "Error reading file"), menu template items without MIS_TEXT (Jigsaw's Options menu), GpiMove/GpiBox coordinates beyond 28 bits (BPMCC's box ran PM's heap out and froze the desktop), a killed EXEC_SYNC parent no longer frees its running child (closing DIAL's command window wedged a CPU), DosKillProcess's DKP_PROCESS/DKP_PROCESSTREE. |
 | OWL examples (OWLAPI, OWLAPPS, TUTORIAL) | works, with notes | Each starts and closes: BUTTONX, GROUPBOX, INSTANCE, SCROLLBA, SCROLLER, STATIC, COLORDLG, COMBOBOX, COMMDLG, DLLHELLO, DOCVIEW, EDIT, EDITSEAR, GAUGE, LAYOUT, LISTBOX, MDI, MDISTRM, NOTIFY, PALETTE, POPUP, PRINTING, PRNTPREV, SLIDER, TRANSFER, VALIDATE, ACLOCK, BMPVIEW, CALC, CURSOR, DRAW, FILEBROW, GDIDEMO, MDIFILE, MTHREAD, OWLCMD, SDIFILE, SWAT, the tutorial steps. Fixed for them: a 0 page size (cached PSs) is the device's default size (every OWL window divided by its page viewport), the italic outline faces (PRNTPREV), GpiQueryPaletteInfo without a palette handle (PAINT), a focused frame is its own QWL_HWNDFOCUSSAVE (PRNTPREV's menu hung). OWL's own bugs, as on IBM's PM: BUTTONX's check box never says "Toggled" (OWL compares PM's BN_CLICKED 1 with Windows' 0); PRNTPREV's Print Preview copies a NULL driver name when the default queue's name is not a printer device's (OWL passes the queue name to SplQueryDevice, which IBM's PMSPL refuses too). PAINT and PEEPER take the display's colours from OWL's `NColors`, which knows 1, 4, 8 and 24 bits a pel: on rs2's 32-bit true colour they overrun a colour table; with `RS2COLORS=24` (a 24-bit view, below) or `RS2COLORS=256` they start; PAINT's tool and colour bars still draw black (not looked at). |
-| BC.EXE (the IDE) | partial | Starts (its window, menu bar, speed bar, an editor window, the status line); menus open from the keyboard (Alt+letter, also from inside a document window: each frame's menu is asked during accelerator translation, as IBM's `FrameTranslateAccel`); Alt+F4 closes it. A click on the editor gives it the focus and typing goes into it (IBM's `WinDefWindowProc`: button messages activate the window's frame and go to the owner, here the MDI document frame, which comes to the top and gives the focus to its client). Project > Open project shows BC's own file dialog template (`FDS_CUSTOM`; BC's procedure keeps `WM_INITDLG`, so rs2's PMCTLS now sets the dialog up before it, as IBM's) with the drives, the owner-drawn directory list and the files; `STYLE.PRJ` from `EXAMPLES\STYLE` opens and its project window lists the files. Compile > Build all compiles the eight C files, runs BRCC (through BRCC2MSG on a pipe: DosStartSession with `SSF_INHERTOPT_PARENT` now passes the IDE's handles on) and links; binding the resources runs rs2's `\OS2\RC.EXE` (not retested in the IDE). Run > Run reports Success but no program window was seen. A pop-up menu of the project window stays shown at the bottom left of the screen (not looked at). |
-| Integrated debugger (TDDEBUG.DLL) | partial | Loads with the IDE (after rs2 got PM's debugger calls, below) and runs its event loop (it polls its event queue with `DosQueryQueue` between `WinPeekMsg` calls); a debugging session was not started, as no project could be built in the IDE. |
-| TD.EXE, TDOS2.EXE (Turbo Debugger) | not tested | Their imports resolve. |
-| WORKSHOP.EXE (Resource Workshop) | not tested | Imports BPMCC.DLL's `BPMCCGETVERSION`, which the installer puts in `\OS2\DLL`. |
+| BC.EXE (the IDE) | works | Starts with its saved desktop (`start BC PROJECT.PRJ`), opens projects (Project > Open project), Compile > Build all (TDDEMO: compile and link, 0 errors), Run (the program in its own window, its input and output), the project window's pop-up menu (Compile, Edit, Local options, Include files), Help > Contents (BC.HLP), Tools > Grep (GREP's output in the transcript through GREP2MSG), Tools > Turbo Debugger. Earlier: menus from the keyboard, the editor, typing (IBM's `WinDefWindowProc` activation on a click). |
+| Integrated debugger (TDDEBUG.DLL) | works | Step over (F8) into `main`, over lines and calls (`showargs`, `readaline` with the program waiting for its input), the Local Variable window, Run (Ctrl+F9) to the program's end. DosDebug single steps, breakpoints written with `DBG_C_WriteMemBuf`, `DBG_C_Go`; when the program ends the IDE unmaps its aliases, which rs2 freed with the program's memory (`DBG_N_AliasFree` semantics: the later unmaps fail, the IDE carries on). |
+| TD.EXE, TDOS2.EXE (Turbo Debugger) | works | TD (PM): the control panel, the Source window at `main`, F8 steps, View > Disassembly, F9 to the end ("Process terminated with code 0"). TDOS2 (text mode, in the command window): stops at `main` (it asks `DosQueryModuleHandle` for the debuggee's EXE, which rs2 tried to load as a DLL; below), F8, F9, the program's input in its own session, "Process terminated: Normal exit, Result = 0". |
+| WORKSHOP.EXE (Resource Workshop) | works, with notes | Starts (it ended in SYS3175 twice: espfix and PAG_GUARD, below); File > Open project of HANOI.RC: the resource list (owner-drawn: WM_MEASUREITEM again on WM_PRESPARAMCHANGED), the dialog editor (its Tools and Align palettes stay above it; a new control placed; Test), the bitmap editor (zoomed and actual size), the menu editor (as text). Not judged: the Test mode's behaviour after a click (a second test dialog appears). |
+| BIN utilities: GREP, TDUMP, TLIB, OBJXREF, IMPDEF, IMPLIB, TOUCH, TRIGRAPH, CPP, TEMC, BRCC, RCONVERT, TCREF, TASM, MAKE, HLP2INF | works | Each run on the HANOI and TDDEMO files: GREP's matches and counts, TDUMP of an OBJ (with its Borland debug symbols) and of the LX EXE, a TLIB library made, listed, extracted from and shrunk, OBJXREF's cross-reference, IMPDEF's `.DEF` and IMPLIB's library of OWL20.DLL, TRIGRAPH's conversion, CPP's preprocessed output, TEMC compiling CUA.TEM. |
+| H2ASH.EXE | works, with notes | Converts headers of declarations and constant macros. A macro it cannot translate (`#define M(x) a = (x);`, STDIO.H line 215) ends in "Fatal: Internal compiler error" because its warning 417 has no text in its message table (BCC's table has the same gap): Borland's own; `H2ASH -w-` converts them. |
+| EXTRAS\BCC2.EXE | works | Compiles and links TDDEMO from the CD (with `-I` and `-L`: it finds no TURBOC.CFG beside itself there); the program runs. |
+| SMART2F (One Up's SMART migration toolkit, `D:\SMART2F\INSTALL`) | works, with notes | The installer copies the toolkit and its migration tables, makes the "SMART2 Toolset" desktop folder and adds `C:\SMART` to PATH and LIBPATH (it searched CONFIG.SYS with `MLM_SEARCH` and cchFind 0: rs2 found nothing and it added a second LIBPATH, which left PM without PMWIN at the next boot; below). SMART2 Source Migration started from its desktop object loads the Windows 3.1 to OS/2 table. Not done: SMART2 started from a command line asks for its configuration and then traps in its own code (an uninitialized pointer); a path typed into its table dialog keeps only the first character. |
 
 ![Borland's installer on rs2](images/rs2-bcos2-install.png)
 
@@ -187,10 +191,39 @@ resources and the message box line breaks have no check):
   `GpiQueryBitmapDimension`, `GpiQueryKerningPairs`,
   `GpiQueryFaceString`, `GpiFloodFill` (not done: GPI_ERROR).
 
+- **espfix** (APITEST): `iretq` to a 16-bit stack segment loads only
+  SP, bits 16..31 of ESP keeping the kernel's stack pointer's. Such
+  returns go through a trampoline in the gate area (`lss esp, [esp]`;
+  `iretd`) with the frame below the program's SP. Borland's C runtime
+  (C2.DLL) took a page fault in its thunk back from a 16-bit VIO call
+  and then loaded SS:ESP from a garbage address (Resource Workshop).
+- **DosSetMem PAG_GUARD on a committed page** (without PAG_COMMIT,
+  APITEST): it becomes a guard page that keeps its contents. Borland's
+  C runtime makes its stack's guard page so; the stack never grew.
+- **DosQueryModuleHandle of a running EXE** (APITEST): another
+  process's program by its path gives its module handle (TDOS2 asks so
+  for DosDebug's `DBG_C_NumToAddr`); `DosWaitChild` for an EXEC_ASYNC
+  child ends when the child does.
+- **List boxes** (PMXTEST): WM_PRESPARAMCHANGED and WM_SYSCOLORCHANGE
+  measure owner-drawn items again, as IBM's (OWL answers
+  WM_MEASUREITEM only after subclassing); an owner gets the whole
+  rectangle of an item partly in view.
+- **Owned windows** (host test): windows owned by a frame's client come
+  up with the frame (OWL's floating palettes).
+- **Scroll bars** (PMXTEST): a click activates the frame, also when
+  there is nothing to scroll (Turbo Debugger's program window).
+- **MLM_SEARCH with cchFind 0** (CTLTEST): a NUL-terminated string
+  (SMART's installer).
+- **A PM program's own session** is PM's (VS_PM): no "WORKSHOP (full
+  screen)" in the window list.
+
 Debugging aid added on the way: `apitrace=NAME` on the kernel command
 line (`\RS2\CMDLINE`) traces only the programs whose module name
 starts with NAME, with the paths of file calls and the offsets and sizes
-of `DosSetFilePtr`/`DosRead`.
+of `DosSetFilePtr`/`DosRead`; a CPU exception in such a program also
+dumps its stack, the EBP chain with each frame's first arguments and
+the modules of the addresses, and guard page exceptions are shown.
+`dbgtrace` traces every DosDebug call.
 
 ## Presentation Manager programs
 
