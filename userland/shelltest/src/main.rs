@@ -203,6 +203,8 @@ static VIEWER_MSGS: AtomicU32 = AtomicU32::new(0);
 static ENTERS: AtomicU32 = AtomicU32::new(0);
 static EMPHASIS: AtomicU32 = AtomicU32::new(0);
 static EXPANDS: AtomicU32 = AtomicU32::new(0);
+/// The FIELDINFO of the last details view cell the owner was asked to draw.
+static OWNER_FIELD: AtomicU32 = AtomicU32::new(0);
 static MOVES: AtomicU32 = AtomicU32::new(0);
 
 fn check(name: &str, ok: bool) {
@@ -268,6 +270,16 @@ extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
         WM_RS2_MINWINDOW => {
             VIEWER_MSGS.fetch_add(1, Ordering::Relaxed);
             0
+        }
+        // WM_DRAWITEM from the container's details view: OWNERITEM's
+        // idItem (0) and hItem's CNRDRAWITEMINFO (pRecord, pFieldInfo).
+        // The owner drew it.
+        0x0036 if b != 0 => {
+            let (id, info) = (rd(b, 40), rd(b, 44));
+            if id == 0 && info != 0 && rd(info, 0) != 0 {
+                OWNER_FIELD.store(rd(info, 4), Ordering::Relaxed);
+            }
+            1
         }
         _ => unsafe { WinDefWindowProc(h, m, a, b) },
     }
@@ -730,7 +742,8 @@ fn container(hab: u32, client: u32) -> u32 {
     wr(f1, 4, CFA_STRING | CFA_SEPARATOR);
     wr(f1, 12, b"Name\0".as_ptr() as u32);
     wr(f1, 16, R_PSZNAME as u32);
-    wr(f2, 4, CFA_ULONG | 0x2);
+    // The size column is the owner's to draw (CFA_OWNER).
+    wr(f2, 4, CFA_ULONG | 0x2 | 0x1000);
     wr(f2, 12, b"Size\0".as_ptr() as u32);
     wr(f2, 16, R_SIZE as u32);
     let fi: [u32; 4] = [16, CMA_END, 1, 2];
@@ -741,6 +754,7 @@ fn container(hab: u32, client: u32) -> u32 {
     pump(hab);
     send(cnr, CM_QUERYCNRINFO, q.as_mut_ptr() as u32, 92);
     check("detail view: cFields 2", q[21] == 2 && q[5] & CV_DETAIL != 0);
+    check("detail view: a CFA_OWNER column's cells go to the owner (WM_DRAWITEM, CNRDRAWITEMINFO)", OWNER_FIELD.load(Ordering::Relaxed) == f2);
     // A tree: a child record under the first one.
     let child = send(cnr, CM_ALLOCRECORD, 4, 1);
     wr(child, R_PSZTREE, b"Child\0".as_ptr() as u32);

@@ -127,6 +127,7 @@ const CFA_BITMAPORICON: u32 = 0x0100;
 const CFA_SEPARATOR: u32 = 0x0200;
 const CFA_HORZSEPARATOR: u32 = 0x0400;
 const CFA_STRING: u32 = 0x0800;
+const CFA_OWNER: u32 = 0x1000;
 const CFA_DATE: u32 = 0x2000;
 const CFA_TIME: u32 = 0x4000;
 const CFA_FIREADONLY: u32 = 0x8000;
@@ -685,8 +686,14 @@ fn paint(h: u32) {
         button: Rect,
         expanded: bool,
         cells: Vec<(Vec<u8>, u32, u32)>,
+        rec: u32,
     }
     let mut rows = Vec::with_capacity(l.placed.len());
+    // Details view cells the owner draws (CFA_OWNER, or CA_OWNERDRAW):
+    // the record, the FIELDINFO, the cell, the record's attributes, and
+    // what the container would draw there.
+    let mut owner_cells: Vec<OwnerCell> = Vec::new();
+    let owner_all = c.attr & CA_OWNERDRAW != 0;
     // CA_OWNERDRAW: the owner may draw the records' text over the
     // container's (those wholly in the item area).
     let mut owner_rows: Vec<(u32, Rect, u32)> = Vec::new();
@@ -714,13 +721,16 @@ fn paint(h: u32) {
             button: to_window(c, l.parts.area, l.view, p.button),
             expanded: attr(r) & CRA_EXPANDED != 0,
             cells,
+            rec: r,
         });
     }
+    let cols = l.cols.clone();
     let heads: Vec<(Vec<u8>, u32)> = l.cols.iter().map(|&f| (if rd(f, F_TITLEFL) & CFA_BITMAPORICON != 0 { Vec::new() } else { text_at(rd(f, F_TITLE)) }, rd(f, F_TITLEFL) | rd(f, F_DATA) & (CFA_SEPARATOR | CFA_HORZSEPARATOR))).collect();
     let split_after = l.cols.iter().position(|&f| f == field_last);
     let scroll_x = c.scroll.0;
     let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::mini_size());
     let inset = layout::column_margin(&l.m);
+    let item_area = parts.area;
     let f = draw::font_of(h);
     // Presentation parameter colours (a desktop's background).
     let bg = crate::pp::color_set(h, crate::pp::PP_BACKGROUNDCOLOR);
@@ -784,7 +794,22 @@ fn paint(h: u32) {
                 for (k, (t, fl, hp)) in row.cells.iter().enumerate() {
                     let w = widths.get(k).copied().unwrap_or(0);
                     let r = Rect::new(x, row.rect.bottom, x + w, row.rect.top);
-                    if fl & CFA_BITMAPORICON != 0 {
+                    if (fl & CFA_OWNER != 0 || owner_all) && !r.intersect(&area).is_empty() {
+                        // The owner's to draw (after the painting; its
+                        // own if the owner leaves it).
+                        let al = if fl & CFA_RIGHT != 0 { draw::DT_RIGHT } else if fl & CFA_CENTER != 0 { draw::DT_CENTER } else { 0 };
+                        owner_cells.push(OwnerCell {
+                            rec: row.rec,
+                            field: cols.get(k).copied().unwrap_or(0),
+                            rect: r,
+                            attr: row.attr,
+                            text: t.clone(),
+                            icon: *hp,
+                            text_rect: Rect::new(r.left + inset, r.bottom, r.right - inset, r.top),
+                            flags: fl | al << 16,
+                            fg,
+                        });
+                    } else if fl & CFA_BITMAPORICON != 0 {
                         if *hp != 0 {
                             crate::pointer::draw_in(cv, r, *hp, mini_icons, disabled);
                         }
@@ -855,6 +880,67 @@ fn paint(h: u32) {
         cv.ps.clip = saved;
     });
     owner_draw(h, owner_rows);
+    owner_draw_cells(h, item_area, owner_cells);
+}
+
+/// A details view cell the owner draws.
+struct OwnerCell {
+    rec: u32,
+    field: u32,
+    rect: Rect,
+    attr: u32,
+    /// What the container draws there when the owner does not.
+    text: Vec<u8>,
+    icon: u32,
+    text_rect: Rect,
+    /// The FIELDINFO's flData, the DT_ alignment in the high word.
+    flags: u32,
+    fg: u32,
+}
+
+/// As IBM's CnrProcessColumnData: WM_DRAWITEM to the owner for each
+/// details view cell of a CFA_OWNER column (or of every column with
+/// CA_OWNERDRAW): OWNERITEM hwnd, hps (in RGB mode, with the container's
+/// font, clipped to the records' area), fsAttribute the record's
+/// attributes, rclItem the cell, idItem 0, hItem a CNRDRAWITEMINFO
+/// (pRecord, pFieldInfo). When the owner returns FALSE the container
+/// draws the cell itself. UltiMail draws its In-basket so (its own date
+/// format).
+fn owner_draw_cells(h: u32, area: Rect, cells: Vec<OwnerCell>) {
+    if cells.is_empty() {
+        return;
+    }
+    const LCOL_RESET: u32 = 1;
+    const LCOLF_RGB: i32 = 2;
+    let (owner, id) = (ctl::owner(h), ctl::id(h));
+    let hps = win::WinGetPS(h);
+    let clip = crate::gpiapi::RectL::from(area);
+    crate::gpiobj::GpiIntersectClipRectangle(hps, &clip);
+    let font = draw::font_of(h);
+    let mini = crate::pointer::mini_size();
+    for cell in cells {
+        crate::gpiobj::GpiCreateLogColorTable(hps, LCOL_RESET, LCOLF_RGB, 0, 0, core::ptr::null());
+        if let Some(e) = crate::gpiapi::entry(st(), hps) {
+            e.ps.font = font;
+        }
+        let info: [u32; 2] = [cell.rec, cell.field];
+        let t = cell.rect;
+        let oi: [u32; 12] = [h, hps, 0, cell.attr, 0, 0, t.left as u32, t.bottom as u32, t.right as u32, t.top as u32, 0, info.as_ptr() as u32];
+        if send(owner, WM_DRAWITEM, id, oi.as_ptr() as u32) & 0xffff != 0 {
+            continue;
+        }
+        draw::with(h, hps, |cv| {
+            if cell.flags & CFA_BITMAPORICON != 0 {
+                if cell.icon != 0 {
+                    let small = cell.rect.height() < crate::pointer::icon_size();
+                    crate::pointer::draw_in(cv, cell.rect, cell.icon, small && mini > 0, cell.attr & CRA_DISABLED != 0);
+                }
+            } else {
+                cv.text_in(cell.text_rect, &cell.text, cell.fg, (cell.flags >> 16) | draw::DT_VCENTER);
+            }
+        });
+    }
+    win::WinReleasePS(hps);
 }
 
 /// WM_DRAWITEM to the owner for each record's text (OWNERITEM: hwnd,
