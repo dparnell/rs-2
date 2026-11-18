@@ -550,10 +550,10 @@ receiver), reached as 10.0.2.100 through `--guestfwd
 | In-basket object | works | Starts `UMAIL.EXE /HIDE` and opens the In-basket; first time, UltiMail asks for the user's name and its own password; the In-basket fetches the mail over POP3 (USER, PASS, STAT, RETR, DELE, QUIT) and lists it; letters open with their header and text, and stay in the mail store across restarts. |
 | New Letter object | works | Opens an empty letter (To, Cc, Subject, the SentMail folder). Sending not tried. |
 | Names and Addresses object | works | Opens the nickname notebook (its index, New Person, New Group). |
-| Letter window | partial | The header fields (From, Subject) are drawn too short and their text is cut; the tool bar (IBM's UCMENUS control: a WC_MENU whose bitmap items it measures and draws itself) is black. |
-| In-basket list | partial | The Date and Icon column titles and values are cut short. |
-| Windows menu | partial | "Address Book" is cut to "Address Boo" (its items have icons). |
-| UMAIL.EXE started by hand after a session | partial | Its main window, saved minimized (hidden in the Minimized Window Viewer), comes back drawn as a large icon at its full size; restoring it works. |
+| Letter window | works | The header fields, the tool bar (IBM's UCMENUS control: a WC_MENU whose bitmap items it measures and draws itself; Reply, Forward, Close, Delete, Print, Help) and the attachment button. |
+| In-basket list | works | Drawn by UltiMail (owner-drawn columns, "12.System VIO"). Its own short date ("11/18/26") is cut to "11/18/": the Date column is 50 pixels wide and UltiMail keeps 9/5 of an average character on each side, which leaves 46 pixels for 64 (the same sums on IBM's container and font). |
+| Windows menu | works | Its owner-drawn items (with icons) are whole; a long window title is shortened by UltiMail itself (31 characters). |
+| UMAIL.EXE started by hand after a session | works | Its main window, saved minimized, stays in the Minimized Window Viewer. |
 
 What it needed from rs2 (each with its check):
 
@@ -585,6 +585,31 @@ What it needed from rs2 (each with its check):
   them as UTF-8 and the kernel gave names back to programs as UTF-8.
 - **WinSetPresParam** keeps a font name the system does not have, as
   IBM's does (PMXTEST).
+- **PrfQueryProfileSize** sets the size to 0 for an application or key
+  that is not there (INITEST): UCMenus reads it whatever the result and
+  took stack garbage for a saved tool bar style (black, no buttons).
+- **WinLoadMenu** makes an action bar whatever the parent (IBM's
+  WC_MENU with MS_ACTIONBAR): UCMenus loads its menu for HWND_OBJECT and
+  sizes it from MM_QUERYITEMRECT; as a vertical menu of no width its
+  items came out of negative width.
+- **ES_MARGIN entry fields** take their margin around every position
+  WinSetWindowPos gives (WM_ADJUSTWINDOWPOS, three SV_CXBORDERs; CTLTEST):
+  the letter's From, Date and Subject fields were 6 pixels short of
+  their text.
+- **Image buttons** (BS_ICON, BS_MINIICON, BS_BITMAP, BS_TEXT) and the
+  button's WM_QUERYWINDOWPARAMS/WM_SETWINDOWPARAMS with its BTNCDATA
+  (CTLTEST): the attachment button's paper clip.
+- **Container details view** (SHELLTST): columns are their cxWidth plus
+  three average character widths (IBM's CnrQueryColumnPosInDV), and
+  cells of CFA_OWNER columns go to the owner with WM_DRAWITEM
+  (CNRDRAWITEMINFO), as IBM's CnrProcessColumnData.
+- **"N.System VIO" fonts**: IBM's sizes name VIO cell sizes (12 is
+  8x16); the In-basket and the Mail Cabinet ask for "12.System VIO".
+- **Menus**: an owner-drawn item of a pull-down is its measured width
+  plus the check mark's and the submenu arrow's columns (IBM's
+  MenuFormatMenu).
+- **The Minimized Window Viewer**: a frame minimized into it is
+  icon-sized at (-32000, -32000), as IBM's FrameMinMax (SHELLTST).
 
 ![UltiMail Lite's In-basket on rs2](images/rs2-ultimail-inbasket.png)
 
