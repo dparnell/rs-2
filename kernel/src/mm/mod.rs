@@ -1,5 +1,6 @@
 //! Memory management.
 
+pub mod espfix;
 pub mod fault;
 pub mod heap;
 pub mod mmio;
@@ -10,4 +11,5 @@ pub mod phys;
 pub fn init(info: &bootinfo::BootInfo) {
     phys::init(info);
     paging::init();
+    espfix::init();
 }

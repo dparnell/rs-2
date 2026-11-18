@@ -56,7 +56,7 @@ pub fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
     let q = s.queue_of(h);
     let p = s.pointer;
     let raw = (WM_MOUSEMOVE..=WM_CHAR).contains(&msg) && !PLAYBACK.load(core::sync::atomic::Ordering::Relaxed);
-    let reserved = if raw { crate::hooks::QMSG_INPUT } else { 0 };
+    let reserved = crate::hooks::QMSG_SYSQ | if raw { crate::hooks::QMSG_INPUT } else { 0 };
     post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved });
 }
 

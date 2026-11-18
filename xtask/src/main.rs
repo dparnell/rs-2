@@ -489,8 +489,13 @@ fn main() -> ExitCode {
                 files.clear();
                 walk(&esp, "", &mut files);
                 files.retain(|(_, d)| !d.ends_with("C.IMG"));
-                files.extend(build_userland().unwrap_or_default());
-                if let Ok(t) = std::fs::read_to_string(root().join("work/modules.txt")) {
+                // What the installer puts on the disk: the boot volume
+                // (C.IMG's files: with --dist rs2's own, the manifest's
+                // fonts, CONFIG.SYS and the rest), then work/modules.txt's
+                // on top (with --dist; without, the boot volume is made
+                // from it already).
+                files.extend(boot_volume(&o, &esp, build_userland().unwrap_or_default()).unwrap_or_default());
+                if o.dist && let Ok(t) = std::fs::read_to_string(root().join("work/modules.txt")) {
                     files.extend(image::manifest(&root(), &t));
                 }
             }
@@ -588,6 +593,20 @@ fn build(o: &Opts) -> Option<PathBuf> {
     }
     // rs2 user programs (Rust, i686) converted to LX.
     let userland = build_userland()?;
+    if let Some(files) = boot_volume(o, &esp, userland) {
+        let img = image::build(&files, "RS2", 16, None);
+        let out = esp.join("RS2/MODULES/C.IMG");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        std::fs::write(&out, img).unwrap();
+    }
+    Some(esp)
+}
+
+/// The boot volume's files (drive C:, C.IMG in the ESP, what the
+/// installer copies): from work/modules.txt (development) or
+/// dist/manifest.txt (distribution: rs2's own files only), with rs2's
+/// programs (`userland`), interface repositories and the rest.
+fn boot_volume(o: &Opts, esp: &Path, userland: image::FileList) -> Option<image::FileList> {
     // Drive C: as a FAT image built from work/modules.txt (development)
     // or dist/manifest.txt (distribution: rs2's own files only).
     let list = if o.dist { root().join("dist/manifest.txt") } else { root().join("work/modules.txt") };
@@ -610,12 +629,9 @@ fn build(o: &Opts) -> Option<PathBuf> {
         // Boot files for the installer.
         files.push((esp.join("EFI/BOOT/BOOTX64.EFI"), "RS2\\BOOT\\BOOTX64.EFI".to_string()));
         files.push((esp.join("RS2/KERNEL"), "RS2\\BOOT\\KERNEL".to_string()));
-        let img = image::build(&files, "RS2", 16, None);
-        let out = esp.join("RS2/MODULES/C.IMG");
-        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
-        std::fs::write(&out, img).unwrap();
+        return Some(files);
     }
-    Some(esp)
+    None
 }
 
 /// rs2's interface repositories (`\OS2\ETC\SOM.IR`, `WPSH.IR`, ...),

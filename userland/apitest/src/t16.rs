@@ -53,7 +53,49 @@ unsafe extern "C" {
     static at16_create: u8;
     static at16_thread: u8;
     static at16_esp: u8;
+    static at16_below: u8;
 }
+
+// at16_below(selGlobalInfoSeg) (_pascal far, the selector at bp+6): fills
+// the 24 bytes below its SP with 5AA5h, waits (in 16-bit code, on the
+// 16-bit stack) until the global information segment's millisecond count
+// has moved by 100, so that interrupts return to it, and returns how many
+// of the 12 words are still 5AA5h. IBM's VisualAge C++ thunks keep the
+// 16:16 address they call below SP (IBM Works' database engine): the
+// kernel must not write there (the espfix frame once did).
+core::arch::global_asm!(
+    ".pushsection .text.at16below,\"ax\"",
+    ".p2align 4",
+    ".code16",
+    ".globl at16_below",
+    "at16_below:",
+    "push bp",
+    "mov bp, sp",
+    "push es",
+    "mov es, word ptr [bp + 6]",
+    ".irp n, 4,6,8,10,12,14,16,18,20,22,24,26",
+    "mov word ptr [bp - \\n], 0x5aa5",
+    ".endr",
+    "mov eax, dword ptr es:[4]",
+    "2:",
+    "mov edx, dword ptr es:[4]",
+    "sub edx, eax",
+    "cmp edx, 100",
+    "jb 2b",
+    "xor ax, ax",
+    ".irp n, 4,6,8,10,12,14,16,18,20,22,24,26",
+    "cmp word ptr [bp - \\n], 0x5aa5",
+    "jne 3f",
+    "inc ax",
+    "3:",
+    ".endr",
+    "pop es",
+    "pop bp",
+    "xor dx, dx",
+    ".byte 0xca, 2, 0",
+    ".code32",
+    ".popsection",
+);
 
 // at16_esp(pfnGetInfoSeg) (_pascal far, the pointer at bp+6): sets the
 // upper half of ESP to 1234h (a 16-bit stack uses SP only), calls
@@ -304,6 +346,8 @@ pub fn run() {
     check("16-bit DosGetInfoSeg: tidCurrent of the main thread is 1", main_tid);
     let high = PascalCall::new().l(gate(D16GetInfoSeg)).call(far(&raw const at16_esp)) & 0xffff;
     check(&alloc::format!("a 16-bit API returns to a 16-bit stack with the upper half of ESP kept ({high:#x})"), high == 0x1234);
+    let kept = PascalCall::new().w(gsel).call(far(&raw const at16_below)) & 0xffff;
+    check(&alloc::format!("returns to a 16-bit stack leave the memory below SP alone ({kept} of 12 words)"), kept == 12);
     // A 16-bit stack (in a tiled object) and the result buffer.
     let mut stack: *mut u8 = core::ptr::null_mut();
     const OBJ_TILE: u32 = 0x40;

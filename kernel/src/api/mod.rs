@@ -546,6 +546,13 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
             stack_linear
         );
     }
+    // As IBM's router: the KBD and MOU calls first check the caller's
+    // process type (a PM or detached process has no keyboard or mouse).
+    let forced = forced.or_else(|| match gate::MODULES[module as usize] {
+        "KBDCALLS" => kbdapi::refused(&ctx),
+        "MOUCALLS" => mou::refused(&ctx),
+        _ => None,
+    });
     if forced.is_none() && route && subsys::route(&mut ctx, module as u8, ordinal as u16) {
         return;
     }

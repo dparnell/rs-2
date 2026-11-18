@@ -10,6 +10,21 @@ const ERROR_MOUSE_INV_HANDLE: u32 = 389;
 const MOU_WAIT: u16 = 1;
 const HMOU: u16 = 1;
 
+const ERROR_MOU_DETACHED: u32 = 466;
+const ERROR_MOU_EXTENDED_SG: u32 = 505;
+
+/// IBM's _MouCheckProcType (DOSCALL1, before every MOU call): a detached
+/// process gets ERROR_MOU_DETACHED, a PM program ERROR_MOU_EXTENDED_SG.
+pub fn refused(c: &Ctx) -> Option<u32> {
+    if c.process.exe.app_type & 7 == 3 {
+        Some(ERROR_MOU_EXTENDED_SG)
+    } else if c.process.background.load(core::sync::atomic::Ordering::Relaxed) {
+        Some(ERROR_MOU_DETACHED)
+    } else {
+        None
+    }
+}
+
 fn sid(c: &Ctx) -> u32 {
     c.process.session.load(core::sync::atomic::Ordering::Relaxed)
 }
