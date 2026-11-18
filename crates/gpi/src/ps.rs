@@ -321,6 +321,42 @@ pub struct Ps {
     /// The device's default rectangle in pels (the screen, the printer's
     /// page): the page size a PS gets when it asks for 0.
     pub device_size: (i32, i32),
+    /// GpiSavePS's stack.
+    saved: Vec<Saved>,
+}
+
+/// What GpiSavePS keeps of a PS and GpiRestorePS puts back: the
+/// attributes and the current position, the transforms (model, viewing,
+/// default view, page viewport), the clip region and path, the colour
+/// table, the selected font and the draw controls. Logical font and
+/// bitmap definitions are not part of it.
+#[derive(Clone)]
+struct Saved {
+    color: Rgb,
+    back_color: Rgb,
+    mix: Mix,
+    back_mix: Mix,
+    pos: Point,
+    font: &'static Font,
+    attrs: Attrs,
+    colors: ColorTable,
+    attr_mode: i32,
+    attr_stack: Vec<Attrs>,
+    model: Matrix,
+    viewing: Matrix,
+    view: Matrix,
+    defaults: Attrs,
+    page: Matrix,
+    page_units: u32,
+    page_size: (i32, i32),
+    page_asked: (i32, i32),
+    yinv: i32,
+    clip_region: Option<Region>,
+    clip_path: Option<Region>,
+    logfont: LogFont,
+    pattern_bitmap: Option<Fill>,
+    collect_bounds: bool,
+    display: bool,
 }
 
 impl Ps {
@@ -365,7 +401,81 @@ impl Ps {
             device_font: None,
             device_ppm: xform::PELS_PER_METRE,
             device_size: (0, 0),
+            saved: Vec::new(),
         }
+    }
+
+    /// GpiSavePS: push the PS's state; returns its id (1 for the first).
+    pub fn save(&mut self) -> i32 {
+        self.saved.push(Saved {
+            color: self.color,
+            back_color: self.back_color,
+            mix: self.mix,
+            back_mix: self.back_mix,
+            pos: self.pos,
+            font: self.font,
+            attrs: self.attrs.clone(),
+            colors: self.colors.clone(),
+            attr_mode: self.attr_mode,
+            attr_stack: self.attr_stack.clone(),
+            model: self.model,
+            viewing: self.viewing,
+            view: self.view,
+            defaults: self.defaults.clone(),
+            page: self.page,
+            page_units: self.page_units,
+            page_size: self.page_size,
+            page_asked: self.page_asked,
+            yinv: self.yinv,
+            clip_region: self.clip_region.clone(),
+            clip_path: self.clip_path.clone(),
+            logfont: self.logfont,
+            pattern_bitmap: self.pattern_bitmap.clone(),
+            collect_bounds: self.collect_bounds,
+            display: self.display,
+        });
+        self.saved.len() as i32
+    }
+
+    /// GpiRestorePS: put back the state saved as `id` (a negative id
+    /// counts back from the last save: -1 is the last), dropping it and
+    /// every later save. False if there is no such save.
+    pub fn restore(&mut self, id: i32) -> bool {
+        let n = self.saved.len() as i32;
+        let at = if id < 0 { n + id + 1 } else { id };
+        if at < 1 || at > n {
+            return false;
+        }
+        self.saved.truncate(at as usize);
+        let Some(v) = self.saved.pop() else { return false };
+        self.color = v.color;
+        self.back_color = v.back_color;
+        self.mix = v.mix;
+        self.back_mix = v.back_mix;
+        self.pos = v.pos;
+        self.font = v.font;
+        self.attrs = v.attrs;
+        self.colors = v.colors;
+        self.attr_mode = v.attr_mode;
+        self.attr_stack = v.attr_stack;
+        self.model = v.model;
+        self.viewing = v.viewing;
+        self.view = v.view;
+        self.defaults = v.defaults;
+        self.page = v.page;
+        self.page_units = v.page_units;
+        self.page_size = v.page_size;
+        self.page_asked = v.page_asked;
+        self.yinv = v.yinv;
+        self.clip_region = v.clip_region;
+        self.clip_path = v.clip_path;
+        self.logfont = v.logfont;
+        self.pattern_bitmap = v.pattern_bitmap;
+        self.collect_bounds = v.collect_bounds;
+        self.display = v.display;
+        self.update_xf();
+        self.refresh_clip();
+        true
     }
 
     /// Whether drawing goes to a vector device.
@@ -1908,6 +2018,35 @@ impl Ps {
 mod tests {
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn save_and_restore_ps() {
+        // IBM Works draws a picture so: GpiSavePS, GpiResetPS(GRES_ALL),
+        // a default view matrix of its own, GpiPlayMetaFile, GpiRestorePS;
+        // its document is drawn with a 1440-unit page shown at 96 pels.
+        let mut ps = Ps::new(Point::new(0, 0), vec![Rect::new(0, 0, 640, 480)]);
+        ps.device_size = (640, 480);
+        ps.set_page(xform::PU_ARBITRARY, (1440, 1440));
+        ps.set_page_viewport(Rect::new(-89, 141, 7, 237));
+        ps.attrs.char_box = (195 << 16, 195 << 16);
+        let scale = |ps: &Ps| ps.world_to_device().apply(1440.0, 0.0).0 - ps.world_to_device().apply(0.0, 0.0).0;
+        assert_eq!(scale(&ps), 96.0);
+        assert_eq!(ps.save(), 1);
+        ps.reset(true);
+        ps.set_view(Matrix::scale(0.125, 0.125));
+        assert_ne!(scale(&ps), 96.0);
+        assert_eq!(ps.save(), 2);
+        ps.set_view(Matrix::scale(3.0, 3.0));
+        // -1: the last save; restoring 1 drops 2 as well.
+        assert!(ps.restore(1));
+        assert_eq!(scale(&ps), 96.0);
+        assert_eq!(ps.attrs.char_box, (195 << 16, 195 << 16));
+        assert!(!ps.restore(-1));
+        assert_eq!(ps.save(), 1);
+        ps.set_view(Matrix::scale(2.0, 2.0));
+        assert!(ps.restore(-1));
+        assert_eq!(scale(&ps), 96.0);
+    }
 
     fn surface(buf: &mut Vec<u32>, w: i32, h: i32) -> Surface {
         unsafe { Surface::new(buf.as_mut_ptr(), w, h, w, false) }

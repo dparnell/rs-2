@@ -211,6 +211,12 @@ unsafe extern "C" {
     fn GpiQueryFonts(hps: u32, opts: u32, face: *const u8, req: *mut i32, len: i32, out: *mut u8) -> i32;
     #[link_name = "PMGPI.520"]
     fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const [i32; 9], opt: i32) -> u32;
+    #[link_name = "PMGPI.501"]
+    fn GpiSavePS(hps: u32) -> i32;
+    #[link_name = "PMGPI.499"]
+    fn GpiRestorePS(hps: u32, id: i32) -> u32;
+    #[link_name = "PMGPI.498"]
+    fn GpiResetPS(hps: u32, opts: u32) -> u32;
     #[link_name = "PMGPI.538"]
     fn GpiSetModelTransformMatrix(hps: u32, n: i32, m: *const [i32; 9], opt: i32) -> u32;
     #[link_name = "PMGPI.566"]
@@ -595,6 +601,22 @@ fn self_checks(hab: u32) {
         check("default view matrix", p[0] == pt(20, 35));
         GpiConvert(m.hps, CVTC_DEVICE, CVTC_WORLD, 1, p.as_mut_ptr());
         check("convert back", p[0] == pt(5, 5));
+        // GpiSavePS / GpiRestorePS keep the transforms, also across
+        // GpiResetPS(GRES_ALL) (IBM Works draws pictures so).
+        let id = GpiSavePS(m.hps);
+        GpiResetPS(m.hps, 4);
+        let mx2 = [MAKEFIXED / 8, 0, 0, 0, MAKEFIXED / 8, 0, 0, 0, 1];
+        GpiSetDefaultViewMatrix(m.hps, 9, &mx2, TRANSFORM_REPLACE);
+        let id2 = GpiSavePS(m.hps);
+        let mut p = [pt(5, 5)];
+        GpiConvert(m.hps, CVTC_WORLD, CVTC_DEVICE, 1, p.as_mut_ptr());
+        let changed = p[0] != pt(20, 35);
+        let ok = GpiRestorePS(m.hps, -2) != 0;
+        let mut p = [pt(5, 5)];
+        GpiConvert(m.hps, CVTC_WORLD, CVTC_DEVICE, 1, p.as_mut_ptr());
+        check("GpiSavePS ids 1 and 2", id == 1 && id2 == 2);
+        check("GpiRestorePS -2 brings back the default view matrix reset after GpiSavePS", changed && ok && p[0] == pt(20, 35));
+        check("both saves gone after it", GpiRestorePS(m.hps, -1) == 0);
 
         // Colour tables.
         let t = [0x123456];
