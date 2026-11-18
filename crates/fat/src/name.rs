@@ -13,16 +13,30 @@ pub fn valid_83(name: &str) -> bool {
     to_83(name).is_some()
 }
 
+/// The name's bytes: rs2 keeps OS/2 text one character per byte (code
+/// page characters as U+0080..U+00FF), not UTF-8. None if a character is
+/// beyond that.
+fn os2_bytes(s: &str) -> Option<alloc::vec::Vec<u8>> {
+    s.chars().map(|c| u8::try_from(c as u32).ok()).collect()
+}
+
+fn os2_string(b: &[u8]) -> String {
+    b.iter().map(|&c| c as char).collect()
+}
+
 /// Normalise a name to upper-case `NAME.EXT`, or None if it does not fit
-/// 8.3 or contains characters FAT does not allow.
+/// 8.3 or contains characters FAT does not allow. Code page characters
+/// (bytes 0x80 and up) count as one each: UltiMail's mail store names
+/// its files with 0xE0..0xED in them.
 pub fn to_83(name: &str) -> Option<String> {
     if name.is_empty() || name == "." || name == ".." {
         return None;
     }
-    let (base, ext) = match name.rfind('.') {
+    let name = os2_bytes(name)?;
+    let (base, ext) = match name.iter().rposition(|&c| c == b'.') {
         Some(0) => return None,
         Some(i) => (&name[..i], &name[i + 1..]),
-        None => (name, ""),
+        None => (&name[..], &[][..]),
     };
     // A trailing dot means "no extension" (OS/2 strips it).
     if base.is_empty() || base.len() > 8 || ext.len() > 3 {
@@ -31,15 +45,14 @@ pub fn to_83(name: &str) -> Option<String> {
     // OS/2 takes spaces inside FAT names (`EA DATA. SF`, `WP ROOT. SF`),
     // not at the start, nor at the end of a part (they would not come
     // back from the padded directory form).
-    let ok = |p: &str| p.bytes().all(|c| valid_char(c) || c == b' ') && !p.ends_with(' ');
-    if !ok(base) || !ok(ext) || base.starts_with(' ') {
+    let ok = |p: &[u8]| p.iter().all(|&c| valid_char(c) || c == b' ') && p.last() != Some(&b' ');
+    if !ok(base) || !ok(ext) || base[0] == b' ' {
         return None;
     }
-    let mut s = String::with_capacity(12);
-    s.push_str(&base.to_ascii_uppercase());
+    let mut s = os2_string(&base.to_ascii_uppercase());
     if !ext.is_empty() {
         s.push('.');
-        s.push_str(&ext.to_ascii_uppercase());
+        s.push_str(&os2_string(&ext.to_ascii_uppercase()));
     }
     Some(s)
 }
@@ -47,17 +60,18 @@ pub fn to_83(name: &str) -> Option<String> {
 /// Pack `NAME.EXT` into the 11-byte directory form.
 pub fn pack_83(name: &str) -> Option<[u8; 11]> {
     let mut out = [b' '; 11];
-    let (base, ext) = match name.rfind('.') {
+    let name = os2_bytes(name)?;
+    let (base, ext) = match name.iter().rposition(|&c| c == b'.') {
         Some(i) if i > 0 => (&name[..i], &name[i + 1..]),
-        _ => (name, ""),
+        _ => (&name[..], &[][..]),
     };
     if base.len() > 8 || ext.len() > 3 {
         return None;
     }
-    for (d, s) in out.iter_mut().zip(base.bytes()) {
+    for (d, s) in out.iter_mut().zip(base) {
         *d = s.to_ascii_uppercase();
     }
-    for (d, s) in out[8..].iter_mut().zip(ext.bytes()) {
+    for (d, s) in out[8..].iter_mut().zip(ext) {
         *d = s.to_ascii_uppercase();
     }
     if out[0] == 0xe5 {

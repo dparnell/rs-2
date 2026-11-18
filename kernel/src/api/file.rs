@@ -56,7 +56,7 @@ fn read_path(c: &Ctx, addr: u32) -> Result<String, u32> {
 fn check_names(fs: &dyn fs::FileSystem, p: &FullPath) -> Result<(), u32> {
     let max = fs.max_component();
     for part in &p.parts {
-        if part.len() > max || (max == 12 && !fat::valid_83(part)) {
+        if part.chars().count() > max || (max == 12 && !fat::valid_83(part)) {
             return Err(err::FILENAME_EXCED_RANGE);
         }
     }
