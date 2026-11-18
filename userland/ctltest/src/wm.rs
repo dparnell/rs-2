@@ -77,6 +77,8 @@ static FRAME_PROC: AtomicU32 = AtomicU32::new(0);
 static DDE: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 static ACK: AtomicU32 = AtomicU32::new(0);
 static DRAWCLIP: AtomicU32 = AtomicU32::new(0);
+/// How often the derived frame was asked to format itself.
+static FORMATS: AtomicU32 = AtomicU32::new(0);
 
 extern "C" fn derived_frame(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
@@ -103,6 +105,9 @@ extern "C" fn derived_frame(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             DDE[0].store(msg, Ordering::Relaxed);
             DDE[2].store(mp2, Ordering::Relaxed);
             return 0;
+        }
+        WM_FORMATFRAME => {
+            FORMATS.fetch_add(1, Ordering::Relaxed);
         }
         _ => {}
     }
@@ -207,6 +212,17 @@ fn frame_checks(hab: u32) -> u32 {
         let mut pb = [0i32; 9];
         let ok = WinSetMultWindowPos(hab, set.as_ptr(), 2) != 0 && WinQueryWindowPos(a, pa.as_mut_ptr()) != 0 && WinQueryWindowPos(b, pb.as_mut_ptr()) != 0;
         check("WinSetMultWindowPos", ok && pa[1..5] == [30, 40, 5, 6] && pb[1..5] == [31, 41, 7, 8]);
+
+        // As IBM's frame: it formats its controls when its size changes,
+        // not when it only moves (OWL's floating palettes, moved by the
+        // PM server, were formatted the default way: a full-size close
+        // box painted under their tiny one).
+        let n = FORMATS.load(Ordering::Relaxed);
+        WinSetWindowPos(f, 3, 15, 25, 0, 0, 2);
+        let moved = FORMATS.load(Ordering::Relaxed);
+        WinSetWindowPos(f, 3, 0, 0, 310, 210, 1);
+        check("a frame is formatted when sized, not when moved", moved == n && FORMATS.load(Ordering::Relaxed) > n);
+        WinSetWindowPos(f, 3, 10, 20, 300, 200, 3);
 
         // WinStoreWindowPos / WinRestoreWindowPos.
         let stored = WinStoreWindowPos(b"CtlTest\0".as_ptr(), b"Pos\0".as_ptr(), f);

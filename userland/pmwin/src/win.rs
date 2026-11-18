@@ -827,11 +827,18 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
         } else {
             s.desk.set_pos(h, nx, ny, ncx, ncy);
         }
-        if s.frames.contains_key(&h) {
-            frame::layout(h);
-        } else if (ncx, ncy) != (ocx, ocy) {
-            let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
-            send(h, WM_SIZE, pack(ocx, ocy), pack(ncx, ncy));
+        // As IBM's frame (FrameSizeChanged): a frame formats its controls
+        // when its size changes, not when it only moves. OWL's floating
+        // palettes format their own tiny caption; moved by the PM server,
+        // they were formatted the default way and painted a close box in
+        // the wrong place.
+        if (ncx, ncy) != (ocx, ocy) {
+            if s.frames.contains_key(&h) {
+                frame::layout(h);
+            } else {
+                let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
+                send(h, WM_SIZE, pack(ocx, ocy), pack(ncx, ncy));
+            }
         }
         if (nx, ny) != (ox, oy) {
             moved(h);

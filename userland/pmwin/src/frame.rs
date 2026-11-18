@@ -340,7 +340,14 @@ pub fn layout(frame: u32) {
         return;
     }
     let own = s.desk.get(frame).is_some_and(|w| w.proc_ == frame_entry as *const () as u32);
-    let placed: alloc::vec::Vec<(u32, Rect, u32)> = if own || s.queue_of(frame) != s.my_queue() {
+    // A subclassed frame of another thread formats itself, in its own
+    // thread (its WM_FORMATFRAME may be in another process, as OWL's for
+    // its floating palettes, which the PM server sizes).
+    if !own && s.queue_of(frame) != s.my_queue() {
+        post(frame, WM_UPDATEFRAME, 0, 0);
+        return;
+    }
+    let placed: alloc::vec::Vec<(u32, Rect, u32)> = if own {
         format(frame).0.into_iter().map(|(h, r)| (h, r, format_fl(&r))).collect()
     } else {
         let n = (send(frame, WM_QUERYFRAMECTLCOUNT, 0, 0) as usize).clamp(1, 64) + 1;
