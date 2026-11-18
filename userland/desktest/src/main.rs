@@ -175,7 +175,14 @@ fn pmwin(hab: u32) {
     check("PP_FONTNAMESIZE set and inherited", ok && n == 8 && &text[..8] == b"12.Helv\0" && id == 15);
     // QPF_NOINHERIT
     check("PP_FONTNAMESIZE not the client's own", unsafe { WinQueryPresParam(cb, 15, 0, &mut id, 32, name.as_mut_ptr(), 1) } == 0);
-    check("PP_FONTNAMESIZE of an unknown face refused", unsafe { WinSetPresParam(b, 15, 13, b"10.NoSuchFace\0".as_ptr() as *const u32) } == 0);
+    // As IBM's WIN32SETPRESPARAM (XSetPresParam, SetPresParam: the bytes
+    // are stored as given): a face the system lacks is kept, and the
+    // window draws in the default font.
+    check("PP_FONTNAMESIZE of an unknown face kept", unsafe { WinSetPresParam(b, 15, 14, b"10.NoSuchFace\0".as_ptr() as *const u32) } != 0 && {
+        let n = unsafe { WinQueryPresParam(b, 15, 0, &mut id, 32, name.as_mut_ptr(), 1) };
+        let t = unsafe { core::slice::from_raw_parts(name.as_ptr() as *const u8, 14) };
+        n == 14 && t == b"10.NoSuchFace\0"
+    });
     // A frame made with WinCreateWindow and FCF_SHELLPOSITION in its
     // FRAMECDATA (as the Toolkit's WPSTutorial makes its view) gets the
     // shell's position when it is first shown.
