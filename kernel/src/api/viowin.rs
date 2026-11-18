@@ -126,6 +126,12 @@ pub fn query_sessions(c: &mut Ctx) -> u32 {
         }
         let changes = crate::screen::with_session(sid, |s| s.changes).unwrap_or(0);
         let leader = session::info(sid).map_or(0, |x| x.0);
+        // A PM program's own session (DosStartSession of a PM program,
+        // CMD's START) shows nothing: it is PM's, not a full-screen one
+        // ("WORKSHOP (full screen)" stood in the window list).
+        if crate::task::process::by_pid(leader).is_some_and(|p| p.exe.app_type & 7 == 3) {
+            f |= VS_PM;
+        }
         let mut e = Vec::with_capacity(SESSION_SIZE as usize);
         for v in [sid, f, changes, leader] {
             e.extend_from_slice(&v.to_le_bytes());
