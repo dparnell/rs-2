@@ -236,6 +236,13 @@ fn mle_checks(hab: u32, client: u32) {
     check("MLM_INSERT replaces the selection", n == 3 && text(m) == b"one\r\nTWO\r\nthree");
     check("MLM_QUERYCHANGED after an edit", send(m, MLM_QUERYCHANGED, 0, 0) == 1);
     check("MLN_CHANGE sent to the owner", noted(100, 7));
+    // Setting the window text does not notify (IBM's MLEC_SetParams):
+    // UltiMail's text viewer copies the MLE into its letter on MLN_CHANGE.
+    let m3 = create(client, 10, b"", 0x0002, (0, 0, 200, 100), 103, null());
+    notes().clear();
+    unsafe { WinSetWindowText(m3, b"new\r\ntext\0".as_ptr()) };
+    check("WinSetWindowText on an MLE sends no MLN_CHANGE", !noted(103, 7) && text(m3) == b"new\r\ntext");
+    unsafe { WinDestroyWindow(m3) };
     check("MLM_QUERYUNDO", send(m, MLM_QUERYUNDO, 0, 0) & 0xffff != 0);
     check("MLM_UNDO", send(m, MLM_UNDO, 0, 0) == 1 && text(m) == b"one\r\ntwo\r\nthree");
     send(m, MLM_RESETUNDO, 0, 0);

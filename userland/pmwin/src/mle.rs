@@ -691,7 +691,9 @@ pub fn set_text(h: u32, t: &[u8]) {
     d.m.changed = true;
     sync_scroll(h);
     refresh(h);
-    ctl::notify(h, MLN_CHANGE);
+    // No MLN_CHANGE: IBM's MLE (MLEC_SetParams, ET_SetText) does not
+    // notify when its window text is set. UltiMail's text viewer copies
+    // the MLE back into the letter on MLN_CHANGE and cleared the letter so.
 }
 
 // ---- The window procedure ----
