@@ -27,7 +27,8 @@
 //! (an object handle, to the current tray), ADDTRAY=name[,objects],
 //! ADDTOTRAY=n[,objects] (n from 0), SAVENOW. Its settings pages: Display
 //! (on top of maximized windows, auto-hide, top or bottom, small or large
-//! icons, bubble help, confirm shutdown), Monitors and Trays. IBM's
+//! icons, bubble help, confirm lockup and shutdown, the clock green on
+//! black), Monitors and Trays. IBM's
 //! SmartCenter derives from WPLaunchPad, as this one does.
 //!
 //! rs2's own: the settings are kept with the object (IBM's go to
@@ -35,7 +36,9 @@
 //! grows by 4); the battery monitor shows the charge as text too and
 //! is offered only when there is a battery (IBM's whenever APM$ opens);
 //! the setup strings WCPOSITION=TOP|BOTTOM, WCMONITOR=BATTERY|CPU|d:,
-//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO and WCLARGEICONS=YES|NO; the Desktop
+//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO, WCLARGEICONS=YES|NO and
+//! WCPRETTYCLOCK=YES|NO; Lockup asks first (IBM's only asks before shut
+//! down, though its setting is "confirm lockup and shutdown"); the Desktop
 //! and Assistance menus go one folder deep (deeper folders open).
 
 use alloc::boxed::Box;
@@ -62,6 +65,9 @@ const F_AUTOHIDE: u32 = 8;
 const F_NOBUBBLE: u32 = 16;
 /// Shut down without asking.
 const F_NOCONFIRM: u32 = 32;
+/// IBM's "pretty clock": green on black in a sunken frame (also with
+/// SCUSEPRETTYCLOCK set, IBM's only switch for it).
+const F_PRETTY: u32 = 64;
 
 /// The monitors offered (bits of `mask`; IBM's resource mask has one for
 /// each drive, rs2's one for the fixed disks).
@@ -195,6 +201,7 @@ extern "C" fn wc_setup(o: usize, setup: *const u8) -> u32 {
             b"WCAUTOHIDE" => set_flag(o, F_AUTOHIDE, yes(&v)),
             b"WCONTOP" => set_flag(o, F_NOTONTOP, !yes(&v)),
             b"WCLARGEICONS" => set_flag(o, F_LARGE, yes(&v)),
+            b"WCPRETTYCLOCK" => set_flag(o, F_PRETTY, yes(&v)),
             b"WCMONITOR" => {
                 let u = v.to_ascii_uppercase();
                 wd(o).mode = match u.as_slice() {
@@ -890,7 +897,13 @@ fn paint(h: u32) {
                 Hit::Clock => {
                     bevel(hps, r, true);
                     let t = bars()[b].mon.clock.clone();
-                    text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0, DT_CENTER);
+                    if pretty(o) {
+                        // IBM's pretty clock: green on black.
+                        fill(hps, rect(r.l + 1, r.b + 1, r.r - 1, r.t - 1), 0);
+                        text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0x00ff00, DT_CENTER);
+                    } else {
+                        text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0, DT_CENTER);
+                    }
                 }
                 Hit::Timer => {
                     bevel(hps, r, pressed);
@@ -1246,6 +1259,17 @@ fn poll_mail(b: usize, force: bool) {
     }
 }
 
+/// The clock is drawn green on black (the setting, or IBM's
+/// SCUSEPRETTYCLOCK).
+fn pretty(o: usize) -> bool {
+    wd(o).flags & F_PRETTY != 0 || env_set(b"SCUSEPRETTYCLOCK\0")
+}
+
+/// IBM's confirmations (its Confirm: Yes and No, system modal, movable).
+fn confirm(b: usize, text: &[u8]) -> bool {
+    message(bars()[b].hwnd, text, b"WarpCenter", MB_YESNO | 0x1000 | 0x4000) == MBID_YES
+}
+
 /// What bar `b`'s clock shows now.
 fn clock_now(b: usize) -> Vec<u8> {
     match wd(bars()[b].obj).date {
@@ -1510,7 +1534,7 @@ fn process_menu(b: usize) {
 /// End process `pid` from the process list, once confirmed.
 fn kill(b: usize, pid: u32) {
     if !(env_set(b"KILLCONFIRMDISABLED\0") || env_set(b"SCKILLCONFIRMDISABLED\0"))
-        && message(bars()[b].hwnd, b"Are you sure that you want to kill this process?", b"WarpCenter", MB_YESNO | MB_WARNING) != MBID_YES
+        && !confirm(b, b"Are you sure that you want to kill this process?")
     {
         return;
     }
@@ -1601,7 +1625,11 @@ fn act(b: usize, it: Hit) {
             }
         }
         Hit::Lockup => {
-            crate::desktop::WinLockupSystem(0);
+            // IBM's question, under its "confirm lockup and shutdown"
+            // setting (IBM's own bar asks only before shutting down).
+            if wd(o).flags & F_NOCONFIRM != 0 || confirm(b, b"Are you sure that you want to lock the system?") {
+                crate::desktop::WinLockupSystem(0);
+            }
         }
         Hit::Find => {
             let d = crate::fs::desktop();
@@ -1892,11 +1920,12 @@ const ID_UNDO: u16 = 1440;
 const ID_DEFAULT: u16 = 1441;
 
 /// The Display page's check boxes: (text, flag, flag set means checked).
-const OPTS: [(&[u8], u32, bool); 4] = [
+const OPTS: [(&[u8], u32, bool); 5] = [
     (b"Show on top of ~maximized windows", F_NOTONTOP, false),
     (b"~Hide until the pointer reaches its edge", F_AUTOHIDE, true),
     (b"Show ~bubble help", F_NOBUBBLE, false),
-    (b"~Confirm shutdown", F_NOCONFIRM, false),
+    (b"~Confirm lockup and shutdown", F_NOCONFIRM, false),
+    (b"Clock in ~green on black", F_PRETTY, true),
 ];
 const MONS: [(&[u8], u32); 3] = [(b"~Battery", M_BATTERY), (b"~Processor activity", M_CPU), (b"~Fixed disks", M_DISKS)];
 
@@ -1909,6 +1938,14 @@ fn display_init(h: u32, o: usize) {
     for (i, &(_, bit, set)) in OPTS.iter().enumerate() {
         let on = (f & bit != 0) == set;
         unsafe { WinSendDlgItemMsg(h, (ID_DISPLAY + i as u16) as u32, BM_SETCHECK, on as u32, 0) };
+    }
+    // IBM's SCUSEPRETTYCLOCK decides it: checked, and not to be changed.
+    if env_set(b"SCUSEPRETTYCLOCK\0") {
+        let id = ID_DISPLAY + OPTS.iter().position(|&(_, bit, _)| bit == F_PRETTY).unwrap_or(0) as u16;
+        unsafe {
+            WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, 1, 0);
+            WinEnableWindow(WinWindowFromID(h, id as u32), 0);
+        }
     }
     let r = |id: u16, on: bool| unsafe { WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, on as u32, 0) };
     r(ID_TOP, f & F_BOTTOM == 0);
@@ -1958,7 +1995,7 @@ extern "C" fn display_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                     changed(o);
                 }
                 ID_DEFAULT if o != 0 => {
-                    wd(o).flags &= !(F_BOTTOM | F_LARGE | F_NOTONTOP | F_AUTOHIDE | F_NOBUBBLE | F_NOCONFIRM);
+                    wd(o).flags &= !(F_BOTTOM | F_LARGE | F_NOTONTOP | F_AUTOHIDE | F_NOBUBBLE | F_NOCONFIRM | F_PRETTY);
                     display_init(h, o);
                     changed(o);
                 }
@@ -1981,7 +2018,7 @@ extern "C" fn wc_add_display_page(o: usize, nb: u32) -> u32 {
     let mut v = alloc::vec![book::label(b"The bar:", (6, 110, 200))];
     for (i, &(t, _, _)) in OPTS.iter().enumerate() {
         // BS_AUTOCHECKBOX
-        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 98 - i as i16 * 11, 220, 10), ID_DISPLAY + i as u16));
+        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 99 - i as i16 * 10, 220, 10), ID_DISPLAY + i as u16));
     }
     // BS_AUTORADIOBUTTON
     let radio = |t: &[u8], x: i16, y: i16, id: u16, first: bool| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (x, y, 100, 10), id);
