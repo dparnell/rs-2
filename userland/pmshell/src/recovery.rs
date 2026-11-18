@@ -37,8 +37,6 @@ use crate::fileops;
 unsafe extern "C" {
     #[link_name = "PMSHAPI.115"]
     fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, len: u32) -> u32;
-    #[link_name = "KBDCALLS.4"]
-    fn KBDCHARIN();
     #[link_name = "DOSCALLS.415"]
     fn DosShutdown(reserved: u32) -> u32;
     #[link_name = "RS2API.7"]
@@ -135,13 +133,28 @@ struct KeyInfo {
     time: u32,
 }
 
-/// A key if one was typed (KbdCharIn, IO_NOWAIT).
+/// A key if one was typed: KBD$'s KBD_READCHAR (category 4, 0x74) with
+/// KBD_READ_NOWAIT. Not KbdCharIn: the KBD calls refuse a PM program
+/// (ERROR_KBD_EXTENDED_SG, as IBM's), and PMSHELL is one.
 fn key() -> Option<KeyInfo> {
+    static mut KBD: u32 = 0;
+    unsafe {
+        if KBD == 0 {
+            let (mut h, mut action) = (0u32, 0u32);
+            // OPEN_ACTION_OPEN_IF_EXISTS, OPEN_SHARE_DENYNONE | OPEN_ACCESS_READONLY.
+            if DosOpen(b"KBD$\0".as_ptr(), &mut h, &mut action, 0, 0, 1, 0x40, core::ptr::null_mut()) != 0 {
+                return None;
+            }
+            KBD = h;
+        }
+    }
+    let mut param: u16 = 1 | 0x8000;
     let mut k = KeyInfo::default();
-    let p = os2::vio::ptr_words(&k);
-    let rc = unsafe { os2::vio::call16(KBDCHARIN as *const () as usize, &[p[0], p[1], 1, 0]) };
-    let k = unsafe { core::ptr::read_volatile(&k) };
-    (rc == 0 && k.status & 0x40 != 0).then_some(k)
+    let (mut cbp, mut cbd) = (2u32, 0u32);
+    let rc = unsafe {
+        DosDevIOCtl(KBD, 4, 0x74, &mut param as *mut u16 as *mut u8, 2, &mut cbp, &mut k as *mut KeyInfo as *mut u8, 10, &mut cbd)
+    };
+    (rc == 0 && param == 1 && k.status & 0x40 != 0).then_some(k)
 }
 
 fn out(s: &str) {
