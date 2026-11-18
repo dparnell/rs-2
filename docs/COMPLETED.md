@@ -637,7 +637,8 @@ What is already done, by milestone. What is still to do is in
   Lockup, Find, Shut down, the battery, processor and disk monitor, up
   to 16 trays, the Assistance menu, the clock and its timer, the process
   list on Ctrl+click, the mail indicator, the pretty clock, the
-  lockup question, the disk monitor's drives; WinSetDesktopWorkArea keeps maximized windows off
+  lockup question, the disk monitor's drives,
+  MENUSFOLLOWPOINTER; WinSetDesktopWorkArea keeps maximized windows off
   it)
 - done: deleting with IBM's confirmations and the Shredder, IBM's
   settings pages (File, Type, Window, Association, Session, Details, the

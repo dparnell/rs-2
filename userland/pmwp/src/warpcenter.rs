@@ -16,6 +16,8 @@
 //! and a click on the window list button list the processes instead:
 //! one chosen is ended (DosKillProcess) once confirmed, unless
 //! SCKILLCONFIRMDISABLED (or KILLCONFIRMDISABLED) is set.
+//! Its menus follow the pointer only with MENUSFOLLOWPOINTER set
+//! (otherwise only while a mouse button is down), as IBM's.
 //!
 //! IBM's layout, behaviour and setup strings (studied in SCENTER.DLL):
 //! the bar is 22 pixels high with small icons; shown on top of maximized
@@ -1417,6 +1419,44 @@ fn folder_menu(b: usize, f: usize, it: Hit) {
     popup(b, &items, it);
 }
 
+/// The pop-up menu up and its window procedure before `track`.
+static mut MENU_PROC: (u32, u32) = (0, 0);
+
+/// IBM's MENUSFOLLOWPOINTER: with it set the bar's menus highlight the
+/// item under the pointer as it moves (and back across a parent menu,
+/// closing the submenu); without it they track the pointer only while a
+/// mouse button is down (IBM's TMenu::MouseMove). rs2's PM menus always
+/// follow it, so without the variable the bar's menus are subclassed to
+/// drop the moves made with no button down. The root menu holds the
+/// capture: its submenus' moves come to it as well.
+fn track(menu: u32) {
+    if env_set(b"MENUSFOLLOWPOINTER\0") {
+        return;
+    }
+    let old = unsafe { WinSubclassWindow(menu, menu_proc) };
+    unsafe { MENU_PROC = (menu, old) };
+}
+
+extern "C" fn menu_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    let (m, old) = unsafe { MENU_PROC };
+    if m != h || old == 0 {
+        return unsafe { WinDefWindowProc(h, msg, a, b) };
+    }
+    // WM_MOUSEMOVE with neither button down: the highlight stays.
+    if msg == 0x0070 {
+        let down = |vk: i32| unsafe { WinGetKeyState(HWND_DESKTOP, vk) } & 0x8000 != 0;
+        // VK_BUTTON1, VK_BUTTON2
+        if !down(1) && !down(2) {
+            return 1;
+        }
+    }
+    if msg == WM_DESTROY {
+        unsafe { MENU_PROC = (0, 0) };
+    }
+    let f: WndProc = unsafe { core::mem::transmute(old as usize) };
+    f(h, msg, a, b)
+}
+
 /// Pop up `items` at item `it`'s edge away from the screen's.
 fn popup(b: usize, items: &[Menu], it: Hit) {
     let menu = popup_menu(items);
@@ -1434,6 +1474,7 @@ fn popup(b: usize, items: &[Menu], it: Hit) {
     }
     hide_bubble(b);
     bars()[b].menu_up = true;
+    track(menu);
     unsafe { WinPopupMenu(HWND_DESKTOP, bars()[b].hwnd, menu, p[0].x, p[0].y.max(0), 0, PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2) };
 }
 
@@ -1615,6 +1656,7 @@ fn context_menu(b: usize, x: i32, y: i32) {
         hide_bubble(b);
         bars()[b].menu_up = true;
         let p = pointer_pos();
+        track(menu);
         unsafe { WinPopupMenu(HWND_DESKTOP, bars()[b].hwnd, menu, p.x, p.y, 0, PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2) };
     }
 }
