@@ -687,29 +687,41 @@ fn placed(s: &State, p: Point) -> Option<(Point, &'static Image)> {
     Some((Point::new(p.x - o.hot.x, p.y - o.hot.y), &o.img))
 }
 
+/// The screen as the pointer draws on it: in true colour, whichever
+/// process moves it. Under the lock of a program with RS2COLORS=256 the
+/// surface draws in its 256-colour palette, and the pels saved under the
+/// pointer came back in that palette's colours: a 32 by 32 square of
+/// nearly the desktop's colour was left behind (OWL PAINT).
+fn screen(s: &State) -> gpi::Surface {
+    let mut surface = s.surface;
+    unsafe { surface.set_palette(core::ptr::null_mut()) };
+    surface
+}
+
 pub fn draw(s: &mut State) {
     if s.ptr_hardware || s.ptr_hidden > 0 || s.ptr_level < 0 || s.ptr_saved.is_some() {
         return;
     }
     let Some((at, img)) = placed(s, s.pointer) else { return };
+    let mut surface = screen(s);
     let mut saved = Vec::with_capacity((img.w * img.h) as usize);
     for y in 0..img.h {
         for x in 0..img.w {
-            saved.push(s.surface.get(at.x + x, at.y + y).unwrap_or(0));
+            saved.push(surface.get(at.x + x, at.y + y).unwrap_or(0));
         }
     }
-    let all = s.surface.bounds();
-    let mut surface = s.surface;
+    let all = surface.bounds();
     icon::draw(&mut surface, &[all], at.x, at.y, img, false);
     s.ptr_saved = Some((at, img.w, img.h, saved));
 }
 
 pub fn erase(s: &mut State) {
     let Some((at, w, h, saved)) = s.ptr_saved.take() else { return };
+    let mut surface = screen(s);
     let mut i = 0;
     for y in 0..h {
         for x in 0..w {
-            s.surface.set(at.x + x, at.y + y, saved[i]);
+            surface.set(at.x + x, at.y + y, saved[i]);
             i += 1;
         }
     }

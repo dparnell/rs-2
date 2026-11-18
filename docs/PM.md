@@ -274,7 +274,10 @@ shared by all of them): the caps, the bitmap formats with 8 bits first,
 the default palette shrinking, 8-bit pointer and system bitmaps. Taking
 PM's lock points the screen surface at the palette of the display the
 process sees (`gpiobj::own_palette`), so its pels get that palette's
-colours; every other process draws in true colour. Windows programs
+colours; every other process draws in true colour. The software pointer
+is drawn, and the pels under it saved and put back, in true colour
+whoever moves it (in a 256-colour palette they left a square of nearly
+the desktop's colour behind). Windows programs
 under WIN16.DLL follow it (WIN16 asks PM's `DevQueryCaps`).
 `WM_REALIZEPALETTE` still goes to every queue. Only 256 colours is
 offered: a 16-colour display is a different driver (IBM's VGA), whose
