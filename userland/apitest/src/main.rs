@@ -554,6 +554,19 @@ fn exceptions() {
             check("the guard page raises XCPT_GUARD_PAGE_VIOLATION to the handler", FAULTS == 111 && GUARD_AT == p as u32 + 0x1010 && GUARD_ACCESS == 2);
             core::ptr::write_volatile(p.add(0x1020), 8u8);
             check("only once, and the write went through", FAULTS == 111 && core::ptr::read_volatile(p.add(0x1010)) == 7);
+            // PAG_GUARD alone on a page already committed and in use (as
+            // Borland's C runtime makes its stack's guard page): it keeps
+            // its contents and raises the exception on the next touch
+            // (rs2 ignored PAG_GUARD without PAG_COMMIT).
+            let set = DosSetMem(p.add(0x1000), 0x1000, PAG_READ | PAG_WRITE | PAG_GUARD);
+            let (mut cb, mut fl) = (0x1000u32, 0u32);
+            let q = DosQueryMem(p.add(0x1000), &mut cb, &mut fl);
+            let kept = core::ptr::read_volatile(p.add(0x1010));
+            let faults = FAULTS;
+            check(
+                &alloc::format!("DosSetMem PAG_GUARD on a committed page: kept, a guard page (set {set}, query {q} flags {fl:#x}, value {kept}, faults {faults})"),
+                set == 0 && q == 0 && fl & PAG_GUARD != 0 && kept == 7 && faults == 211 && GUARD_AT == p as u32 + 0x1010,
+            );
             DosFreeMem(p);
         }
         check("DosUnsetExceptionHandler", DosUnsetExceptionHandler(&mut rec) == 0);

@@ -141,9 +141,16 @@ pub fn user_exception(f: &mut TrapFrame) {
                     // grows the stack down.
                     let info = [if write { 2 } else { 1 }, addr as u32];
                     if crate::api::exceptions::raise(f, &p, &t, crate::api::exceptions::xcpt::GUARD_PAGE_VIOLATION, 0, &info, f.rip as u32) {
+                        if crate::api::tracing() {
+                            crate::trace!("    guard page {addr:x} at {:x}: a handler took it", f.rip);
+                        }
                         return;
                     }
-                    if guard_default(&p, addr as u32, write) {
+                    let ok = guard_default(&p, addr as u32, write);
+                    if crate::api::tracing() {
+                        crate::trace!("    guard page {addr:x} at {:x}: the stack grows ({ok})", f.rip);
+                    }
+                    if ok {
                         return;
                     }
                 }
@@ -183,7 +190,11 @@ pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
     }
     let Some(t) = sched::current_opt() else { return false };
     let Some(p) = t.process() else { return false };
-    let r = p.space.lock().fault_in(addr as u32, error & 2 != 0);
+    let mut sp = p.space.lock();
+    let r = sp.fault_in(addr as u32, error & 2 != 0);
+    if r == Fault::Guard {
+        sp.guard_below(addr as u32 & !(vm::PAGE - 1));
+    }
     matches!(r, Fault::Resolved | Fault::Guard)
 }
 

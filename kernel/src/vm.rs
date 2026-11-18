@@ -776,6 +776,21 @@ impl AddressSpace {
             } else if flags & pag::COMMIT != 0 {
                 let st = if flags & pag::GUARD != 0 { PageState::Guard } else { PageState::Committed };
                 r.set_page_state(i as usize, st);
+            } else if flags & pag::GUARD != 0 && matches!(r.page_state(i as usize), PageState::Committed) {
+                // PAG_GUARD on a committed page (no PAG_COMMIT): it stays
+                // committed, its first touch raises the guard page
+                // exception. A page already mapped keeps its frame but not
+                // the user's access until then. Borland's C runtime makes
+                // the page below its stack's committed part the guard page
+                // so; rs2 ignored it and the stack never grew (Resource
+                // Workshop's SYS3175 in PMWIN).
+                r.set_page_state(i as usize, PageState::Guard);
+                if let Some(old) = paging::entry(root, va) {
+                    if old & PRESENT != 0 && old & USER != 0 {
+                        paging::set_entry(root, va, old & !USER);
+                        changed = true;
+                    }
+                }
             }
         }
         if flags & (pag::READ | pag::WRITE | pag::EXECUTE) != 0 && flags & pag::DECOMMIT == 0 {
@@ -831,6 +846,13 @@ impl AddressSpace {
             PageState::Reserved => return Fault::Invalid,
             PageState::Guard => {
                 r.set_page_state(i, PageState::Committed);
+                // A mapped page made a guard page (set_mem) gets the
+                // user's access back.
+                if let Some(e) = paging::entry(root, va) {
+                    if e & PRESENT != 0 && e & USER == 0 {
+                        paging::set_entry(root, va, e | USER);
+                    }
+                }
                 return Fault::Guard;
             }
             PageState::Committed => {}
@@ -862,6 +884,25 @@ impl AddressSpace {
         Fault::Resolved
     }
 
+    /// A guard page at `page` was committed: the page below it, if it is
+    /// in the same allocation and not committed, becomes the guard page,
+    /// as the default action for a guard page exception does (a stack
+    /// grows down so). Without this a guard page the kernel touched for a
+    /// program (an API writing into its stack) left uncommitted pages
+    /// below it with no guard: Borland's C runtime decommits its stack and
+    /// grows it by its guard page (Resource Workshop ended in SYS3175).
+    pub fn guard_below(&mut self, page: u32) {
+        let Some(below) = page.checked_sub(PAGE) else { return };
+        let Some(r) = self.region_mut(below) else { return };
+        if below < r.base {
+            return;
+        }
+        let i = ((below - r.base) / PAGE) as usize;
+        if matches!(r.page_state(i), PageState::Reserved) {
+            r.set_page_state(i, PageState::Guard);
+        }
+    }
+
     /// Check that `[addr, addr+len)` is accessible and fault it in, so the
     /// kernel can then touch it directly.
     pub fn check(&mut self, addr: u32, len: u32, write: bool) -> bool {
@@ -873,8 +914,13 @@ impl AddressSpace {
         while p < end {
             match self.fault_in(p, write) {
                 Fault::Resolved => {}
-                // Kernel touching a guard page commits it silently.
+                // Kernel touching a guard page commits it silently; the
+                // guard moves down.
                 Fault::Guard => {
+                    if crate::api::tracing() {
+                        crate::trace!("    guard page {p:x} touched by the kernel");
+                    }
+                    self.guard_below(p);
                     if self.fault_in(p, write) != Fault::Resolved {
                         return false;
                     }
