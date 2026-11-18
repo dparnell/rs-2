@@ -66,6 +66,10 @@ unsafe extern "C" {
     fn WinSetWindowText(h: u32, t: *const u8) -> u32;
     #[link_name = "PMWIN.875"]
     fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
+    #[link_name = "PMWIN.837"]
+    fn WinQueryWindowPos(h: u32, swp: *mut i32) -> u32;
+    #[link_name = "PMWIN.829"]
+    fn WinQuerySysValue(desk: u32, i: i32) -> i32;
     #[link_name = "PMWIN.899"]
     fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.918"]
@@ -320,6 +324,23 @@ fn entry_combo_checks(hab: u32, client: u32) {
     send(e, 0x0142, mp(10, 10), 0);
     send(e, 0x0147, 0, 0); // EM_PASTE
     check("EM_PASTE", text(e) == b"entry textentry");
+    unsafe { WinDestroyWindow(e) };
+    // ES_MARGIN: as IBM's entry field (WM_ADJUSTWINDOWPOS), the margin
+    // (3 border widths) goes around the place and size given, at
+    // creation and on every WinSetWindowPos (UltiMail's letter header
+    // fields came out 6 pixels short of their text).
+    let m = 3 * unsafe { WinQuerySysValue(1, 26) }; // SV_CXBORDER
+    let e = create(client, 6, b"margin", 0x0008, (20, 20, 100, 15), 114, null());
+    let mut swp = [0i32; 9];
+    unsafe { WinQueryWindowPos(e, swp.as_mut_ptr()) };
+    let created = (swp[4], swp[3], swp[2], swp[1]) == (20 - m, 20 - m, 100 + 2 * m, 15 + 2 * m);
+    unsafe { WinSetWindowPos(e, 0, 40, 30, 120, 15, 0x0003) };
+    unsafe { WinQueryWindowPos(e, swp.as_mut_ptr()) };
+    let moved = (swp[4], swp[3], swp[2], swp[1]) == (40 - m, 30 - m, 120 + 2 * m, 15 + 2 * m);
+    unsafe { WinSetWindowPos(e, 0, 50, 50, 0, 0, 0x0002) };
+    unsafe { WinQueryWindowPos(e, swp.as_mut_ptr()) };
+    let only_moved = (swp[4], swp[3], swp[2], swp[1]) == (50 - m, 50 - m, 120 + 2 * m, 15 + 2 * m);
+    check("ES_MARGIN: the margin goes around the position given (created, moved and sized, moved)", created && moved && only_moved);
     unsafe { WinDestroyWindow(e) };
     // At the text limit (32 without ENTRYFDATA) EN_OVERFLOW goes to the
     // owner; when it makes room the character goes in.

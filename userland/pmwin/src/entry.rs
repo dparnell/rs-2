@@ -42,9 +42,10 @@ const EN_SCROLL: u32 = 0x0008;
 const EN_OVERFLOW: u32 = 0x0020;
 const EN_INSERTMODETOGGLE: u32 = 0x0040;
 
-/// Margin drawn around ES_MARGIN fields (the window grows by it).
+/// Margin drawn around ES_MARGIN fields (the window grows by it): as
+/// IBM's, three border widths (SV_CXBORDER).
 fn margin() -> i32 {
-    crate::scale::px(3)
+    3 * crate::frame::border(crate::frame::FCF_BORDER)
 }
 
 wndproc! {
@@ -336,6 +337,28 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 if let Some(w) = st().desk.get(h) {
                     let (x, y, cx, cy) = (w.x - margin(), w.y - margin(), w.cx + 2 * margin(), w.cy + 2 * margin());
                     st().desk.set_pos(h, x, y, cx, cy);
+                }
+            }
+            0
+        }
+        // As IBM's entry field: an ES_MARGIN field's margin goes around
+        // the place and size it is given, so a WinSetWindowPos moves it
+        // out by the margin and grows it by both (the text keeps the
+        // size asked for; UltiMail's letter header fields).
+        crate::win::WM_ADJUSTWINDOWPOS if ctl::style(h) & ES_MARGIN != 0 && mp1 != 0 => {
+            const SWP_SIZE: u32 = 0x0001;
+            const SWP_MOVE: u32 = 0x0002;
+            let swp = mp1 as *mut i32;
+            let m = margin();
+            unsafe {
+                let fl = swp.read_unaligned() as u32;
+                if fl & SWP_MOVE != 0 {
+                    swp.add(3).write_unaligned(swp.add(3).read_unaligned() - m);
+                    swp.add(4).write_unaligned(swp.add(4).read_unaligned() - m);
+                }
+                if fl & SWP_SIZE != 0 {
+                    swp.add(1).write_unaligned(swp.add(1).read_unaligned() + 2 * m);
+                    swp.add(2).write_unaligned(swp.add(2).read_unaligned() + 2 * m);
                 }
             }
             0
