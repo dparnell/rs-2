@@ -314,7 +314,14 @@ fn popup_size(h: u32) -> (i32, i32) {
         hh += item_h();
     }
     let text_w = if wl > 0 || wr > 0 { 6 + px(22) + wl + if wr > 0 { px(24) + wr } else { 0 } + px(22) } else { 0 };
-    (text_w.max(wo + 6), hh)
+    // As IBM's MenuFormatMenu: an owner-drawn item is as wide as the
+    // owner measured it plus the check mark's column (SBMP_MENUCHECK's
+    // width), and the menu's right-hand column is at least as wide as
+    // the submenu arrow (SBMP_MENUATTACHED's). UltiMail's Windows menu
+    // draws its window titles to the edge it is given and lost their
+    // ends.
+    let owner_w = if wo > 0 { wo + 2 * px(12) } else { 0 };
+    (text_w.max(owner_w + 6), hh)
 }
 
 /// Where a menu's owner-draw notifications go: the first owner up the
