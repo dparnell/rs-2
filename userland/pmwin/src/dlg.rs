@@ -120,15 +120,21 @@ fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
 
 pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32 {
     let parent = if parent == 0 { HWND_DESKTOP } else { parent };
-    // The actual owner is the ancestor of hwndOwner that is a child of
-    // the dialog's parent (a client window's frame, for a dialog on the
-    // desktop).
+    // The actual owner is the ancestor of hwndOwner (or hwndOwner) that
+    // is a child of the dialog's parent (a client window's frame, for a
+    // dialog on the desktop); without one it is NULLHANDLE, as in IBM's
+    // dialog manager. UltiMail's text viewer loads its dialog with its
+    // parent as owner and posts to the owner, so to its own queue.
     let mut owner = owner;
-    while owner != 0 && st().desk.get(owner).is_some_and(|w| w.parent != parent && w.parent != 0) {
-        owner = ctl::parent(owner);
-    }
-    if !st().desk.exists(owner) {
-        owner = 0;
+    loop {
+        match st().desk.get(owner) {
+            Some(w) if w.parent == parent => break,
+            Some(w) if w.parent != 0 => owner = w.parent,
+            _ => {
+                owner = 0;
+                break;
+            }
+        }
     }
     // A template whose window is not a frame (PMREXXIO's input line is
     // an entry field): that class, subclassed by the dialog procedure,

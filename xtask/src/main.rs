@@ -480,7 +480,9 @@ fn main() -> ExitCode {
         "disk" => {
             // A test hard disk from work/disk.txt (same manifest format);
             // with --system, an installed system: the ESP tree plus the
-            // boot volume files in one bootable FAT partition.
+            // boot volume files (all that C.IMG holds: with --dist
+            // dist/manifest.txt's, and then work/modules.txt's as extras)
+            // in one bootable FAT partition.
             let mut files = std::fs::read_to_string(root().join("work/disk.txt"))
                 .map(|t| image::manifest(&root(), &t))
                 .unwrap_or_default();
@@ -489,14 +491,15 @@ fn main() -> ExitCode {
                 files.clear();
                 walk(&esp, "", &mut files);
                 files.retain(|(_, d)| !d.ends_with("C.IMG"));
-                // What the installer puts on the disk: the boot volume
-                // (C.IMG's files: with --dist rs2's own, the manifest's
-                // fonts, CONFIG.SYS and the rest), then work/modules.txt's
-                // on top (with --dist; without, the boot volume is made
-                // from it already).
-                files.extend(boot_volume(&o, &esp, build_userland().unwrap_or_default()).unwrap_or_default());
-                if o.dist && let Ok(t) = std::fs::read_to_string(root().join("work/modules.txt")) {
-                    files.extend(image::manifest(&root(), &t));
+                match boot_volume(&o, &esp) {
+                    Some(Some(v)) => files.extend(v),
+                    Some(None) => return ExitCode::FAILURE,
+                    None => files.extend(build_userland().unwrap_or_default()),
+                }
+                if o.dist {
+                    if let Ok(t) = std::fs::read_to_string(root().join("work/modules.txt")) {
+                        files.extend(image::manifest(&root(), &t));
+                    }
                 }
             }
             let out = o.output.clone().unwrap_or_else(|| root().join("work/disk.img"));
@@ -591,10 +594,10 @@ fn build(o: &Opts) -> Option<PathBuf> {
         std::fs::create_dir_all(esp.join("RS2")).unwrap();
         std::fs::write(f, line).unwrap();
     }
-    // rs2 user programs (Rust, i686) converted to LX.
-    let userland = build_userland()?;
-    if let Some(files) = boot_volume(o, &esp, userland) {
-        let img = image::build(&files, "RS2", 16, None);
+    // Drive C: as a FAT image built from work/modules.txt (development)
+    // or dist/manifest.txt (distribution: rs2's own files only).
+    if let Some(files) = boot_volume(o, &esp) {
+        let img = image::build(&files?, "RS2", 16, None);
         let out = esp.join("RS2/MODULES/C.IMG");
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
         std::fs::write(&out, img).unwrap();
@@ -602,36 +605,36 @@ fn build(o: &Opts) -> Option<PathBuf> {
     Some(esp)
 }
 
-/// The boot volume's files (drive C:, C.IMG in the ESP, what the
-/// installer copies): from work/modules.txt (development) or
-/// dist/manifest.txt (distribution: rs2's own files only), with rs2's
-/// programs (`userland`), interface repositories and the rest.
-fn boot_volume(o: &Opts, esp: &Path, userland: image::FileList) -> Option<image::FileList> {
-    // Drive C: as a FAT image built from work/modules.txt (development)
-    // or dist/manifest.txt (distribution: rs2's own files only).
+/// The files of the boot volume (C.IMG, and an installed system's drive
+/// for `disk --system`): rs2's user programs, the interface repositories,
+/// the files work/modules.txt (development) or dist/manifest.txt (`--dist`)
+/// lists, and the rest. None when that list does not exist; Some(None)
+/// when a part failed to build.
+fn boot_volume(o: &Opts, esp: &Path) -> Option<Option<image::FileList>> {
     let list = if o.dist { root().join("dist/manifest.txt") } else { root().join("work/modules.txt") };
-    if let Ok(text) = std::fs::read_to_string(&list) {
-        // rs2's interface repositories (first, so that a modules.txt line
-        // can put another in its place).
-        let mut files = interface_repositories();
-        files.extend(image::manifest(&root(), &text));
-        files.extend(userland);
-        files.extend(win16_tests());
-        files.extend(four_os2(o.dist)?);
-        files.extend(firmware());
-        if !o.dist {
-            files.extend(dos_tests());
-        }
-        // The version the installer shows (and an update compares).
-        let version = root().join("target/rs2-version.txt");
-        std::fs::write(&version, version_text()).unwrap();
-        files.push((version, "RS2\\VERSION".to_string()));
-        // Boot files for the installer.
-        files.push((esp.join("EFI/BOOT/BOOTX64.EFI"), "RS2\\BOOT\\BOOTX64.EFI".to_string()));
-        files.push((esp.join("RS2/KERNEL"), "RS2\\BOOT\\KERNEL".to_string()));
-        return Some(files);
+    let text = std::fs::read_to_string(&list).ok()?;
+    // rs2 user programs (Rust, i686) converted to LX.
+    let Some(userland) = build_userland() else { return Some(None) };
+    // rs2's interface repositories (first, so that a modules.txt line
+    // can put another in its place).
+    let mut files = interface_repositories();
+    files.extend(image::manifest(&root(), &text));
+    files.extend(userland);
+    files.extend(win16_tests());
+    let Some(four) = four_os2(o.dist) else { return Some(None) };
+    files.extend(four);
+    files.extend(firmware());
+    if !o.dist {
+        files.extend(dos_tests());
     }
-    None
+    // The version the installer shows (and an update compares).
+    let version = root().join("target/rs2-version.txt");
+    std::fs::write(&version, version_text()).unwrap();
+    files.push((version, "RS2\\VERSION".to_string()));
+    // Boot files for the installer.
+    files.push((esp.join("EFI/BOOT/BOOTX64.EFI"), "RS2\\BOOT\\BOOTX64.EFI".to_string()));
+    files.push((esp.join("RS2/KERNEL"), "RS2\\BOOT\\KERNEL".to_string()));
+    Some(Some(files))
 }
 
 /// rs2's interface repositories (`\OS2\ETC\SOM.IR`, `WPSH.IR`, ...),
@@ -775,8 +778,6 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("arp", "OS2\\ARP.EXE"),
         ("hostname", "OS2\\HOSTNAME.EXE"),
         ("powercfg", "OS2\\POWERCFG.EXE"),
-        // Plays a mail program to the WarpCenter's mail indicator.
-        ("newmail", "RS2\\NEWMAIL.EXE"),
         ("host", "OS2\\HOST.EXE"),
         ("ftp", "OS2\\FTP.EXE"),
         ("ftpd", "OS2\\FTPD.EXE"),

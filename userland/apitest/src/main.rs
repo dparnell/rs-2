@@ -395,6 +395,28 @@ fn files() {
         check("DosDelete", DosDelete(b"C:\\APITEST.TMP\0".as_ptr()) == 0);
         check("DosCreateDir", DosCreateDir(b"C:\\APIDIR\0".as_ptr(), null_mut()) == 0);
         check("DosDeleteDir", DosDeleteDir(b"C:\\APIDIR\0".as_ptr()) == 0);
+        // Code page characters in a FAT 8.3 name (UltiMail's mail store
+        // names files with bytes 0xE0..0xED): created, found and given
+        // back as those bytes, not UTF-8.
+        let cp = b"C:\\E0G\xe7\xeb.{\xed-\0";
+        let mut hf = 0;
+        let mut action = 0;
+        let rc = DosOpen(cp.as_ptr(), &mut hf, &mut action, 0, 0, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYNONE, null_mut());
+        if rc == 0 {
+            DosClose(hf);
+        }
+        let mut full = [0u8; 64];
+        let q = DosQueryPathInfo(cp.as_ptr(), 5, full.as_mut_ptr(), full.len() as u32);
+        let mut fb: FileFindBuf3 = core::mem::zeroed();
+        let mut hdir = HDIR_CREATE;
+        let mut count = 1;
+        let f = DosFindFirst(b"C:\\E0G*.*\0".as_ptr(), &mut hdir, 0, &mut fb as *mut _ as *mut u8, core::mem::size_of::<FileFindBuf3>() as u32, &mut count, FIL_STANDARD);
+        DosFindClose(hdir);
+        check(
+            "a FAT name with code page characters: DosOpen, DosQueryPathInfo FIL_QUERYFULLNAME and DosFindFirst give its bytes",
+            rc == 0 && q == 0 && full[..cp.len()] == cp[..] && f == 0 && fb.name[..fb.cch_name as usize] == cp[3..cp.len() - 1],
+        );
+        check("and DosDelete takes it", DosDelete(cp.as_ptr()) == 0);
     }
 }
 
@@ -445,7 +467,30 @@ fn threads_and_sems() {
         check("release unowned mutex fails", DosReleaseMutexSem(hmtx) == 288);
         DosCloseMutexSem(hmtx);
         DosCloseEventSem(hev);
+
+        // A post satisfies the wait of a thread it woke even when the
+        // poster closes the semaphore before that thread runs again
+        // (UltiMail's worker threads post and close at once; rs2 gave the
+        // waiter ERROR_INVALID_HANDLE).
+        let mut hev = 0;
+        DosCreateEventSem(null(), &mut hev, 0, 0);
+        HEV = hev;
+        POSTED_WAIT.store(0xffff, Ordering::Relaxed);
+        let mut t = 0;
+        DosCreateThread(&mut t, post_waiter, 0, 0, 16384);
+        DosSleep(200);
+        let post = DosPostEventSem(hev);
+        let close = DosCloseEventSem(hev);
+        DosWaitThread(&mut t, DCWW_WAIT);
+        check("DosPostEventSem then DosCloseEventSem: the woken waiter gets NO_ERROR", post == 0 && close == 0 && POSTED_WAIT.load(Ordering::Relaxed) == 0);
     }
+}
+
+static POSTED_WAIT: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn post_waiter(_: u32) {
+    let rc = unsafe { DosWaitEventSem(HEV, 5000) };
+    POSTED_WAIT.store(rc, Ordering::Relaxed);
 }
 
 static mut FAULTS: u32 = 0;

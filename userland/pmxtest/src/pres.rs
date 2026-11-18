@@ -100,6 +100,15 @@ pub fn pres_checks(client: u32) {
     unsafe { WinRemovePresParam(client, PP_FONTNAMESIZE) };
     check("WinGetPS: the window's PP_FONTNAMESIZE font", em >= 20 && fm != plain.1 && ps_font(client).1 == plain.1);
 
+    // A font the system does not have is kept all the same (IBM's
+    // SetPresParam does not look at it; UltiMail sets its saved faces), and
+    // the window paints in the default font.
+    let ok = unsafe { WinSetPresParam(client, PP_FONTNAMESIZE, 16, b"10.No Such Face\0".as_ptr()) } != 0;
+    let (n, _, b) = query(client, PP_FONTNAMESIZE, 0, QPF_NOINHERIT);
+    let same = ps_font(client).1 == plain.1;
+    unsafe { WinRemovePresParam(client, PP_FONTNAMESIZE) };
+    check("WinSetPresParam keeps an unknown font name (the default font is used)", ok && n == 16 && b.starts_with(b"10.No Such Face") && same);
+
     // Owned windows take it, unless they have it themselves.
     let kid = unsafe { WinCreateWindow(client, b"PmxTest\0".as_ptr(), null(), 0x8000_0000, 300, 200, 40, 40, client, 3, 70, null(), null()) };
     let (n, _, b) = query(kid, PP_USER + 1, 0, 0);

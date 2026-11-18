@@ -176,6 +176,26 @@ pub fn checks(hab: u32, owner: u32) {
         );
         check("the window's own thread can", WinDestroyWindow(d) != 0 && WinIsWindow(hab, d) == 0);
 
+        // The actual owner (IBM's dialog manager): the requested owner's
+        // ancestor that is a child of the dialog's parent, else NULLHANDLE
+        // (UltiMail's text viewer, a dialog inside its owner, posts to
+        // its owner and so to its own queue).
+        unsafe extern "C" {
+            #[link_name = "PMWIN.834"]
+            fn WinQueryWindow(h: u32, cmd: i32) -> u32;
+        }
+        let frame = WinQueryWindow(owner, 5); // QW_PARENT: the client's frame
+        let d4 = WinCreateDlg(1, owner, 0, t.as_ptr(), 0);
+        let on_desktop = WinQueryWindow(d4, 4); // QW_OWNER
+        WinDestroyWindow(d4);
+        let d5 = WinCreateDlg(owner, owner, 0, t.as_ptr(), 0);
+        let inside = WinQueryWindow(d5, 4);
+        WinDestroyWindow(d5);
+        check(
+            &alloc::format!("dialog owners: a client's frame for one on the desktop, NULLHANDLE for one inside its owner ({on_desktop:#x}, frame {frame:#x}; {inside:#x})"),
+            on_desktop == frame && inside == 0,
+        );
+
         // The dialog procedure is there when the controls are made: an
         // owner-drawn list box asks it how high its items are first.
         let t3 = template_with(FS_DLGBORDER, 7, 0x8000_0000 | 0x0002);

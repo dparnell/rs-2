@@ -774,11 +774,28 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
         apply_shell_position(h);
     }
     // Minimize, maximize and restore (frames): they size the window.
+    let mut restore_moves = false;
     let fl = if st().frames.contains_key(&h) && fl & (frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE) != 0 {
         let normal = st().desk.get(h).is_some_and(|w| w.style & (ws::MINIMIZED | ws::MAXIMIZED) == 0);
+        // As IBM's FrameMinMax: minimizing or maximizing a frame in its
+        // normal state remembers its rectangle as the restore position,
+        // with SWP_MOVE's x, y and SWP_SIZE's cx, cy in place of its own
+        // (UltiMail minimizes its hidden main window so, with the shell's
+        // position, and later restores it there).
+        let restore_at = st().desk.get(h).filter(|_| normal && fl & (SWP_MOVE | SWP_SIZE) != 0).map(|w| {
+            let (px, py) = if fl & SWP_MOVE != 0 { (x, y) } else { (w.x, w.y) };
+            let (pcx, pcy) = if fl & SWP_SIZE != 0 { (cx, cy) } else { (w.cx, w.cy) };
+            (px, py, pcx, pcy)
+        });
         if fl & frame::SWP_MINIMIZE != 0 {
             frame::minimize(h);
+            if let Some(r) = restore_at {
+                frame::set_restore_pos(h, r);
+            }
         } else if fl & frame::SWP_MAXIMIZE != 0 {
+            if let Some(r) = restore_at {
+                frame::set_restore_pos(h, r);
+            }
             frame::maximize(h, true);
         } else if normal {
             // Restoring a frame that is neither minimized nor maximized
@@ -787,8 +804,11 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
             return WinSetWindowPos(h, behind, x, y, cx, cy, fl & !frame::SWP_RESTORE);
         } else {
             frame::restore(h);
+            // SWP_MOVE and SWP_SIZE put the restored frame where they say
+            // instead of where it was (IBM's FrameMinMax).
+            restore_moves = true;
         }
-        fl & !(SWP_MOVE | SWP_SIZE)
+        if restore_moves { fl } else { fl & !(SWP_MOVE | SWP_SIZE) }
     } else {
         fl
     };

@@ -173,6 +173,29 @@ fn work_area_checks(frame: u32) {
     );
 }
 
+/// WinEnableWindowUpdate sets WS_VISIBLE to its argument (IBM's PMWIN):
+/// UltiMail creates its In-basket container without WS_VISIBLE and shows
+/// it with WinEnableWindowUpdate(TRUE).
+fn enable_update_checks(hab: u32, client: u32) {
+    unsafe extern "C" {
+        #[link_name = "PMWIN.736"]
+        fn WinEnableWindowUpdate(h: u32, on: u32) -> u32;
+        #[link_name = "PMWIN.775"]
+        fn WinIsWindowVisible(h: u32) -> u32;
+    }
+    // WC_STATIC (SS_TEXT), not visible.
+    let st = unsafe { WinCreateWindow(client, 0xffff_0005 as *const u8, b"hidden\0".as_ptr(), 0x0001, 10, 10, 80, 20, client, 3, 77, core::ptr::null(), core::ptr::null()) };
+    let style = |h: u32| unsafe { WinQueryWindowULong(h, -2) } & 0x8000_0000;
+    let hidden = style(st) == 0 && unsafe { WinIsWindowVisible(st) } == 0;
+    let on = unsafe { WinEnableWindowUpdate(st, 1) } != 0;
+    pump(hab);
+    let shown = style(st) != 0 && unsafe { WinIsWindowVisible(st) } != 0;
+    let off = unsafe { WinEnableWindowUpdate(st, 0) } != 0;
+    let gone = style(st) == 0;
+    unsafe { WinDestroyWindow(st) };
+    check("WinEnableWindowUpdate: TRUE sets WS_VISIBLE (a window made without it shows), FALSE clears it", hidden && on && shown && off && gone);
+}
+
 fn main(s: &Startup) -> u32 {
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
@@ -225,6 +248,7 @@ fn main(s: &Startup) -> u32 {
     }
     if args.is_empty() {
         work_area_checks(frame);
+        enable_update_checks(hab, client);
     }
     if args.starts_with(b"CHILD") {
         let r = hooks::child(hab, client);

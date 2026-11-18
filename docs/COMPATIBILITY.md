@@ -526,6 +526,70 @@ DLLs) are not on the media, so rs2's own utilities take their place
 | PING.EXE (TCP/IP's) | starts | A DOS program (runs in a DOS session); rs2's own PING is the OS/2 one. |
 | SENDMAIL.EXE | not tried | `-?` did not return within the test's time. |
 
+### UltiMail Lite (Warp 4 CD)
+
+IBM's TCP/IP mail client from the Warp 4 CD (`OS2WARP4-EN.iso`,
+`CID\IMG\TCPAPPS\UMAIL1.ZIP` and `UMAIL2.ZIP`; not on the Warp 4.52
+media), on a system disk with only rs2's files (`cargo xtask disk
+--system --dist`). Installed as IBM's TCP/IP installer does it: the two
+ZIPs unpacked into `C:\TCPIP` (`UMAIL`, `HELP`, `BIN\DSKUMLT.TCP`), then
+the kit's exit `UMLITEXT.EXE` run with the installer's environment
+(`TARGET_PATH=C:\TCPIP`, `BOOT_DRIVE`, `HOSTNAME`, `DNS_DOMAIN`), then
+UltiMail's `MAKEWPS.CMD` (the desktop objects; UMLITEXT leaves it for the
+next start). The mail user and the POP server are set in TCPCFG2's Mail
+tab (or `TCPCFG2 MAILUSER=test POPSERVER=10.0.2.100 POPID=test
+POPPASSWORD=secret REPLYDOMAIN=example.com`), as on Warp 4. The test
+server is `tools/scripts/pop3host.py` on the host (POP3 and an SMTP
+receiver), reached as 10.0.2.100 through `--guestfwd
+"tcp:10.0.2.100:110-cmd:nc 127.0.0.1 1110"`.
+
+| Part | Status | Notes |
+|------|--------|-------|
+| UMLITEXT.EXE (the install exit) | works | Writes `UMAIL.PRO`, `UMAILSRV.PRO`, `\OS2\UMAIL.INI`, the mail store and `%ETC%\TCPOS2.INI` (LAN/MAIL_STORE). |
+| MAKEWPS.CMD | works | Registers `IBMUmailWPS` (UMAILWPS.DLL) and makes the "Ultimedia Mail/2 Lite" folder with the In-basket, Mail Cabinet, New Letter, Names and Addresses and Information objects (the folder goes on the desktop: there is no `<IAK>` folder, IBM's script falls back so). |
+| In-basket object | works | Starts `UMAIL.EXE /HIDE` and opens the In-basket; first time, UltiMail asks for the user's name and its own password; the In-basket fetches the mail over POP3 (USER, PASS, STAT, RETR, DELE, QUIT) and lists it; letters open with their header and text, and stay in the mail store across restarts. |
+| New Letter object | works | Opens an empty letter (To, Cc, Subject, the SentMail folder). Sending not tried. |
+| Names and Addresses object | works | Opens the nickname notebook (its index, New Person, New Group). |
+| Letter window | partial | The header fields (From, Subject) are drawn too short and their text is cut; the tool bar (IBM's UCMENUS control: a WC_MENU whose bitmap items it measures and draws itself) is black. |
+| In-basket list | partial | The Date and Icon column titles and values are cut short. |
+| Windows menu | partial | "Address Book" is cut to "Address Boo" (its items have icons). |
+| UMAIL.EXE started by hand after a session | partial | Its main window, saved minimized (hidden in the Minimized Window Viewer), comes back drawn as a large icon at its full size; restoring it works. |
+
+What it needed from rs2 (each with its check):
+
+- **TCPCFG2's Mail tab**: IBM's notebook (CNBMAIL.DLL) keeps the mail
+  user and the POP server in `%ETC%\TCPOS2.INI`, application `LAN`
+  (LOGIN_ID, POPSRVR, POP_ID, POP_PWD, REPLY_DOMAIN, MAIL_USE_LAN
+  YES/NO/BOTH, PROMPT, PROMPT_POP, MULTI_USER, MAIL_STORE); UltiMail takes
+  its user from there and loops in its "missing information" dialog
+  without it ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications)).
+- **`xtask disk --system`** puts the whole boot volume on the disk (it
+  had no `%ETC%` and no SOM interface repositories).
+- **WPObject's wpScanSetupString** (WPSTEST): UltiMail's objects read
+  `MAILTYPE` with it; without it every object opened the Mail Cabinet.
+- **Event semaphores** (APITEST): a post that woke a waiting thread
+  satisfies its wait even if the poster closes the semaphore before the
+  thread runs; UltiMail's worker threads post and close at once.
+- **Frames** (SHELLTST): minimizing or maximizing a frame with SWP_MOVE
+  and SWP_SIZE makes those its restore position, and SWP_RESTORE with
+  them restores there (IBM's FrameMinMax); UltiMail's hidden main window
+  stayed 0x0 and invisible.
+- **WinEnableWindowUpdate** sets WS_VISIBLE (PMXTEST): the In-basket's
+  container is made invisible and shown so.
+- **Dialog owners** (CTLTEST): the requested owner's ancestor that is a
+  child of the dialog's parent, else NULLHANDLE.
+- **The MLE** sends no MLN_CHANGE when its window text is set (CTLTEST):
+  UltiMail's text viewer copied the cleared MLE into the letter.
+- **File names with code page characters** (fat unit test, APITEST):
+  UltiMail's mail store names files with bytes 0xE0..0xED; FAT measured
+  them as UTF-8 and the kernel gave names back to programs as UTF-8.
+- **WinSetPresParam** keeps a font name the system does not have, as
+  IBM's does (PMXTEST).
+
+![UltiMail Lite's In-basket on rs2](images/rs2-ultimail-inbasket.png)
+
+![A letter fetched over POP3, open in UltiMail Lite](images/rs2-ultimail-letter.png)
+
 rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, LPD, FINGER,
 TFTP, TFTPD, REXEC, REXECD, RSH, RSHD, TALK, TALKD and TCP/IP
 Configuration notebook (TCPCFG2),

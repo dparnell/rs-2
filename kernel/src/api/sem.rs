@@ -372,9 +372,17 @@ pub fn dos_wait_event_sem(c: &mut Ctx) -> u32 {
     if ms == 0 {
         return if take_event(&s, g0) { 0 } else { ERROR_TIMEOUT };
     }
+    // A post that woke the thread satisfies its wait even if the semaphore
+    // is closed before the thread runs again (the poster closing its handle
+    // right after posting: UltiMail's worker threads), as on OS/2; only a
+    // close with nothing posted ends the wait with ERROR_INVALID_HANDLE.
     let closed = || s.closed.load(core::sync::atomic::Ordering::Acquire);
-    if s.waiters.wait_until(deadline(ms), || closed() || take_event(&s, g0)) {
-        if closed() { err::INVALID_HANDLE } else { 0 }
+    let mut got = false;
+    if s.waiters.wait_until(deadline(ms), || {
+        got = take_event(&s, g0);
+        got || closed()
+    }) {
+        if got { 0 } else { err::INVALID_HANDLE }
     } else if c.thread.exit_requested() || c.thread.interrupted() {
         err::INTERRUPT
     } else {
@@ -441,11 +449,12 @@ pub fn dos_request_mutex_sem(c: &mut Ctx) -> u32 {
     }
     let mut result = None;
     s.waiters.wait_until(deadline(ms), || {
-        if s.closed.load(core::sync::atomic::Ordering::Acquire) {
-            result = Some(err::INVALID_HANDLE);
-            return true;
-        }
+        // A release that woke the thread hands it the mutex even if the
+        // semaphore is closed before it runs (as an event's post, above).
         result = try_mutex(&s, me);
+        if result.is_none() && s.closed.load(core::sync::atomic::Ordering::Acquire) {
+            result = Some(err::INVALID_HANDLE);
+        }
         result.is_some()
     });
     match result {
