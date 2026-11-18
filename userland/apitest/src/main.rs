@@ -445,7 +445,30 @@ fn threads_and_sems() {
         check("release unowned mutex fails", DosReleaseMutexSem(hmtx) == 288);
         DosCloseMutexSem(hmtx);
         DosCloseEventSem(hev);
+
+        // A post satisfies the wait of a thread it woke even when the
+        // poster closes the semaphore before that thread runs again
+        // (UltiMail's worker threads post and close at once; rs2 gave the
+        // waiter ERROR_INVALID_HANDLE).
+        let mut hev = 0;
+        DosCreateEventSem(null(), &mut hev, 0, 0);
+        HEV = hev;
+        POSTED_WAIT.store(0xffff, Ordering::Relaxed);
+        let mut t = 0;
+        DosCreateThread(&mut t, post_waiter, 0, 0, 16384);
+        DosSleep(200);
+        let post = DosPostEventSem(hev);
+        let close = DosCloseEventSem(hev);
+        DosWaitThread(&mut t, DCWW_WAIT);
+        check("DosPostEventSem then DosCloseEventSem: the woken waiter gets NO_ERROR", post == 0 && close == 0 && POSTED_WAIT.load(Ordering::Relaxed) == 0);
     }
+}
+
+static POSTED_WAIT: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn post_waiter(_: u32) {
+    let rc = unsafe { DosWaitEventSem(HEV, 5000) };
+    POSTED_WAIT.store(rc, Ordering::Relaxed);
 }
 
 static mut FAULTS: u32 = 0;
