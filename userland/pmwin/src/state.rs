@@ -130,7 +130,7 @@ pub struct Drag {
 }
 
 /// A message sent to a window of another thread.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Sent {
     pub id: u32,
     pub hwnd: u32,
@@ -142,6 +142,10 @@ pub struct Sent {
     /// The sender waits for the result (a send from the PM server does
     /// not: it never blocks on an application).
     pub reply: bool,
+    /// The copy of mp1's SWPs (WM_ADJUSTWINDOWPOS, WM_WINDOWPOSCHANGED)
+    /// in the shared heap that the message owns: a sender that does not
+    /// wait has no stack left for the receiver to read.
+    pub own: Option<alloc::vec::Vec<u32>>,
 }
 
 pub struct AccelTable {

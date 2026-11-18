@@ -178,8 +178,25 @@ fn deliver(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     s.next_sent = s.next_sent.wrapping_add(1).max(1);
     // The PM server never waits for an application.
     let reply = !s.is_server();
+    // SWPs in the sender's memory go to another process as a copy in
+    // the shared heap (the server's drag of OWL PAINT's palette sent its
+    // stack's address, and OWL's frame trapped reading it).
+    let swps = match msg {
+        WM_ADJUSTWINDOWPOS => 9,
+        WM_WINDOWPOSCHANGED => 18,
+        _ => 0,
+    };
+    let mut copy: Option<alloc::vec::Vec<u32>> = None;
+    let mut sent_mp1 = mp1;
+    if swps != 0 && mp1 != 0 && s.queues.get(&q).is_some_and(|x| x.pid != pid()) {
+        let mut v: alloc::vec::Vec<u32> = (0..swps).map(|i| unsafe { (mp1 as *const u32).add(i).read_unaligned() }).collect();
+        sent_mp1 = v.as_mut_ptr() as u32;
+        copy = Some(v);
+    }
+    let own = if reply { None } else { copy.take() };
+    let s = st();
     if let Some(queue) = s.queues.get_mut(&q) {
-        queue.sent.push_back(Sent { id, hwnd: h, msg, mp1, mp2, from: mine, reply });
+        queue.sent.push_back(Sent { id, hwnd: h, msg, mp1: sent_mp1, mp2, from: mine, reply, own });
         queue.msgs.arrived(now());
     }
     s.wake.insert(q);
@@ -190,6 +207,11 @@ fn deliver(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let r = wait_reply(q, mine, id);
     if let Some(x) = st().queues.get_mut(&mine) {
         x.awaiting = before;
+    }
+    if let Some(v) = copy {
+        for (i, w) in v.iter().enumerate() {
+            unsafe { (mp1 as *mut u32).add(i).write_unaligned(*w) };
+        }
     }
     r
 }
@@ -293,11 +315,11 @@ pub extern "C" fn WinThreadAssocQueue(_hab: u32, hmq: u32) -> u32 {
 /// NULLHANDLE), in pqmsg; its handle, or 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQuerySendMsg(_hab: u32, from: u32, to: u32, pq: *mut QMsg) -> u32 {
-    let Some(m) = st().queues.get(&to).and_then(|q| q.sent.iter().find(|m| from == 0 || m.from == from).copied()) else { return 0 };
+    let Some(m) = st().queues.get(&to).and_then(|q| q.sent.iter().find(|m| from == 0 || m.from == from).map(|m| (m.hwnd, m.msg, m.mp1, m.mp2, m.id))) else { return 0 };
     if !pq.is_null() {
-        unsafe { pq.write_unaligned(qmsg(m.hwnd, m.msg, m.mp1, m.mp2)) };
+        unsafe { pq.write_unaligned(qmsg(m.0, m.1, m.2, m.3)) };
     }
-    m.id
+    m.4
 }
 
 /// WinReplyMsg(hab, hmqSender, hmqReceiver, mresult): answer the oldest

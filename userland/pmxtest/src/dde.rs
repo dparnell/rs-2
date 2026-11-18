@@ -21,6 +21,8 @@ const WM_DDE_EXECUTE: u32 = 0xa7;
 const WM_DDE_TERMINATE: u32 = 0xa8;
 const WM_DDE_INITIATEACK: u32 = 0xa9;
 const WM_QUIT: u32 = 0x002a;
+const WM_ADJUSTWINDOWPOS: u32 = 0x0008;
+const WM_WINDOWPOSCHANGED: u32 = 0x0055;
 
 const DDE_FACK: u16 = 0x0001;
 const DDE_FRESPONSE: u16 = 0x0010;
@@ -110,6 +112,22 @@ static SERVER: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::
 
 fn server_msg(h: u32, msg: u32, mp1: u32, mp2: u32) -> Option<u32> {
     match msg {
+        // The client moves this window: the SWPs come as a copy this
+        // process can read, and WM_ADJUSTWINDOWPOS's changes go back.
+        WM_ADJUSTWINDOWPOS => {
+            let s = mp1 as *mut u32;
+            if unsafe { s.add(6).read_unaligned() == h && s.add(4).read_unaligned() == 7 && s.add(3).read_unaligned() == 9 } {
+                unsafe { s.add(2).write_unaligned(77) };
+            }
+            Some(0)
+        }
+        WM_WINDOWPOSCHANGED => {
+            let s = mp1 as *const u32;
+            if unsafe { s.add(6).read_unaligned() == h && s.add(4).read_unaligned() == 7 && s.add(2).read_unaligned() == 77 } {
+                unsafe { WinSetWindowText(h, b"moved\0".as_ptr()) };
+            }
+            Some(0)
+        }
         WM_DDE_INITIATE => {
             let p = mp2 as *const u32;
             let (app, topic) = unsafe { (cstr(*p.add(1) as *const u8), cstr(*p.add(2) as *const u8)) };
@@ -208,6 +226,16 @@ pub fn dde_checks(hab: u32, client: u32) {
     unsafe { DosFreeMem(exec) };
     let a = wait_for(hab, WM_DDE_ACK);
     check("WM_DDE_EXECUTE acknowledged (DDEPM_NOFREE keeps the block)", still && a.is_some_and(|a| a.2 == DDE_FACK | 6 << 8));
+    // Another process's window moved from here (as the PM server moves
+    // a frame dragged by its title bar): its window procedure reads the
+    // SWPs (OWL PAINT's palette trapped on the sender's stack address).
+    unsafe { WinSetWindowPos(server, 0, 7, 9, 30, 40, SWP_MOVE | SWP_SIZE) };
+    let mut swp = [0i32; 9];
+    unsafe { WinQueryWindowPos(server, swp.as_mut_ptr()) };
+    let mut text = [0u8; 16];
+    let n = unsafe { WinQueryWindowText(server, 16, text.as_mut_ptr()) };
+    check("WinSetWindowPos of another process's window: its WM_ADJUSTWINDOWPOS reads and changes the SWP", swp[4] == 7 && swp[3] == 9 && swp[2] == 77);
+    check("and its WM_WINDOWPOSCHANGED reads the new position", &text[..n.max(0) as usize] == b"moved");
     unsafe { WinDdePostMsg(server, client, WM_DDE_TERMINATE, null_mut(), 0) };
     let t = wait_for(hab, WM_DDE_TERMINATE);
     check("WM_DDE_TERMINATE answered", t.is_some_and(|t| t.1 == server));

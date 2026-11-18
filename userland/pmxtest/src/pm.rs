@@ -117,11 +117,15 @@ unsafe extern "C" {
     pub fn WinQueryWindowULong(h: u32, i: i32) -> u32;
     #[link_name = "PMWIN.864"]
     pub fn WinSetOwner(h: u32, owner: u32) -> u32;
+    #[link_name = "PMWIN.877"]
+    pub fn WinSetWindowText(h: u32, text: *const u8) -> u32;
     #[link_name = "PMWIN.875"]
     pub fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;
+pub const SWP_SIZE: u32 = 0x0001;
+pub const SWP_MOVE: u32 = 0x0002;
 pub const WM_USER: u32 = 0x1000;
 pub const WM_TIMER: u32 = 0x0024;
 pub const WM_CHAR: u32 = 0x007a;
