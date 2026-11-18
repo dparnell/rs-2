@@ -119,6 +119,12 @@ What is already done, by milestone. What is still to do is in
 - done: APM$ power events for programs as APM.SYS keeps them (event
   semaphores and queues per handle, broadcasts, the daemon's
   confirmation); suspend and standby are refused
+- done: battery and AC adapter status (2026-11-17): an AML interpreter
+  (`crates/aml`), the embedded controller (`ec.rs`), PNP0C0A batteries
+  and ACPI0003 adapters read by the "acpi" kernel thread into `APM$`
+  0x60 (as IBM's APM.SYS fills it), POWERCFG and the Power object's
+  status view; checked in QEMU with a test SSDT (charging and on
+  battery), not yet on the Surface Pro 4
 - done: the last small SMP races: each keyboard source keeps its own E0
   prefix and a key's whole shift-state change is made under one lock;
   the infoseg's time fields are written whole (one writer, dwords in
@@ -627,6 +633,10 @@ What is already done, by milestone. What is still to do is in
   fonts (WarpSans, Helvetica, Times New Roman, Courier) when installed
   from the CD (docs/PM.md, Fonts)
 - done: the Font Palette and folder fonts (PP_FONTNAMESIZE)
+- done: the WarpCenter (SmartCenter: the Desktop and window list menus,
+  Lockup, Find, Shut down, the battery, processor and disk monitor, up
+  to 16 trays, the Assistance menu and the clock; WinSetDesktopWorkArea
+  keeps maximized windows off it)
 - done: deleting with IBM's confirmations and the Shredder, IBM's
   settings pages (File, Type, Window, Association, Session, Details, the
   View page's font), the System object and System Clock, Connections

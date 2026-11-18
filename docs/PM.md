@@ -89,8 +89,11 @@ rs2's own DLLs (applications never import it):
 - `Rs2QueryProcesses(pBuf, cb)` (24), `Rs2QueryThreadReport(pBuf, cb)`
   (25), `Rs2KillProcess(pid)` (26): for the rescue screen (see
   [Programs that stop responding](#programs-that-stop-responding)).
+- `Rs2PowerControl(ulFunc, ulParam, pBuf, cb)` (27): the processor power
+  plan (ARCHITECTURE.md "Power management"), for the Power object and
+  POWERCFG.
 
-RS2API ordinals: 1-7 and 20-26 PM (above), 10-16 windowed VIO sessions
+RS2API ordinals: 1-7 and 20-27 PM (above), 10-16 windowed VIO sessions
 (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
 performance counters, 200-221 sockets (docs/NETWORK.md), 500-501 AVIO
 (see [AVIO](#avio-vio-presentation-spaces-in-windows)).
@@ -1458,6 +1461,15 @@ shell](#the-desktop-shell-rs2shell)); `WinSetWindowPos` with
 deepest descendant, under a point) and `WinQueryWindowProcess`;
 presentation parameters (see [Presentation
 parameters](#presentation-parameters)).
+
+**The work area.** `WinSetDesktopWorkArea(hwndDesktop, prcl)` (PMWIN
+1068, PMMERGE 5468, as IBM's forward it; the later Toolkits' name) sets
+the part of the screen that maximized frames fill, and NULL gives the
+whole screen back. Frames that are maximized when it changes take the
+new area, and `WinGetMaxPosition` gives it; `WinQueryDesktopWorkArea`
+(1069, 5469) reports it. It lives in the shared PM state. The WarpCenter
+keeps its bar out of it, as IBM's SCENTER.DLL does (docs/WPS.md).
+PMXTEST checks it.
 
 **System values and colours.** `WinSetSysValue` sets the values a user
 changes: SV_SWAPBUTTON (the right button becomes button 1), SV_DBLCLKTIME

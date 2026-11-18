@@ -45,6 +45,7 @@ mod url;
 mod usermenu;
 mod launch;
 mod launchpad;
+mod warpcenter;
 mod lazy;
 mod menu;
 mod mindex;

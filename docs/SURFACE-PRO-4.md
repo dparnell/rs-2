@@ -21,7 +21,8 @@ been in QEMU, VirtualBox and VMware).
 | WiFi | Marvell AVASTAR 88W8897 (PCIe; Bluetooth on USB) | None (rs2 has wired NICs only) | New: mwifiex-style driver, 802.11 association, WPA2 (see below) |
 | Audio | Realtek ALC298 on HD Audio (8086:9D70) | `drivers/hda.rs` | Probably the codec's amplifier/pin setup. Low priority |
 | Buttons | Power and volume buttons on GPIOs (ACPI MSHW0040) | ACPI power-off only | Needs a real AML interpreter (GPIO controller + `_DSM`). Low priority |
-| Battery | ACPI control-method battery behind the EC | None | Needs an AML interpreter (`_BST`/`_BIF`). Low priority |
+| CPU power | Skylake HWP, MWAIT C-states to C10, RAPL | `cpupower.rs`: power plans (POWERCFG, the Power object's Plan page), MWAIT idle, tickless idle APs, HWP requests, RAPL readings | Untested on the Surface: check `POWERCFG /WATCH` (package watts on each plan) |
+| Battery | ACPI control-method battery behind the EC | AML interpreter (`crates/aml`), EC driver (`ec.rs`), PNP0C0A/ACPI0003 into `APM$`, POWERCFG and the Power object (`acpipm.rs`); checked in QEMU with a test SSDT | Not tried on the Surface: its DSDT, its EC (ECDT or PNP0C09) and the `_Qxx` events; look for `acpi: AML:` and `acpi: battery` in the boot log |
 | Cameras, sensors | IPU3-class cameras, sensor hub | None | Not planned |
 
 ## Phase 0: get any log out of the machine
@@ -608,7 +609,7 @@ Testing on the Surface: `WIFI CONNECT "your ssid" passphrase`, then
 on lines starting `wlan0` and `88W8897` (key API version, association
 result, handshake failures).
 
-### Round 3: 802.11n and 802.11ac (written 2026-11-17, not yet run on the chip)
+### Round 3: 802.11n and 802.11ac (2026-11-17)
 
 Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
 `11n_rxreorder.c`, `11n_aggr.c`):
@@ -633,8 +634,87 @@ Following Linux `mwifiex` (`join.c`, `11n.c`, `11ac.c`,
 - A-MSDUs (RxPD type 0xe6) are split into their frames; BARs are 0xe7.
 - Host tests use the Surface's own capability words.
 
-Not done: transmit aggregation (A-MPDU/A-MSDU from rs2), power saving,
-roaming, hidden networks.
+On the Surface (2026-11-17, 0380dfd0): **joins as 802.11n** (the
+2.4 GHz network on channel 6; 802.11ac is 5 GHz only), WPA2 and DHCP as
+before, and the AP starts a block-ack session on TID 0, which rs2
+accepts. The window (WIFIPM) works. The first join after boot timed
+out twice (firmware code 0xfffc: no answer to the association, then to
+the authentication) and the retry a few seconds later worked. rs2 had
+called that "refused by the access point" and fallen back to legacy
+rates; the firmware's codes are now named as Linux names them
+(`wlan::mwifiex::assoc_failure`), and only a real refusal (the AP's
+status code, or the firmware refusing the command) falls back.
+
+### Round 4: transmit aggregation and power saving (written 2026-11-17, not yet run on the chip)
+
+- **Transmit aggregation.** Once the link carries data on 802.11n/ac
+  (a second after the pairwise key, or after joining an open network),
+  the driver asks the AP for a block-ack session on TID 0, which is all
+  rs2 sends (11N_ADDBA_REQ, window 64, as Linux `mwifiex_send_addba`).
+  When the AP accepts, the firmware sends A-MPDUs by itself; the log
+  says `transmit block ack on TID 0` or gives the AP's status. rs2 does
+  not build A-MSDUs.
+- **Power saving.** Off unless `\MPTN\ETC\WIFI.CFG` says `POWERSAVE=ON`
+  (a line before the first `SSID=`): this firmware is known to crash
+  with power save on, and after a crash only a D3cold cycle of the slot
+  through ACPI brings the card back, which rs2 cannot do yet. Turn it
+  on with `WIFI POWERSAVE ON` or the window's Power saving checkbox;
+  the kernel applies the file's setting at boot and on `Rs2WlanReload`.
+  The flow is Linux's for PCIe: PS_MODE_ENH turns station power save on
+  (wake for every DTIM, sleep 1000 ms after activity); the firmware asks
+  to sleep (EVENT_PS_SLEEP) and rs2 confirms (sleep confirmation command,
+  then CPU_INTR_SLEEP_CFM_DONE) only with nothing to send, receive or
+  ask; before a command or a frame rs2 wakes the chip by writing
+  FIRMWARE_READY to the firmware status register until it interrupts.
+  `WIFI STATUS` shows `power_save`, `power_state`, `sleeps` and `wakes`;
+  `WIFI POWERSAVE` alone shows the setting and what each adapter does.
+
+First try on the Surface (1880599b, power saving on): the join reached
+WPA2 message 2, then the whole machine froze (the log stopped there).
+With nothing pending the firmware went to sleep, and rs2 kept reading
+the card's interrupt status every 5 ms (the wlan thread's poll, and
+`wake()` waited by reading it too). Linux never reads the card while
+it sleeps: it waits for the card's interrupt, and only writes the wake
+request. A read sent to the sleeping 88W8897 most likely stalled the
+CPU. Now no register is read while the chip is asleep: the poll skips
+the chip until an MSI arrives after it went to sleep, `wake()` writes
+FIRMWARE_READY and waits for that interrupt, and power saving is
+refused without MSI.
+
+Second try (fdaaff0a): WPA2 completed, the AP accepted transmit block
+ack, a few frames came in, then no DHCP lease and the machine froze
+again. A race was left: the sleep confirmation's response is seen by
+polling, and its MSI could arrive just after the chip was marked asleep
+and count as "it woke", so the registers were read while it slept. Now
+the driver waits for that interrupt before marking the chip asleep; a
+chip that does not answer the wake request stays marked asleep (its
+command fails, the frame is dropped) instead of being read; and the
+first sleeps and wakes are logged ("the chip sleeps", "woke the chip",
+"the chip woke up (interrupt)").
+
+Third try (bb4f48ad): no freeze. WPA2, transmit block ack and a DHCP
+lease (192.168.1.78) all worked, and the chip slept and woke 52 times
+in the first minute or so, mostly woken by its own interrupt. But it
+lost many packets: the firmware often ignored the host's wake request
+("the firmware did not wake up", about 460 ms of retries each time, and
+the frame or command was dropped), the AP later deauthenticated it
+(reason 6), and turning power saving off from the window failed too
+("timeout (waking the chip)"). With power saving off the same network
+worked well. This is the firmware's fault, not rs2's: Linux's
+`mwifiex_pm_wakeup_card` has the same retry loop for the same reason,
+and the Surface Linux patches turn power saving off by default on the
+88W8897 because it is unusable. So rs2 now gives up on it at the first
+missed wake request: it confirms no further sleep, and once the chip
+answers again (it wakes by itself for beacons and frames), it turns
+power saving off for the rest of that start ("power saving goes off
+once the chip answers", then "power saving off"). `WIFI STATUS` and
+the window show "off: the firmware missed a wake request". Turning
+it off while the chip cannot be woken now waits for the chip the same
+way instead of failing. `POWERSAVE=` in WIFI.CFG is unchanged, so the
+next start tries again.
+
+Not done: A-MSDUs from rs2, roaming, hidden networks, recovering the card
+after a firmware crash.
 
 ### The WiFi window (WIFIPM.EXE)
 
@@ -652,7 +732,9 @@ existing desktops); from a command prompt, `START WIFIPM` or just
   g), and the IP address of the adapter's interface
   (found by its MAC address; "Waiting for DHCP..." until the lease).
   Read again every 3 seconds; a line under it says what the last action
-  did.
+  did. The **Power saving** check box sets `POWERSAVE=` in WIFI.CFG (as
+  WIFI POWERSAVE ON/OFF) and has the kernel apply it at once; beside it,
+  whether the chip is awake or asleep now.
 - Networks: one line per SSID (its strongest access point), strongest
   first, with signal bars, the security and "Saved", "Joining" or
   "Connected". Hidden networks are left out and counted in the heading.
@@ -736,7 +818,7 @@ Type-A port. Most are soft-MAC (Realtek, MediaTek) and need rs2 to do the
 | USB CDC-ECM/NCM Ethernet (done 2026-11-16, QEMU) | medium | yes (`usb-net`) |
 | MEI + IPTS single touch | medium | no |
 | 88W8897 WiFi + WPA2 | large | no (WPA2 part on the host) |
-| AML interpreter (battery, buttons, power/sleep) | large | yes |
+| AML interpreter (battery done 2026-11-17 in QEMU; buttons, power/sleep) | large | yes |
 
 ## References
 

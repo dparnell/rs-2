@@ -90,6 +90,7 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
         // the time and runs the periodic work, the others only account
         // their time slice.
         crate::bench::account();
+        crate::cpupower::tick(crate::smp::this().current().as_ref().is_none_or(|t| t.is_idle()));
         if crate::smp::this().index() == 0 {
             // Ticks lost (interrupts that came late: QEMU without KVM
             // drops about a third of them) are made up from the time-stamp

@@ -25,7 +25,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
                 let t = crate::fs::iostat::begin();
                 crate::task::user_exception(f);
                 crate::fs::iostat::fault(t);
-            } else if !crate::mm::fault::kernel_fault(f) && !crate::api::debug::kernel_trap(f) {
+            } else if !crate::arch::msr_fixup(f) && !crate::mm::fault::kernel_fault(f) && !crate::api::debug::kernel_trap(f) {
                 kernel_exception(f);
             }
         }

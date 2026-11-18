@@ -618,6 +618,86 @@ memory's per-CPU page-table copies pick up page directories added above
 1 GB on the first fault there, as they do below. `cargo xtask run --mem
 SIZE` sets QEMU's memory (512 MB by default).
 
+## Power management
+
+`kernel/src/cpupower.rs`. A **power plan** (Performance, Balanced,
+Power saver) is chosen at boot by CONFIG.SYS's `POWERPLAN=` (rs2's own
+statement; Balanced without one) and changed at run time with
+`Rs2PowerControl` (RS2API 27: 0 queries RS2POWERINFO, 1 sets the plan),
+which the Power object's Plan page and POWERCFG use; both also write
+`POWERPLAN=` (the Plan page always, POWERCFG with `/SAVE`). A change
+takes effect at once: the calling CPU applies it and kicks the others,
+which apply it on their next tick or before their next idle wait.
+
+| | Performance | Balanced | Power saver |
+|---|---|---|---|
+| Idle wait | `HLT` (C1) | `MWAIT` down to the third MWAIT C-state (C6 on Skylake) | `MWAIT` down to the deepest the CPU lists |
+| Idle CPUs other than CPU 0 | keep their 1 ms tick | stop their LAPIC timer | stop their LAPIC timer |
+| HWP request (min-max, EPP) | guaranteed-highest, 0 | lowest-highest, 0x80 | lowest-guaranteed, 0xC0 |
+| SpeedStep without HWP | highest turbo ratio | ratio from the load of the last 32 ticks | the same without turbo |
+| Energy/performance bias | 0 | 6 | 15 |
+
+- `MWAIT` is used on Intel CPUs that list sub-states in CPUID leaf 5,
+  not in a virtual machine (`mwait` on the kernel command line forces
+  it there). Below C1 needs ARAT and an invariant TSC, else C1 is the
+  limit. CPU 0 keeps its tick and goes no deeper than the third state.
+  The C-state numbering is CPUID's MWAIT numbering, which on Intel
+  client parts maps C1, C3, C6, C7s, C8, C9, C10 to hints 0x00-0x60;
+  there is no per-model table (as Linux's intel_idle has) and no
+  residency governor yet.
+- **Tickless idle.** Only the boot CPU keeps the clock, wakes sleepers
+  and polls the drivers that are polled every tick; the other CPUs' tick
+  only ends time slices. So an idle AP stops its LAPIC timer
+  (`apic::timer_stop`) and anything that needs it sends an IPI (a
+  thread made ready, a TLB shootdown); it restarts the timer when the
+  wait ends. Under QEMU with four CPUs an idle system takes ~800 timer
+  interrupts a second instead of ~3200. CPU 0 stays at 1 kHz: making it
+  tickless needs the per-tick pollers (xHCI, virtio, net, audio, screen,
+  SVGA) turned into deadlines first.
+- **Readings.** RAPL energy counters (Intel package, cores, DRAM; AMD
+  17h+ package) and CPU 0's APERF/MPERF are sampled once a second by
+  CPU 0's tick; RS2POWERINFO reports watts, CPU 0's average clock while
+  running and the timer interrupts of the last second.
+- Model-specific registers go through `arch::rdmsr_safe`/`wrmsr_safe`:
+  a #GP on their `rdmsr`/`wrmsr` is skipped by the trap handler
+  (`arch::msr_fixup`), so a register the CPU lacks is just absent. QEMU's
+  TCG answers unknown MSRs with 0 instead of faulting, so the RAPL unit
+  register must be non-zero to count.
+- **Battery and AC adapter** (`kernel/src/acpipm.rs`, `ec.rs`,
+  `crates/aml`). The "acpi" kernel thread loads the DSDT and SSDTs into
+  rs2's AML interpreter (the `aml` crate: definition blocks run as
+  module-level code, then control methods with locals, arguments,
+  `If`/`While`, integer, string, buffer and package operators, buffer
+  fields, `Field`/`IndexField`/`BankField` units on SystemMemory,
+  SystemIO, PCI_Config and EmbeddedControl regions, mutexes and events
+  that never wait (one thread runs all AML), `Notify` recorded, `_OSI`
+  answering as Windows does; no `Load`/`LoadTable`; 16 nested calls and
+  2 million operators per evaluation at most). It calls `_PIC (1)`,
+  starts the embedded controller (the ECDT's ports, else the PNP0C09
+  device's `_CRS` and `_GPE`; byte read 0x80, write 0x81, query 0x84),
+  runs `_REG` for memory, I/O, PCI and EC regions and the devices'
+  `_STA`/`_INI`. Then every 5 s, and at once after a `Notify` of the
+  device, it reads the ACPI0003 adapters' `_PSR` and the PNP0C0A
+  batteries' `_STA`, `_BST` and (when a battery appears or after Notify
+  0x81) `_BIX` or `_BIF`; every 500 ms it polls the EC's SCI_EVT and
+  runs the `_Qxx` method of each event (GPEs and the SCI are not used
+  yet). `APM$` category 0xC function 0x60 answers from the last reading
+  as IBM's APM.SYS does from the BIOS (studied with Ghidra: byte 11
+  selects a battery, 0 all of them; byte 7 the time unit, 1 minutes;
+  battery status and flags high/low/critical/charging; byte 12 the
+  number of batteries); without batteries it is still on line, no
+  system battery. POWERCFG, the Power object's status view and the
+  WarpCenter's battery monitor (docs/WPS.md) read `APM$`
+  (`os2::power::apm_status`). `noaml` on the kernel command line
+  leaves the thread out. QEMU has no battery: `cargo run -p aml
+  --example battery_ssdt -- work/battery.aml [--discharging]` writes a
+  test SSDT for `cargo xtask run ... -- -acpitable file=work/battery.aml`.
+  The PCI interrupt routing still uses the namespace walker in
+  `kernel/src/aml.rs`.
+- Not done: ACPI `_CST`/`_PSS` and thermal zones (the interpreter could
+  run them now), lid and button events (GPEs and the SCI), AMD's
+  P-states (CPPC), suspend (S3).
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

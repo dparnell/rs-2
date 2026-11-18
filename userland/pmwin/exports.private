@@ -37,3 +37,5 @@ WinWindowFromDC 898
 WinGetFrameTreePPSize 972
 WinGetFrameTreePPs 973
 WinIsThreadActive 771
+WinSetDesktopWorkArea 1068
+WinQueryDesktopWorkArea 1069

@@ -14,6 +14,7 @@ pub mod heap;
 pub mod msg;
 pub mod net;
 pub mod path;
+pub mod power;
 pub mod vio;
 
 /// Programs using `alloc` get the OS/2 heap.

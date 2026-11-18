@@ -26,6 +26,7 @@ both ways.
 | LVM, FDISK | Partitions and volumes | IBM's LVM command line (/QUERY, /CREATE:PARTITION and COMPATIBILITY volumes, /DELETE, /SETNAME, /SETSTARTABLE, /HIDE, /NEWMBR) plus `/SETLETTER`, and an `LVM>` prompt without arguments. MBR disks with OS/2 LVM drive letter tables, GPT disks (no letters). IBM's LVM reads what rs2's writes. |
 | PACK, PACK2, UNPACK, UNPACK2 | FTCOMP packed files (the installation media format) | PACK writes LZ-coded blocks without the entropy stage (IBM's UNPACK reads them); /H /D /T /C /A /R /L; UNPACK /SHOW /N /F, EAs restored |
 | PATCH | Patches files | Interactive, or /A with a control file (`FILE`, `VER`, `CHA` lines) |
+| POWERCFG | The processor power plan, idle states, speed control and power readings, the power source and battery (rs2's own) | `Rs2PowerControl` and `APM$` 0x60 (ARCHITECTURE.md "Power management"); `/SET:PERFORMANCE\|BALANCED\|POWERSAVER` changes the plan now, `/SAVE` writes `POWERPLAN=` to CONFIG.SYS, `/WATCH[:n]` shows the readings every second |
 | PRINT | Prints files to LPTn, cancels jobs | Through the kernel's LPT device into the spooler; /C and /T through PMSPL |
 | PSTAT | Processes, threads, semaphores, shared memory, libraries | DosQuerySysState; /C /S /L /M /P /A |
 | RMVIEW | The hardware as the resource manager knows it: adapters, devices, drivers, logical devices, the hardware tree; the IRQs, I/O ports, DMA channels and memory in use with their owners | RESMGR$ (WPS.md, "The Hardware Manager"); /P /D /L /HW /IRQ /IO /IOA /DMA /MEM |

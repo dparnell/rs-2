@@ -215,6 +215,9 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     if crate::irq::ticks() % 50 == 0 {
         crate::infoseg::bios_tick();
     }
+    if crate::irq::ticks() % 1000 == 0 {
+        crate::cpupower::sample();
+    }
 }
 
 /// Last chance before `iretq` to user mode: preemption and sanity checks on

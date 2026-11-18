@@ -259,6 +259,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 501) => super::avio::font,
         (8, 6) => super::rs2api::rs2_show_pointer,
         (8, 7) => super::rs2api::rs2_power_off,
+        (8, 27) => super::rs2api::rs2_power_control,
         (8, 20) => super::rs2api::rs2_update_display,
         (8, 21) => super::rs2api::rs2_query_display,
         (8, 22) => super::rs2api::rs2_query_display_modes,

@@ -14,13 +14,18 @@
 //! how it goes. A scan runs on a second thread (it takes a few seconds).
 //! Forget removes the network from WIFI.CFG and its passphrase from the
 //! keychain (as WIFI FORGET), and leaves it when connected to it.
+//! "Power saving" sets `POWERSAVE=` in WIFI.CFG (as WIFI POWERSAVE) and
+//! has the kernel read the file again; next to it, whether the chip is
+//! asleep or awake now. Every writer of WIFI.CFG keeps what it does not
+//! change.
 //!
 //! Without an adapter (QEMU has none) the window says so and offers only
 //! Close. A line on the serial port (`[wifipm] ...`) tells what it found.
 //!
 //! `WIFIPM /DEMO` shows made-up networks and a connection without asking
 //! the kernel (for screenshots and trying the window in QEMU); Connect
-//! there asks for the passphrase but joins nothing.
+//! there asks for the passphrase but joins nothing, and Power saving
+//! writes nothing.
 
 #![no_std]
 #![no_main]
@@ -67,6 +72,8 @@ const ID_ADDRESS: u32 = 13;
 const ID_NOTE: u32 = 14;
 const ID_NETLABEL: u32 = 15;
 const ID_LIST: u32 = 16;
+const ID_POWERSAVE: u32 = 17;
+const ID_POWER: u32 = 18;
 const ID_CONNECT: u32 = 20;
 const ID_DISCONNECT: u32 = 21;
 const ID_FORGET: u32 = 22;
@@ -114,6 +121,10 @@ struct Status {
     wanted: String,
     error: String,
     mac: Option<[u8; 6]>,
+    /// "on"/"off", and "awake"/"asleep" while on (empty from a kernel
+    /// that does not tell).
+    power_save: String,
+    power_state: String,
 }
 
 impl Status {
@@ -144,9 +155,13 @@ struct App {
     pass_ssid: Vec<u8>,
     /// `/DEMO`: made-up data, no kernel calls.
     demo: bool,
+    /// WIFI.CFG's `POWERSAVE=` (missing: off), as the check box shows it.
+    powersave: bool,
+    /// The text beside the check box, as last set.
+    power_text: String,
 }
 
-static mut APP: App = App { hab: 0, dlg: 0, st: Status { present: false, name: String::new(), status: String::new(), state: String::new(), ssid: String::new(), signal: String::new(), channel: String::new(), security: String::new(), standard: String::new(), wanted: String::new(), error: String::new(), mac: None }, nets: Vec::new(), hidden: 0, scanning: false, note: String::new(), note_state: String::new(), joining: None, pass: None, pass_ssid: Vec::new(), demo: false };
+static mut APP: App = App { hab: 0, dlg: 0, st: Status { present: false, name: String::new(), status: String::new(), state: String::new(), ssid: String::new(), signal: String::new(), channel: String::new(), security: String::new(), standard: String::new(), wanted: String::new(), error: String::new(), mac: None, power_save: String::new(), power_state: String::new() }, nets: Vec::new(), hidden: 0, scanning: false, note: String::new(), note_state: String::new(), joining: None, pass: None, pass_ssid: Vec::new(), demo: false, powersave: false, power_text: String::new() };
 
 fn app() -> &'static mut App {
     unsafe { &mut *core::ptr::addr_of_mut!(APP) }
@@ -177,8 +192,9 @@ const DEMO_QUERY: &str = "adapter=0\nname=88W8897 02:00.0 (demo)\nstatus=up\nmac
 const DEMO_SCAN: &str = "Home\t-52\t36\tWPA2\t02:00:00:00:00:02\t1\nHome\t-70\t6\tWPA2\t02:00:00:00:00:03\t1\nCafe Guest\t-61\t11\topen\t02:00:00:00:00:04\t0\nNeighbour 5G\t-72\t149\tWPA2/WPA3\t02:00:00:00:00:05\t0\nOffice\t-80\t1\t802.1X\t02:00:00:00:00:06\t0\nOld Router\t-88\t6\tWEP\t02:00:00:00:00:07\t0\n\0\0\0\t-75\t6\tWPA2\t02:00:00:00:00:08\t0\n";
 
 fn query_text() -> String {
-    if app().demo {
-        return String::from(DEMO_QUERY);
+    let a = app();
+    if a.demo {
+        return String::from(DEMO_QUERY) + if a.powersave { "power_save=on\npower_state=asleep\n" } else { "power_save=off\n" };
     }
     text(|b, cb, pcb| unsafe { Rs2WlanQuery(b, cb, pcb) }, |b, cb, pcb| unsafe { Rs2WlanQuery(b, cb, pcb) }).unwrap_or_default()
 }
@@ -228,6 +244,8 @@ fn parse_status(t: &str) -> Status {
             "wanted" => s.wanted = v,
             "error" => s.error = v,
             "mac" => s.mac = parse_mac(&v),
+            "power_save" => s.power_save = v,
+            "power_state" => s.power_state = v,
             _ => {}
         }
     }
@@ -301,15 +319,17 @@ fn config_path() -> Vec<u8> {
     [&[boot_drive()][..], b":\\MPTN\\ETC\\WIFI.CFG"].concat()
 }
 
-fn read_config() -> Vec<wlan::config::Profile> {
+/// The whole file (settings and networks): a writer changes only its part
+/// and writes all of it back, so the other settings are kept.
+fn read_config() -> wlan::config::Config {
     match read_file(&config_path()) {
-        Some(d) => wlan::config::parse(&d.iter().map(|&b| b as char).collect::<String>()).profiles,
-        None => Vec::new(),
+        Some(d) => wlan::config::parse(&d.iter().map(|&b| b as char).collect::<String>()),
+        None => wlan::config::Config::default(),
     }
 }
 
-fn write_config(p: &[wlan::config::Profile]) -> Result<(), u32> {
-    let t: Vec<u8> = wlan::config::write(p).chars().map(|c| c as u32 as u8).collect();
+fn write_config(c: &wlan::config::Config) -> Result<(), u32> {
+    let t: Vec<u8> = wlan::config::write_config(c).chars().map(|c| c as u32 as u8).collect();
     write_file(&config_path(), &t)
 }
 
@@ -327,6 +347,7 @@ fn bytes(s: &str) -> Vec<u8> {
 fn main(s: &os2::Startup) -> u32 {
     let a = app();
     a.demo = pmkit::arg(s).eq_ignore_ascii_case(b"/DEMO");
+    a.powersave = if a.demo { true } else { read_config().powersave.unwrap_or(false) };
     a.hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(a.hab, 0) };
     if hmq == 0 {
@@ -339,6 +360,7 @@ fn main(s: &os2::Startup) -> u32 {
         return 1;
     }
     a.dlg = dlg;
+    set_check(dlg, ID_POWERSAVE, a.powersave);
     let icon = unsafe { WinLoadPointer(HWND_DESKTOP, 0, 1) };
     if icon != 0 {
         send(dlg, WM_SETICON, icon, 0);
@@ -374,21 +396,23 @@ fn main(s: &os2::Startup) -> u32 {
 
 fn main_template() -> Vec<u8> {
     let fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_MINBUTTON | FCF_TASKLIST | FCF_NOBYTEALIGN;
-    let mut frame = tpl::item(WC_FRAME, TITLE, WS_CLIPSIBLINGS | WS_SAVEBITS | FS_DLGBORDER | FS_NOBYTEALIGN, (20, 20, 270, 240), DLG_MAIN);
+    let mut frame = tpl::item(WC_FRAME, TITLE, WS_CLIPSIBLINGS | WS_SAVEBITS | FS_DLGBORDER | FS_NOBYTEALIGN, (20, 20, 270, 252), DLG_MAIN);
     frame.ctl = fcf.to_le_bytes().to_vec();
     let l = DT_LEFT | DT_VCENTER;
     template(
         frame,
         alloc::vec![
-            group_box(b"Connection", (6, 150, 258, 84)),
-            label(b"Adapter:", (14, 210, 52, 9), l),
-            text_id(b"", (68, 210, 190, 9), ID_ADAPTER, l),
-            label(b"State:", (14, 199, 52, 9), l),
-            text_id(b"", (68, 199, 190, 9), ID_STATE, l),
-            label(b"Signal:", (14, 188, 52, 9), l),
-            text_id(b"", (68, 188, 190, 9), ID_SIGNAL, l),
-            label(b"IP address:", (14, 177, 52, 9), l),
-            text_id(b"", (68, 177, 190, 9), ID_ADDRESS, l),
+            group_box(b"Connection", (6, 150, 258, 96)),
+            label(b"Adapter:", (14, 222, 52, 9), l),
+            text_id(b"", (68, 222, 190, 9), ID_ADAPTER, l),
+            label(b"State:", (14, 211, 52, 9), l),
+            text_id(b"", (68, 211, 190, 9), ID_STATE, l),
+            label(b"Signal:", (14, 200, 52, 9), l),
+            text_id(b"", (68, 200, 190, 9), ID_SIGNAL, l),
+            label(b"IP address:", (14, 189, 52, 9), l),
+            text_id(b"", (68, 189, 190, 9), ID_ADDRESS, l),
+            check_box(b"~Power saving", (12, 176, 54, 10), ID_POWERSAVE).group(),
+            text_id(b"", (68, 177, 190, 9), ID_POWER, l),
             text_id(b"", (14, 154, 244, 20), ID_NOTE, DT_LEFT | DT_TOP | DT_WORDBREAK),
             text_id(b"Networks:", (8, 138, 254, 9), ID_NETLABEL, l),
             list_box((6, 26, 258, 110), ID_LIST, LS_OWNERDRAW | LS_NOADJUSTPOS).group(),
@@ -440,6 +464,11 @@ fn refresh() {
     set_item_text(dlg, ID_STATE, &bytes(&state));
     set_item_text(dlg, ID_SIGNAL, signal.as_bytes());
     set_item_text(dlg, ID_ADDRESS, address(&st).as_bytes());
+    let power = power_text(&st, a.powersave);
+    if power != a.power_text {
+        set_item_text(dlg, ID_POWER, power.as_bytes());
+        a.power_text = power;
+    }
     // A Connect followed to its end.
     if let Some(j) = a.joining.clone() {
         let name = ssid_text(&j);
@@ -477,6 +506,55 @@ fn address(st: &Status) -> String {
     }
 }
 
+/// Beside the check box: what the adapter does now, when it says.
+fn power_text(st: &Status, setting: bool) -> String {
+    if !st.up() {
+        return String::new();
+    }
+    match (st.power_save.as_str(), setting) {
+        ("on", _) => {
+            let now = if st.power_state.is_empty() { String::new() } else { alloc::format!(", {} now", st.power_state) };
+            alloc::format!("{}{now}", if setting { "on" } else { "still on" })
+        }
+        ("off", true) => String::from("not in effect yet"),
+        // "on, turning off", "off: the firmware missed a wake request"
+        (s, _) if s.starts_with("on,") || s.starts_with("off:") => String::from(s),
+        _ => String::new(),
+    }
+}
+
+/// The check box was clicked: POWERSAVE= in WIFI.CFG, and the kernel
+/// reads the file again.
+fn set_powersave() {
+    let a = app();
+    let on = checked(a.dlg, ID_POWERSAVE);
+    if on == a.powersave {
+        return;
+    }
+    let what = if on { "on" } else { "off" };
+    if a.demo {
+        a.powersave = on;
+        refresh();
+        say(&alloc::format!("(Demo) Would write POWERSAVE={} in WIFI.CFG and have rs2 read it again.", what.to_ascii_uppercase()));
+        return;
+    }
+    let mut c = read_config();
+    c.powersave = Some(on);
+    if let Err(rc) = write_config(&c) {
+        set_check(a.dlg, ID_POWERSAVE, a.powersave);
+        say(&alloc::format!("WIFI.CFG could not be written (error {rc}); power saving is unchanged."));
+        return;
+    }
+    a.powersave = on;
+    unsafe { Rs2WlanReload() };
+    refresh();
+    say(&if on {
+        String::from("Power saving on: the adapter sleeps between beacons (saved in WIFI.CFG).")
+    } else {
+        String::from("Power saving off: the adapter stays awake (saved in WIFI.CFG).")
+    });
+}
+
 /// Show a note under the status (until the state changes).
 fn say(s: &str) {
     let a = app();
@@ -510,6 +588,7 @@ fn update_buttons() {
     enable(dlg, ID_SCAN, up && !a.scanning);
     set_item_text(dlg, ID_SCAN, if a.scanning { b"Scanning" } else { b"~Scan" });
     enable(dlg, ID_LIST, up);
+    enable(dlg, ID_POWERSAVE, a.st.present);
 }
 
 /// Fill the list from scan lines (keeping the selected network).
@@ -605,14 +684,15 @@ fn connect() {
     }
     // Saved first in WIFI.CFG (so it is joined at the next start), as
     // WIFI CONNECT does; the passphrase goes to the keychain, not there.
-    let mut ps = read_config();
+    let mut c = read_config();
+    let ps = &mut c.profiles;
     let mut p = ps.iter().position(|p| p.ssid == n.ssid).map(|i| ps.remove(i)).unwrap_or_else(|| wlan::config::Profile::new(&n.ssid, None));
     if pass.is_some() {
         p.passphrase = None;
     }
     p.autoconnect = true;
     ps.insert(0, p);
-    let saved = write_config(&ps);
+    let saved = write_config(&c);
     if saved.is_ok() {
         unsafe { Rs2WlanReload() };
     }
@@ -667,14 +747,14 @@ fn forget() {
         say(&alloc::format!("(Demo) Would forget {name}."));
         return;
     }
-    let mut ps = read_config();
-    let before = ps.len();
-    ps.retain(|p| p.ssid != n.ssid);
+    let mut c = read_config();
+    let before = c.profiles.len();
+    c.profiles.retain(|p| p.ssid != n.ssid);
     let account = z(&n.ssid);
     unsafe { Rs2KeyDelete(b"wifi\0".as_ptr(), account.as_ptr()) };
     let mut msg = alloc::format!("{name} forgotten.");
-    if ps.len() != before {
-        if let Err(rc) = write_config(&ps) {
+    if c.profiles.len() != before {
+        if let Err(rc) = write_config(&c) {
             msg = alloc::format!("WIFI.CFG could not be written (error {rc}).");
         }
     }
@@ -700,6 +780,14 @@ extern "C" fn main_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_MEASUREITEM => ROW,
         WM_DRAWITEM if lo(mp1) == ID_LIST && mp2 != 0 => draw_item(mp2 as *mut u32),
+        WM_CONTROL if lo(mp1) == ID_POWERSAVE => {
+            // The check box toggles itself; a double click may come as
+            // BN_DBLCLICKED: either way its state is compared with the file's.
+            if matches!(hi(mp1), BN_CLICKED | BN_DBLCLICKED) {
+                set_powersave();
+            }
+            0
+        }
         WM_CONTROL if lo(mp1) == ID_LIST => {
             match hi(mp1) {
                 LN_SELECT => update_buttons(),
