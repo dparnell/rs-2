@@ -101,6 +101,14 @@ impl ColorTable {
         self.entries = DEFAULT_TABLE.to_vec();
     }
 
+    /// Colour values are RGB: the table is in RGB mode and no palette is
+    /// selected. A selected palette wins over RGB mode, as on IBM's PM:
+    /// OWL makes every PS an RGB one, then selects a palette and draws
+    /// with its indices (PAINT's canvas and colour bar).
+    pub fn is_rgb(&self) -> bool {
+        self.rgb_mode && self.palette.is_none()
+    }
+
     /// RGB of a colour value as passed to GpiSetColor.
     pub fn rgb(&self, c: i32) -> Rgb {
         match c {
@@ -110,7 +118,7 @@ impl ColorTable {
             CLR_TRUE => 0xffffff,
             CLR_FALSE => 0x000000,
             -50..=-6 => (self.sys)(c),
-            _ if c >= 0 && self.rgb_mode => c as u32 & 0xff_ffff,
+            _ if c >= 0 && self.is_rgb() => c as u32 & 0xff_ffff,
             _ if c >= 0 => {
                 if let Some(p) = &self.palette {
                     return p.get(c as usize).copied().unwrap_or(0);
@@ -169,6 +177,6 @@ impl ColorTable {
 
     /// GpiQueryColorIndex: the index nearest to an RGB value.
     pub fn index_of(&self, c: Rgb) -> i32 {
-        if self.rgb_mode { (c & 0xff_ffff) as i32 } else { nearest(self.table(), c) as i32 }
+        if self.is_rgb() { (c & 0xff_ffff) as i32 } else { nearest(self.table(), c) as i32 }
     }
 }

@@ -1283,6 +1283,17 @@ pub extern "C" fn GpiQueryBitmapBits(hps: u32, start: i32, scans: i32, buf: *mut
     i.width = b.bm.width;
     i.height = b.bm.height;
     i.colors = bitmap::standard_table(i.bitcount);
+    // The header gets the bitmap's size too: OWL's TDib zeroes a header,
+    // queries the bits with it and draws them with it (PAINT's buttons).
+    unsafe {
+        if i.cbfix == 12 {
+            (bmi.add(4) as *mut u16).write_unaligned(i.width as u16);
+            (bmi.add(6) as *mut u16).write_unaligned(i.height as u16);
+        } else {
+            (bmi.add(4) as *mut u32).write_unaligned(i.width as u32);
+            (bmi.add(8) as *mut u32).write_unaligned(i.height as u32);
+        }
+    }
     let es = if i.cbfix == 12 { 3 } else { 4 };
     for (k, c) in i.colors.iter().enumerate() {
         let e = [*c as u8, (*c >> 8) as u8, (*c >> 16) as u8, 0];
@@ -1629,7 +1640,7 @@ pub extern "C" fn GpiCreateLogColorTable(hps: u32, opts: u32, format: i32, start
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryLogColorTable(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32 {
     let Some(e) = entry(st(), hps) else { return -1 };
-    if e.ps.colors.rgb_mode {
+    if e.ps.colors.is_rgb() {
         return -2;
     }
     if out.is_null() || start < 0 {
@@ -1660,7 +1671,7 @@ pub extern "C" fn GpiQueryLogColorTable(hps: u32, opts: u32, start: i32, n: i32,
 pub extern "C" fn GpiQueryColorData(hps: u32, n: i32, out: *mut i32) -> u32 {
     let Some(e) = entry(st(), hps) else { return 0 };
     let c = &e.ps.colors;
-    let v = [if c.rgb_mode { 3 } else { 1 }, 0, if c.rgb_mode { 0xff_ffff } else { c.table().len() as i32 - 1 }];
+    let v = [if c.is_rgb() { 3 } else { 1 }, 0, if c.is_rgb() { 0xff_ffff } else { c.table().len() as i32 - 1 }];
     for (i, x) in v.iter().take(n.max(0) as usize).enumerate() {
         write(unsafe { out.add(i) }, *x);
     }

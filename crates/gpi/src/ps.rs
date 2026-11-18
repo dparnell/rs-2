@@ -1877,7 +1877,7 @@ impl Ps {
 
     /// GpiErase: clear the whole device rectangle `r` to the reset colour.
     pub fn erase(&mut self, s: &mut Surface, r: Rect) {
-        let c = if self.colors.rgb_mode { 0xffffff } else { self.colors.rgb(CLR_BACKGROUND) };
+        let c = if self.colors.is_rgb() { 0xffffff } else { self.colors.rgb(CLR_BACKGROUND) };
         if self.display {
             self.fill_rect(s, r, c);
         }

@@ -612,6 +612,29 @@ fn self_checks(hab: u32) {
         check("GpiCreatePalette/SelectPalette", pal != 0 && GpiSelectPalette(m.hps, pal) == 0);
         let mut sp = [0u32; 3];
         check("GpiQueryPaletteInfo of a PS: its palette", GpiQueryPaletteInfo(0, m.hps, 0, 0, 3, sp.as_mut_ptr()) == 3 && sp == [0x010203, 0x040506, 0x070809]);
+        // The PS is in RGB mode, but a selected palette wins: colours are
+        // its indices (OWL makes every PS an RGB one, then selects PAINT's
+        // palette and fills with its indices).
+        let m2 = mem(hab, 8, 8, PU_PELS);
+        GpiCreateLogColorTable(m2.hps, 0, 3, 0, 0, null());
+        GpiSelectPalette(m2.hps, pal);
+        GpiSetColor(m2.hps, 1);
+        GpiMove(m2.hps, &pt(0, 0));
+        GpiBox(m2.hps, DRO_FILL, &pt(7, 7), 0, 0);
+        check("a selected palette wins over LCOLF_RGB", GpiQueryRGBColor(m2.hps, 0, 1) == 0x040506 && pel(&m2, 3, 3) == 0x040506);
+        GpiSelectPalette(m2.hps, 0);
+        check("without it, RGB again", GpiQueryRGBColor(m2.hps, 0, 1) == 1);
+        // GpiQueryBitmapBits fills in the header's size (OWL's TDib zeroes
+        // its header, queries, and draws the bits with it).
+        let mut hdr = [0u8; 16];
+        hdr[0] = 16;
+        hdr[12] = 1;
+        hdr[14] = 24;
+        let mut bits = [0u8; 8 * 24];
+        let n = GpiQueryBitmapBits(m2.hps, 0, 8, bits.as_mut_ptr(), hdr.as_mut_ptr());
+        let l = |o: usize| u32::from_le_bytes([hdr[o], hdr[o + 1], hdr[o + 2], hdr[o + 3]]);
+        check("GpiQueryBitmapBits returns the bitmap's size in the header", n == 8 && l(4) == 8 && l(8) == 8);
+        free(m2);
 
         free(m);
         let m = mem(hab, 8, 8, PU_PELS);
