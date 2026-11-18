@@ -71,6 +71,9 @@ struct State {
     pattern: Vec<u8>,
     /// Set up, and the application's procedure has had WM_INITDLG.
     ready: bool,
+    /// Index of the current directory in the directory list (the path's
+    /// entries come first, the root at 0).
+    cur: u32,
 }
 
 static mut STATES: Vec<State> = Vec::new();
@@ -223,23 +226,56 @@ fn list(dir: &[u8], pattern: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     (dirs, files)
 }
 
-/// Fill the directory and file lists and the path text.
+/// The path's entries of the directory list: the root (`C:\`), then each
+/// directory down to the current one.
+fn path_entries(dir: &[u8]) -> Vec<Vec<u8>> {
+    let mut v = alloc::vec![upper(&dir[..2.min(dir.len())])];
+    v[0].push(b'\\');
+    v.extend(dir.get(3..).unwrap_or(&[]).split(|&c| c == b'\\').filter(|p| !p.is_empty()).map(|p| p.to_vec()));
+    v
+}
+
+/// Fill the directory and file lists and the path text, as IBM's
+/// RefreshDialog does (FillPathListBox, FillFileAndDirListBox,
+/// PositionListBox; studied with Ghidra): the directory list holds the
+/// path from the root down to the current directory, each entry's item
+/// handle its depth (the owner-drawn list indents by it), then the
+/// current directory's subdirectories (one deeper); FILEDLG.szFullFile
+/// holds the current directory; and the current directory is selected,
+/// so the dialog procedure gets LN_SELECT for it (IBM Works' file
+/// dialogs show their "Path:" from szFullFile then, and look up the
+/// listed files' dates in that directory).
 fn refresh(dlg: u32) {
     let Some(s) = state(dlg) else { return };
-    let (dir, pattern) = (s.dir.clone(), s.pattern.clone());
+    let (dir, pattern, fild) = (s.dir.clone(), s.pattern.clone(), s.fild);
     let (dirs, files) = list(&dir, &pattern);
     list_clear(dlg, DID_DIRECTORY_LB as u32);
-    if dir.len() > 3 {
-        list_add(dlg, DID_DIRECTORY_LB as u32, b"..");
+    let path = path_entries(&dir);
+    let cur = path.len() as u32 - 1;
+    for (depth, p) in path.iter().enumerate() {
+        let i = list_add(dlg, DID_DIRECTORY_LB as u32, p);
+        unsafe { WinSendDlgItemMsg(dlg, DID_DIRECTORY_LB as u32, LM_SETITEMHANDLE, i, depth as u32) };
     }
     for d in &dirs {
-        list_add(dlg, DID_DIRECTORY_LB as u32, d);
+        let i = list_add(dlg, DID_DIRECTORY_LB as u32, d);
+        unsafe { WinSendDlgItemMsg(dlg, DID_DIRECTORY_LB as u32, LM_SETITEMHANDLE, i, cur + 1) };
+    }
+    if let Some(s) = state(dlg) {
+        s.cur = cur;
     }
     list_clear(dlg, DID_FILES_LB as u32);
     for f in &files {
         list_add(dlg, DID_FILES_LB as u32, f);
     }
     set_item_text(dlg, DID_DIRECTORY_SELECTED as u32, &dir);
+    let mut full = dir.clone();
+    if full.last() != Some(&b'\\') {
+        full.push(b'\\');
+    }
+    if full.len() < CCHMAXPATH {
+        let zf = z(&full);
+        unsafe { core::ptr::copy_nonoverlapping(zf.as_ptr(), fild.add(F_FULLFILE), zf.len()) };
+    }
     // The drive list shows the current drive.
     let n = unsafe { WinSendDlgItemMsg(dlg, DID_DRIVE_CB as u32, LM_QUERYITEMCOUNT, 0, 0) };
     for i in 0..n {
@@ -247,6 +283,10 @@ fn refresh(dlg: u32) {
         if t.len() >= 2 && t[..2].eq_ignore_ascii_case(&dir[..2]) {
             set_item_text(dlg, DID_DRIVE_CB as u32, &t);
         }
+    }
+    unsafe {
+        WinSendDlgItemMsg(dlg, DID_DIRECTORY_LB as u32, LM_SETTOPINDEX, cur, 0);
+        WinSendDlgItemMsg(dlg, DID_DIRECTORY_LB as u32, LM_SELECTITEM, cur, 1);
     }
 }
 
@@ -274,7 +314,7 @@ fn init(dlg: u32, fild: *mut u8) {
     }
     let pattern = if has_wild(&name) { name.clone() } else { b"*".to_vec() };
     states().retain(|s| s.hwnd != dlg);
-    states().push(State { hwnd: dlg, fild, dir, pattern, ready: false });
+    states().push(State { hwnd: dlg, fild, dir, pattern, ready: false, cur: 0 });
     let title = rd32(fild, F_TITLE);
     let t: Vec<u8> = if title != 0 { cstr(title as *const u8) } else if fl & FDS_SAVEAS_DIALOG != 0 { b"Save As".to_vec() } else { b"Open".to_vec() };
     unsafe { WinSetWindowText(dlg, z(&t).as_ptr()) };
@@ -430,9 +470,25 @@ pub extern "C" fn WinDefFileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> 
                 }
                 (DID_FILES_LB, LN_ENTER) => ok(hwnd),
                 (DID_DIRECTORY_LB, LN_ENTER) => {
-                    if let (Some(i), Some(dir)) = (list_selection(hwnd, id), state(hwnd).map(|s| s.dir.clone())) {
-                        let t = list_text(hwnd, id, i);
-                        change_dir(hwnd, full_path(&dir, &t));
+                    // A path entry goes up to that directory, a
+                    // subdirectory down into it.
+                    if let (Some(i), Some((dir, cur))) = (list_selection(hwnd, id), state(hwnd).map(|s| (s.dir.clone(), s.cur))) {
+                        let to = if i <= cur {
+                            let p = path_entries(&dir);
+                            let mut to = p[0].clone();
+                            for (k, c) in p[1..=i as usize].iter().enumerate() {
+                                if k > 0 {
+                                    to.push(b'\\');
+                                }
+                                to.extend_from_slice(c);
+                            }
+                            to
+                        } else {
+                            join(&dir, &list_text(hwnd, id, i))
+                        };
+                        if i != cur {
+                            change_dir(hwnd, to);
+                        }
                     }
                 }
                 (DID_DRIVE_CB, CBN_LBSELECT) | (DID_DRIVE_CB, CBN_ENTER) => {
@@ -487,13 +543,15 @@ pub extern "C" fn WinDefFileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> 
                 *r = unsafe { *oi.add(6 + i) } as i32;
             }
             let idx = unsafe { *oi.add(10) };
+            // hItem: the entry's depth (IBM indents 5 pels a level).
+            let depth = unsafe { *oi.add(11) }.min(40) as i32;
             let t = list_text(hwnd, DID_DIRECTORY_LB as u32, idx);
             // SYSCLR_HILITEBACKGROUND/FOREGROUND, or SYSCLR_ENTRYFIELD
             // and SYSCLR_WINDOWTEXT.
             let (bg, fg) = if selected { (-32, -33) } else { (-47, -17) };
             unsafe {
                 WinFillRect(hps, rcl.as_ptr(), bg);
-                let mut r = [rcl[0] + 4, rcl[1], rcl[2], rcl[3]];
+                let mut r = [rcl[0] + 4 + depth * 5, rcl[1], rcl[2], rcl[3]];
                 WinDrawText(hps, t.len() as i32, t.as_ptr(), r.as_mut_ptr(), fg, bg, DT_VCENTER);
                 // Drawn here, selection included.
                 *oi.add(2) = 0;
@@ -529,7 +587,8 @@ fn template_for(fl: u32) -> Vec<u8> {
     v.push(item(WC_COMBOBOX, b"", tab | WS_GROUP | 0x0000_0004, (152, 80, 136, 86), DID_DRIVE_CB));
     v.push(item(WC_STATIC, b"", st | 0x0000_0001, (6, 142, 282, 8), DID_DIRECTORY_SELECTED));
     v.push(item(WC_STATIC, b"Directory:", st | 0x0000_0001 | DT_MNEMONIC, (6, 130, 136, 8), DID_DIRECTORY_TXT));
-    v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (6, 30, 136, 98), DID_DIRECTORY_LB));
+    // LS_OWNERDRAW, as IBM's: the path's entries indented by depth.
+    v.push(item(WC_LISTBOX, b"", tab | WS_GROUP | 0x0002, (6, 30, 136, 98), DID_DIRECTORY_LB));
     v.push(item(WC_STATIC, b"File:", st | 0x0000_0001 | DT_MNEMONIC, (152, 130, 136, 8), DID_FILES_TXT));
     v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (152, 30, 136, 98), DID_FILES_LB));
     // Push buttons in the places of IBM's template (applications add

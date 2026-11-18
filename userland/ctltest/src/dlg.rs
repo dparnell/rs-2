@@ -126,9 +126,17 @@ extern "C" fn file_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         INIT_DIRS.store(unsafe { WinSendDlgItemMsg(h, 264, 0x0160, 0, 0) }, Ordering::Relaxed);
         return 0;
     }
+    // WM_CONTROL from DID_DIRECTORY_LB, LN_SELECT: the item selected and
+    // FILEDLG.szFullFile then (IBM Works shows its "Path:" from it).
+    if msg == 0x0030 && mp1 == (1 << 16 | 264) {
+        let fd = unsafe { WinQueryWindowPtr(h, 0) } as *const u8;
+        let full = unsafe { core::slice::from_raw_parts(fd.add(52), 4) };
+        DIR_SELECT.store(unsafe { WinSendDlgItemMsg(h, 264, 0x0165, 0xffff, 0) } << 8 | (full == b"C:\\\0") as u32, Ordering::Relaxed);
+    }
     unsafe { WinDefFileDlgProc(h, msg, mp1, mp2) }
 }
 
+static DIR_SELECT: AtomicU32 = AtomicU32::new(0xffff_ffff);
 static TARGET: AtomicU32 = AtomicU32::new(0);
 static RESULT: AtomicU32 = AtomicU32::new(0xffff_ffff);
 static ERROR: AtomicU32 = AtomicU32::new(0);
@@ -193,6 +201,14 @@ pub fn checks(hab: u32, owner: u32) {
         check("its title set before WM_INITDLG", &tb[..n] == b"CtlTest Open");
         check("WM_INITDLG to the application's procedure with mp1 and mp2 0", INIT_ARGS.load(Ordering::Relaxed) == 0);
         check("the directories listed although it kept WM_INITDLG", WinSendDlgItemMsg(fdlg, 264, 0x0160, 0, 0) > 0);
+        // As IBM's: the directory list starts with the path from the root
+        // (here only "C:\\", item handle 0: its depth), the current
+        // directory selected, which the procedure hears of (LN_SELECT)
+        // with szFullFile holding the current directory.
+        let mut first = [0u8; 8];
+        let n = WinSendDlgItemMsg(fdlg, 264, 0x0168, 8 << 16, first.as_mut_ptr() as u32) as usize;
+        check("the directory list starts with the root (C:\\)", &first[..n] == b"C:\\" && WinSendDlgItemMsg(fdlg, 264, 0x016a, 0, 0) == 0);
+        check("the current directory selected, LN_SELECT with szFullFile C:\\", DIR_SELECT.load(Ordering::Relaxed) == 1);
         // OK with the name of a file that does not exist: an Open dialog
         // takes it as IBM's ProcessOKButtonMsg does (only extended
         // attribute dialogs check the file; the Open Watcom IDE names its
