@@ -633,16 +633,22 @@ pub extern "C" fn GpiQueryPickApertureSize(hps: u32, p: *mut i32) -> u32 {
     point_out(p, e.gpi.pick_size.unwrap_or(PICK_DEFAULT)) as u32
 }
 
-/// GpiSavePS / GpiRestorePS: a single level is enough for most programs;
-/// state saving is not supported, so these only succeed.
+/// GpiSavePS(hps): the state's id on the PS's stack (GPI_ERROR 0).
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSavePS(hps: u32) -> i32 {
-    if entry(st(), hps).is_some() { 1 } else { 0 }
+    entry(st(), hps).map_or(0, |e| e.ps.save())
 }
 
+/// GpiRestorePS(hps, lPSid): a saved state back (a negative id counts
+/// back from the last save). IBM Works draws pictures inside
+/// GpiSavePS/GpiResetPS/GpiRestorePS with view matrices of their own:
+/// with no state kept, its memo's page was drawn 1.9 times too large
+/// from then on.
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiRestorePS(hps: u32, _id: i32) -> u32 {
-    entry(st(), hps).is_some() as u32
+pub extern "C" fn GpiRestorePS(hps: u32, id: i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    e.ps.will_change_attrs();
+    e.ps.restore(id) as u32
 }
 
 // ---- Drawing control (segments and metafiles: gpiseg.rs) ----

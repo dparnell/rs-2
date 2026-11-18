@@ -279,7 +279,7 @@ restart, and it runs.
 |------|--------|-------|
 | The IBM Works folder (FPWWPS.DLL's classes) | works | The folder with its objects and icons; the templates (Document, Sheet, Chart, Database, Report, Contact List) show the classes' icons; the samples (shadowed `SAMPLES`) wake as FpwWPData/FpwSSData/... by their `.CLASSINFO`, with their long names. Double-clicking the memo opens it in the word processor, its fonts (Times New Roman, Helvetica), colours and bold heading. |
 | IBMWORKS.EXE (the launcher) | works | Application type list, New, Open. |
-| Word processor (IEN30PWP) | works, with notes | New document, typing, Helvetica 10 in the outline face; File > Save as, then File > Open of the saved file brings its text back; the samples open. Not looked at: printing, import/export filters, spell check. Open: the memo sample's view is drawn about 1.9 times too large (and so off the window) after the Open dialog has been up, while a new document's is not. |
+| Word processor (IEN30PWP) | works, with notes | New document, typing, Helvetica 10 in the outline face; File > Save as, then File > Open of the saved file brings its text back; the samples open. Not looked at: printing, import/export filters, spell check. The memo's view keeps its size when a dialog covers it and is redrawn. |
 | Spreadsheet (IEN30PSS) | works | Typing into cells (fast), numbers, formulas (`=A1+A2`, `=A2*2`), Enter and the arrow keys. |
 | PIM (FPWPIM.EXE, Appointment Book) | works | The first start makes its databases (`DATA\*.DBF`, CodeBase); the week view; a new appointment entered and shown. Its window opens at the top left, its title bar under the WarpCenter. |
 | File dialogs | works | Works' own template over WinFileDlg: the Path, the dates, the directory tree, going up and down the tree. |
@@ -315,6 +315,15 @@ What it needed from rs2 (the suite that checks each is named):
   conventions, as IBM's MAKEINI writes them from INI.RC): Works takes the
   date separator from `sDate` with "M/d/yy" as its default, and showed
   `11M18M2026`.
+- **GpiSavePS / GpiRestorePS** (GPITEST): they only returned success.
+  The word processor draws a document's pictures inside GpiSavePS,
+  GpiResetPS(GRES_ALL), view matrices of their own, GpiPlayMetaFile and
+  GpiRestorePS; the reset page mapping (1:1) and the picture's 1/8 view
+  matrix stayed, and the memo's next repaint came out 1.875 times too
+  large, off the window. They now keep the attributes, current position,
+  transforms (model, viewing, default view, page viewport), clip region
+  and path, colour table, selected font and draw controls on a stack;
+  a negative id counts back from the last save.
 - **WinFileDlg's directory list as IBM's** (CTLTEST): the path from the
   root down (item handle = depth), then the subdirectories, the current
   directory selected (the dialog procedure gets LN_SELECT) and
