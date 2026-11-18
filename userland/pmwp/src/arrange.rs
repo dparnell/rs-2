@@ -16,6 +16,7 @@ use alloc::vec::Vec;
 
 use crate::obj::OPEN_CONTENTS;
 use crate::pm::*;
+use crate::util::ui;
 use crate::view::{self, wins};
 
 pub const WPMENUID_UNDOARRANGE: u32 = 310;
@@ -127,9 +128,9 @@ fn grid(w: usize) -> (i32, i32, i32, i32, i32, i32) {
     let (aw, ah) = (r.r.max(100), (r.t - 2).max(100));
     let (cw, ch) = view::cell(w);
     if wins()[w].desktop {
-        ((cw - 32) / 2, ah - 12 - 32, cw, ch, (aw / cw).max(1), ((ah - 16) / ch).max(1))
+        ((cw - ui(32)) / 2, ah - ui(12 + 32), cw, ch, (aw / cw).max(1), ((ah - ui(16)) / ch).max(1))
     } else {
-        (4 + (cw - 32) / 2, ah - 8 - 32, cw, ch, ((aw - 8) / cw).max(1), ((ah - 8) / ch).max(1))
+        (ui(4) + (cw - ui(32)) / 2, ah - ui(8 + 32), cw, ch, ((aw - ui(8)) / cw).max(1), ((ah - ui(8)) / ch).max(1))
     }
 }
 

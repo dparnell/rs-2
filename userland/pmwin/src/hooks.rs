@@ -43,6 +43,27 @@ pub const MSGF_TRACK: u32 = 8;
 /// journal record hook gets those as they are taken off the queue); it is
 /// cleared before an application sees the message.
 pub const QMSG_INPUT: u32 = 0x8000_0000;
+/// QMSG.reserved of any keyboard or mouse message (also one played back):
+/// IBM's PM keeps those in the system queue, and WinGetMsg takes them
+/// after the thread's posted messages. Cleared like QMSG_INPUT.
+pub const QMSG_SYSQ: u32 = 0x4000_0000;
+/// QMSG.reserved of a WM_TIMER PMWIN made for a due timer (taken last, after
+/// WM_PAINT, as IBM's). Cleared like QMSG_INPUT.
+pub const QMSG_TIMER: u32 = 0x2000_0000;
+/// The bits above.
+pub const QMSG_FLAGS: u32 = QMSG_INPUT | QMSG_SYSQ | QMSG_TIMER;
+
+/// WinGetMsg's order: posted messages (0), then keyboard and mouse input
+/// (1), then (after WM_PAINT) timers (2).
+pub fn rank(m: &crate::state::QMsg) -> u8 {
+    if m.reserved & QMSG_TIMER != 0 {
+        2
+    } else if m.reserved & QMSG_SYSQ != 0 {
+        1
+    } else {
+        0
+    }
+}
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.320"]

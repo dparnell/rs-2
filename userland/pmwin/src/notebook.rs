@@ -417,10 +417,7 @@ fn arrow(c: &mut Canvas, r: Rect, left: bool, enabled: bool) {
     c.raised(r);
     let col = if enabled { draw::text() } else { draw::shadow() };
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
-    for i in 0..5 {
-        let x = if left { cx - 2 + i } else { cx + 2 - i };
-        c.fill(Rect::new(x, cy - i, x + 1, cy + i + 1), col);
-    }
+    c.triangle(cx, cy, if left { 2 } else { 3 }, crate::scale::px(5), col);
 }
 
 /// Cut the outer corners of a tab (rounded and polygon tabs).

@@ -54,6 +54,8 @@ unsafe extern "C" {
     fn WinCreateWindow(parent: u32, class: u32, name: *const u8, style: u32, x: i32, y: i32, cx: i32, cy: i32, owner: u32, behind: u32, id: u32, ctl: *const u8, pres: u32) -> u32;
     #[link_name = "PMWIN.728"]
     fn WinDestroyWindow(h: u32) -> u32;
+    #[link_name = "PMWIN.844"]
+    fn WinQueryWindowUShort(h: u32, i: i32) -> u16;
     #[link_name = "PMWIN.911"]
     fn WinDefWindowProc(h: u32, m: u32, a: u32, b: u32) -> u32;
     #[link_name = "PMWIN.920"]
@@ -303,7 +305,9 @@ fn pointers() {
     check("system pointers are distinct", uniq.len() == all.len());
     check("WinQuerySysPointer: no SPTR 15", unsafe { WinQuerySysPointer(1, 15, 0) } == 0);
     check("system pointers cannot be destroyed", unsafe { WinDestroyPointer(all[12]) } == 0);
-    check("SV_CXICON/SV_CYICON 32", unsafe { WinQuerySysValue(1, 38) == 32 && WinQuerySysValue(1, 39) == 32 });
+    // 32 pels at 96 dpi; more at a UI scale (RS2SCALE).
+    let n = unsafe { WinQuerySysValue(1, 38) } as u32;
+    check("SV_CXICON/SV_CYICON 32 (or more at a UI scale)", n >= 32 && unsafe { WinQuerySysValue(1, 39) } as u32 == n);
     // POINTERINFO: fPointer, xHot, yHot, hbmPointer, hbmColor, mini x2.
     let mut pi = [0u32; 7];
     let ok = unsafe { WinQueryPointerInfo(all[12], pi.as_mut_ptr()) } != 0;
@@ -312,10 +316,10 @@ fn pointers() {
     bmp[0] = 12;
     unsafe { GpiQueryBitmapParameters(pi[3], bmp.as_mut_ptr()) };
     let (cx, cy) = (bmp[1] & 0xffff, bmp[1] >> 16);
-    check("pointer mask bitmap is 32 x 64", (cx, cy) == (32, 64));
+    check("pointer mask bitmap is SV_CXICON x 2 SV_CYICON", (cx, cy) == (n, 2 * n));
     let mut ai = [0u32; 7];
     unsafe { WinQueryPointerInfo(all[0], ai.as_mut_ptr()) };
-    check("arrow is a pointer with its hot spot at the tip", ai[0] == 1 && ai[1] == 0 && ai[2] == 31);
+    check("arrow is a pointer with its hot spot at the tip", ai[0] == 1 && ai[1] == 0 && ai[2] == n - 1);
     let copy = unsafe { WinCreatePointerIndirect(1, pi.as_ptr()) };
     check("WinCreatePointerIndirect", copy != 0 && !all.contains(&copy));
     let mut ci = [0u32; 7];
@@ -577,9 +581,40 @@ fn frames(hab: u32, viewer: u32) {
     pump(hab);
     check("with a viewer: restored and shown", unsafe { WinIsWindowVisible(f) } != 0 && pos(f).2 == 300);
     check("the viewer heard both", VIEWER_MSGS.load(Ordering::Relaxed) == 2);
+    restore_position(hab);
     check("Rs2SetMinimizeViewer(0) returns the viewer", unsafe { Rs2SetMinimizeViewer(0) } == viewer);
     // Left minimized on the desktop for the screenshot.
     unsafe { WinSetWindowPos(f, 0, 0, 0, 0, 0, SWP_MINIMIZE) };
+}
+
+/// IBM's FrameMinMax: minimizing (or maximizing) a frame in its normal
+/// state with SWP_MOVE and SWP_SIZE makes those its restore position; a
+/// hidden FCF_SHELLPOSITION frame minimized so (UltiMail's main window,
+/// started with /HIDE) is restored there. SWP_RESTORE with SWP_MOVE and
+/// SWP_SIZE restores to the values given.
+fn restore_position(hab: u32) {
+    // FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_SHELLPOSITION, hidden.
+    let mut fcf = 1u32 | 2 | 8 | 0x30 | 0x400;
+    let mut client = 0;
+    let g = unsafe { WinCreateStdWindow(1, 0, &mut fcf, b"ShTest\0".as_ptr(), b"Hidden\0".as_ptr(), 0, 0, 4, &mut client) };
+    unsafe { WinSetWindowPos(g, 0, 120, 140, 320, 220, SWP_MINIMIZE | SWP_MOVE | SWP_SIZE) };
+    pump(hab);
+    let w = |i: i32| unsafe { WinQueryWindowUShort(g, i) } as i16 as i32;
+    check(
+        "SWP_MINIMIZE|SWP_MOVE|SWP_SIZE of a hidden frame: QWS_XRESTORE... are the values given",
+        (w(0x0c), w(0x0e), w(0x10), w(0x12)) == (120, 140, 320, 220) && unsafe { WinQueryWindowULong(g, -2) } & WS_MINIMIZED != 0,
+    );
+    unsafe { WinSetWindowPos(g, 3, 0, 0, 0, 0, SWP_RESTORE | SWP_SHOW | 0x4 | SWP_ACTIVATE) };
+    pump(hab);
+    let (x, y, cx, cy, _) = pos(g);
+    check("SWP_RESTORE|SWP_SHOW: it shows there", (x, y, cx, cy) == (120, 140, 320, 220) && unsafe { WinIsWindowVisible(g) } != 0);
+    unsafe { WinSetWindowPos(g, 0, 0, 0, 0, 0, SWP_MINIMIZE) };
+    pump(hab);
+    unsafe { WinSetWindowPos(g, 0, 200, 210, 250, 150, SWP_RESTORE | SWP_MOVE | SWP_SIZE) };
+    pump(hab);
+    let (x, y, cx, cy, _) = pos(g);
+    check("SWP_RESTORE|SWP_MOVE|SWP_SIZE: restored to the values given", (x, y, cx, cy) == (200, 210, 250, 150));
+    unsafe { WinDestroyWindow(g) };
 }
 
 static NAMES: [&[u8]; 4] = [b"Beta\0", b"Alpha\0", b"Gamma\0", b"Delta\0"];

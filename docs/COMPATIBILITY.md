@@ -241,6 +241,93 @@ HELPMGR. Tested with keyboard and mouse input from
 | Toolkit `controls/style.exe` | partial | Its MLE editor, the button, list box, combo box (simple, drop-down, drop-down list), entry field (MLE and entry field), static, slider, spin button (master and servant), value set (its icons drawn) and notebook dialogs (both pages, the tabs, the page buttons, Alt+PgUp/PgDn), the container dialog (its record in the icon, name, text and detail views, switched from the context menu that button 2 brings up), message boxes with their query, warning, information and action icons; the frame's icon (FCF_ICON) on the system menu button and when minimized, minimize and restore. Presentation parameters are ignored. |
 | Toolkit `clipbrd.exe` | works | Selecting a rectangle with the mouse (WinTrackRect), Copy/Cut as CF_BITMAP and Paste stretched into another selection. |
 
+### IBM Works 3.0 (the Warp 4 BonusPak)
+
+IBM Works (Footprint Software's office suite: word processor,
+spreadsheet, chart, database, report writer, and the PIM: appointments,
+phone book, to-do list, planner, year calendar, event monitor) from the
+Warp 4 CD (`OS2WARP4-EN.iso`, `OS2IMAGE\FI\BONUSPAK\IBMWORKS`), on a
+system disk with only rs2's files.
+
+**Installing it.** On Warp 4 the Feature Installer installs it from
+`OS2IMAGE\FI\FEATURE_\OS2BONUS\BPWORKS\INSTDATA.INI`; rs2 has no Feature
+Installer. `tools/scripts/fi_stage.py` copies the package's files where
+its INSTDATA.INI puts them (`C:\BONUSPAK\IBMWORKS` with `GRAPHICS` and
+`SAMPLES`; FPWWPS.DLL, FPWREC.DLL, IEN30PDE.DLL and IEN30PWR.DLL in
+`C:\OS2\DLL`) with the CD's extended attributes as EAUTIL hold files,
+and writes the lines for `work/modules.txt` and a CMD file that joins
+the EAs:
+
+```
+python3 -I tools/scripts/fi_stage.py ISO/OS2IMAGE/FI/FEATURE_/OS2BONUS/BPWORKS/INSTDATA.INI \
+    ISO/OS2IMAGE/FI/BONUSPAK/IBMWORKS STAGE/files --setup WORKSEA.CMD
+cp STAGE/modules.txt work/modules.txt
+cargo xtask disk --system --dist --release --size 500 -o work/iw.img
+```
+
+Then, on rs2 (`--hdd work/iw.img --boot-hdd`): `C:\WORKSEA.CMD`, and
+IBM's own `C:\BONUSPAK\IBMWORKS\IBMWDESK.CMD C:\BONUSPAK\IBMWORKS` (the
+script IBM ships to rebuild the Works desktop): it registers FPWWPS.DLL's
+eight classes with `SysRegisterObjectClass` (FpwCatalyst, FpwWPSData,
+FpwWPData, FpwSSData, FpwCHData, FpwDBData, FpwRWData, FpwGRData), makes
+the IBM Works folder with the programs, the PIM's objects and the
+templates, adds the directory to LIBPATH, PATH and HELP, sets
+`IBMWORKS_INI`, writes `IBMWORKS DLL` to OS2.INI and runs FPWINI. A
+restart, and it runs.
+
+| Part | Status | Notes |
+|------|--------|-------|
+| The IBM Works folder (FPWWPS.DLL's classes) | works | The folder with its objects and icons; the templates (Document, Sheet, Chart, Database, Report, Contact List) show the classes' icons; the samples (shadowed `SAMPLES`) wake as FpwWPData/FpwSSData/... by their `.CLASSINFO`, with their long names. Double-clicking the memo opens it in the word processor, its fonts (Times New Roman, Helvetica), colours and bold heading. |
+| IBMWORKS.EXE (the launcher) | works | Application type list, New, Open. |
+| Word processor (IEN30PWP) | works, with notes | New document, typing, Helvetica 10 in the outline face; File > Save as, then File > Open of the saved file brings its text back; the samples open. Not looked at: printing, import/export filters, spell check. Open: the memo sample's view is drawn about 1.9 times too large (and so off the window) after the Open dialog has been up, while a new document's is not. |
+| Spreadsheet (IEN30PSS) | works | Typing into cells (fast), numbers, formulas (`=A1+A2`, `=A2*2`), Enter and the arrow keys. |
+| PIM (FPWPIM.EXE, Appointment Book) | works | The first start makes its databases (`DATA\*.DBF`, CodeBase); the week view; a new appointment entered and shown. Its window opens at the top left, its title bar under the WarpCenter. |
+| File dialogs | works | Works' own template over WinFileDlg: the Path, the dates, the directory tree, going up and down the tree. |
+
+![IBM Works' word processor on rs2](images/rs2-ibmworks-wp.png)
+
+![A sample opened from the IBM Works folder (FpwWPData)](images/rs2-ibmworks-memo.png)
+
+What it needed from rs2 (the suite that checks each is named):
+
+- **WinGetMsg's order** (PMWIN): posted messages before keyboard and
+  mouse input, WM_PAINT, then WM_TIMER, as IBM's. The spreadsheet commits
+  a cell on Enter by posting itself WM_COMMAND; rs2 handed it the next
+  key first and the key was lost (`Total` typed fast gave `otal`).
+  crates/pmwin unit test.
+- **espfix without writing to the program's stack** (kernel, APITEST):
+  returns to a 16-bit stack segment put their frame below the program's
+  SP; IBM's VisualAge C++ thunks keep the 16:16 address they call there,
+  and IEN30PDE's `getch` (Kbd16CharIn) jumped to 0000:DB57. Now each CPU
+  returns from a 4 GB kernel window in which one page appears every
+  64 KB (as Linux's espfix64), at an address with the program's ESP bits
+  16..31.
+- **KBD and MOU calls from a PM program fail** (504 and 505, as IBM's
+  DOSCALL1 router, `_KbdCheckProcType`/`_MouCheckProcType`). The PIM's
+  database engine reports the missing databases of a first start as text
+  and waits for a key; in a PM program that wait must end at once (on
+  rs2 it waited for ever, so the databases were never made).
+- **The boot volume's files on `xtask disk --system` disks**: the fonts
+  (without PSFONTS the word processor drew Helvetica with the system
+  font stretched to the character box), CONFIG.SYS, the interface
+  repositories.
+- **`PM_National` in OS2.INI** (PMWP's first start, the system country's
+  conventions, as IBM's MAKEINI writes them from INI.RC): Works takes the
+  date separator from `sDate` with "M/d/yy" as its default, and showed
+  `11M18M2026`.
+- **WinFileDlg's directory list as IBM's** (CTLTEST): the path from the
+  root down (item handle = depth), then the subdirectories, the current
+  directory selected (the dialog procedure gets LN_SELECT) and
+  FILEDLG.szFullFile holding it; Works shows its Path from it and looks
+  the listed files' dates up in that directory.
+
+Also seen, not fixed: switching the memo to Layout Mode left part of the
+View menu on the screen; the window list shows Works' hidden "Dialog
+Title" window (rs2 lists every frame). With `apitrace=IBMWORKS` the
+word processor can stop in a DosEnterCritSec while another thread holds
+the C runtime's semaphore (IBM's kernel freezes the same way: the
+trace's slowness makes the window wide).
+
 ### IBM VisualAge Smalltalk Enterprise 6.0 (development tools)
 
 The user's media (`va600_co.zip` client, `va600_mo.zip` manager,
@@ -438,6 +525,70 @@ DLLs) are not on the media, so rs2's own utilities take their place
 | TIMED.EXE, TIMEDC.EXE | fails | Need PMWSOCK.DLL, which is not on the media. |
 | PING.EXE (TCP/IP's) | starts | A DOS program (runs in a DOS session); rs2's own PING is the OS/2 one. |
 | SENDMAIL.EXE | not tried | `-?` did not return within the test's time. |
+
+### UltiMail Lite (Warp 4 CD)
+
+IBM's TCP/IP mail client from the Warp 4 CD (`OS2WARP4-EN.iso`,
+`CID\IMG\TCPAPPS\UMAIL1.ZIP` and `UMAIL2.ZIP`; not on the Warp 4.52
+media), on a system disk with only rs2's files (`cargo xtask disk
+--system --dist`). Installed as IBM's TCP/IP installer does it: the two
+ZIPs unpacked into `C:\TCPIP` (`UMAIL`, `HELP`, `BIN\DSKUMLT.TCP`), then
+the kit's exit `UMLITEXT.EXE` run with the installer's environment
+(`TARGET_PATH=C:\TCPIP`, `BOOT_DRIVE`, `HOSTNAME`, `DNS_DOMAIN`), then
+UltiMail's `MAKEWPS.CMD` (the desktop objects; UMLITEXT leaves it for the
+next start). The mail user and the POP server are set in TCPCFG2's Mail
+tab (or `TCPCFG2 MAILUSER=test POPSERVER=10.0.2.100 POPID=test
+POPPASSWORD=secret REPLYDOMAIN=example.com`), as on Warp 4. The test
+server is `tools/scripts/pop3host.py` on the host (POP3 and an SMTP
+receiver), reached as 10.0.2.100 through `--guestfwd
+"tcp:10.0.2.100:110-cmd:nc 127.0.0.1 1110"`.
+
+| Part | Status | Notes |
+|------|--------|-------|
+| UMLITEXT.EXE (the install exit) | works | Writes `UMAIL.PRO`, `UMAILSRV.PRO`, `\OS2\UMAIL.INI`, the mail store and `%ETC%\TCPOS2.INI` (LAN/MAIL_STORE). |
+| MAKEWPS.CMD | works | Registers `IBMUmailWPS` (UMAILWPS.DLL) and makes the "Ultimedia Mail/2 Lite" folder with the In-basket, Mail Cabinet, New Letter, Names and Addresses and Information objects (the folder goes on the desktop: there is no `<IAK>` folder, IBM's script falls back so). |
+| In-basket object | works | Starts `UMAIL.EXE /HIDE` and opens the In-basket; first time, UltiMail asks for the user's name and its own password; the In-basket fetches the mail over POP3 (USER, PASS, STAT, RETR, DELE, QUIT) and lists it; letters open with their header and text, and stay in the mail store across restarts. |
+| New Letter object | works | Opens an empty letter (To, Cc, Subject, the SentMail folder). Sending not tried. |
+| Names and Addresses object | works | Opens the nickname notebook (its index, New Person, New Group). |
+| Letter window | partial | The header fields (From, Subject) are drawn too short and their text is cut; the tool bar (IBM's UCMENUS control: a WC_MENU whose bitmap items it measures and draws itself) is black. |
+| In-basket list | partial | The Date and Icon column titles and values are cut short. |
+| Windows menu | partial | "Address Book" is cut to "Address Boo" (its items have icons). |
+| UMAIL.EXE started by hand after a session | partial | Its main window, saved minimized (hidden in the Minimized Window Viewer), comes back drawn as a large icon at its full size; restoring it works. |
+
+What it needed from rs2 (each with its check):
+
+- **TCPCFG2's Mail tab**: IBM's notebook (CNBMAIL.DLL) keeps the mail
+  user and the POP server in `%ETC%\TCPOS2.INI`, application `LAN`
+  (LOGIN_ID, POPSRVR, POP_ID, POP_PWD, REPLY_DOMAIN, MAIL_USE_LAN
+  YES/NO/BOTH, PROMPT, PROMPT_POP, MULTI_USER, MAIL_STORE); UltiMail takes
+  its user from there and loops in its "missing information" dialog
+  without it ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications)).
+- **`xtask disk --system`** puts the whole boot volume on the disk (it
+  had no `%ETC%` and no SOM interface repositories).
+- **WPObject's wpScanSetupString** (WPSTEST): UltiMail's objects read
+  `MAILTYPE` with it; without it every object opened the Mail Cabinet.
+- **Event semaphores** (APITEST): a post that woke a waiting thread
+  satisfies its wait even if the poster closes the semaphore before the
+  thread runs; UltiMail's worker threads post and close at once.
+- **Frames** (SHELLTST): minimizing or maximizing a frame with SWP_MOVE
+  and SWP_SIZE makes those its restore position, and SWP_RESTORE with
+  them restores there (IBM's FrameMinMax); UltiMail's hidden main window
+  stayed 0x0 and invisible.
+- **WinEnableWindowUpdate** sets WS_VISIBLE (PMXTEST): the In-basket's
+  container is made invisible and shown so.
+- **Dialog owners** (CTLTEST): the requested owner's ancestor that is a
+  child of the dialog's parent, else NULLHANDLE.
+- **The MLE** sends no MLN_CHANGE when its window text is set (CTLTEST):
+  UltiMail's text viewer copied the cleared MLE into the letter.
+- **File names with code page characters** (fat unit test, APITEST):
+  UltiMail's mail store names files with bytes 0xE0..0xED; FAT measured
+  them as UTF-8 and the kernel gave names back to programs as UTF-8.
+- **WinSetPresParam** keeps a font name the system does not have, as
+  IBM's does (PMXTEST).
+
+![UltiMail Lite's In-basket on rs2](images/rs2-ultimail-inbasket.png)
+
+![A letter fetched over POP3, open in UltiMail Lite](images/rs2-ultimail-letter.png)
 
 rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, LPD, FINGER,
 TFTP, TFTPD, REXEC, REXECD, RSH, RSHD, TALK, TALKD and TCP/IP

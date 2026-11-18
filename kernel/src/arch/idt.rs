@@ -137,8 +137,19 @@ trap_return:
     pop rdx
     pop rcx
     pop rbx
+    // To a 16-bit stack segment: the frame is in this CPU's espfix window
+    // (mm::espfix), whose address is in the error slot.
+    test qword ptr [rsp + 4*8], 3
+    jz 2f
+    cmp qword ptr [rsp + 2*8], 0
+    jnz 3f
+2:
     pop rax
     add rsp, 16
+    iretq
+3:
+    mov rsp, [rsp + 2*8]
+    pop rax
     iretq
 "#,
     dispatch = sym crate::trap::dispatch,

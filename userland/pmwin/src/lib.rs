@@ -51,6 +51,7 @@ mod pp;
 mod printer;
 mod prtscr;
 mod rect;
+mod scale;
 mod report;
 mod res;
 mod scrollbar;

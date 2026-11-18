@@ -12,9 +12,14 @@
 //! `VIDEO=WxHx256`, and change at the next start, as programs keep the
 //! device's colours from when they started.
 //!
+//! The UI scale for high-dpi screens (100% to 300%) makes PM's
+//! controls, title bars, menus, icons, pointers and fonts bigger while
+//! the resolution stays: it is saved as `SET RS2SCALE=150` in
+//! CONFIG.SYS and PM takes it at the next start.
+//!
 //! Usage: `DISPLAY` (the window), `DISPLAY WxH` or `DISPLAY WxHxCOLORS`
 //! (switch and save without asking, e.g. from a script; COLORS 256 or
-//! 16M).
+//! 16M), `DISPLAY SCALE=150` (save the UI scale for the next start).
 
 #![no_std]
 #![no_main]
@@ -48,6 +53,12 @@ const ID_CLOSE: u32 = 14;
 const ID_COLORS: u32 = 15;
 const ID_TRUE: u32 = 16;
 const ID_256: u32 = 17;
+const ID_SCALELABEL: u32 = 18;
+const ID_SCALE: u32 = 19;
+const WC_COMBOBOX: &[u8] = b"#2\0";
+const CBS_DROPDOWNLIST: u32 = 0x0004;
+/// The UI scales offered (percent).
+const SCALES: [u32; 7] = [100, 125, 150, 175, 200, 250, 300];
 const TID_COUNT: u32 = 1;
 const BS_AUTORADIOBUTTON: u32 = 4;
 const BM_QUERYCHECK: u32 = 0x0124;
@@ -92,6 +103,9 @@ struct App {
     /// 256 colours now, and in CONFIG.SYS (for the next start).
     now256: bool,
     saved256: bool,
+    /// The UI scale now, and in CONFIG.SYS (for the next start).
+    scale_now: u32,
+    scale_saved: u32,
 }
 
 static mut APP: Option<App> = None;
@@ -164,6 +178,73 @@ fn colors256_saved() -> bool {
         let t: Vec<u8> = l.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
         t.starts_with(b"VIDEO=") && t.ends_with(b"X256")
     })
+}
+
+/// PM's UI scale now (percent): SV_CXICON is 32 at 100%.
+fn scale_now() -> u32 {
+    let icon = unsafe { WinQuerySysValue(HWND_DESKTOP, 38) };
+    if icon <= 0 { 100 } else { ((icon * 100 / 32 + 12) / 25 * 25) as u32 }
+}
+
+/// `n` pels at 96 dpi at the UI scale this PM runs with.
+fn k(n: i32) -> i32 {
+    n * scale_now() as i32 / 100
+}
+
+/// The UI scale CONFIG.SYS asks for (SET RS2SCALE=, 100 without one).
+fn scale_saved() -> u32 {
+    let text = read_file(&config_path()).unwrap_or_default();
+    let mut v = 100;
+    for l in text.split(|&b| b == b'\n') {
+        if let Some(n) = rs2scale_value(l) {
+            v = n;
+        }
+    }
+    v
+}
+
+/// The value of a `SET RS2SCALE=n` line.
+fn rs2scale_value(line: &[u8]) -> Option<u32> {
+    let t: Vec<u8> = line.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
+    let v = t.strip_prefix(b"SETRS2SCALE=")?;
+    let v = v.strip_suffix(b"%").unwrap_or(v);
+    core::str::from_utf8(v).ok()?.parse().ok()
+}
+
+/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none at 100).
+fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
+    let text = match text.iter().position(|&b| b == 0x1a) {
+        Some(i) => &text[..i],
+        None => text,
+    };
+    let mut out = Vec::new();
+    for line in text.split_inclusive(|&b| b == b'\n') {
+        if rs2scale_value(line).is_some() {
+            continue;
+        }
+        out.extend_from_slice(line);
+    }
+    if !out.is_empty() && !out.ends_with(b"\n") {
+        out.extend_from_slice(b"\r\n");
+    }
+    if pct != 100 {
+        out.extend_from_slice(alloc::format!("SET RS2SCALE={pct}\r\n").as_bytes());
+    }
+    out
+}
+
+/// Save the UI scale for the next start.
+fn save_scale(pct: u32) -> bool {
+    let path = config_path();
+    let old = read_file(&path).unwrap_or_default();
+    write_file(&path, &with_scale(&old, pct))
+}
+
+/// "SCALE=150" (also "SCALE 150", "SCALE=150%").
+fn parse_scale(s: &str) -> Option<u32> {
+    let v = s.strip_prefix("SCALE")?.trim_start_matches(['=', ' ', ':']).trim().trim_end_matches('%');
+    let n: u32 = v.parse().ok()?;
+    SCALES.contains(&n).then_some(n)
 }
 
 /// The boot drive's CONFIG.SYS.
@@ -246,6 +327,14 @@ fn main(s: &os2::Startup) -> u32 {
         os2::println!("DISPLAY: Presentation Manager is not available");
         return 1;
     }
+    if let Some(n) = parse_scale(&args) {
+        let ok = save_scale(n);
+        unsafe {
+            WinDestroyMsgQueue(hmq);
+            WinTerminate(hab);
+        }
+        return if ok { 0 } else { 1 };
+    }
     if let Some((w, h, c)) = parse_mode(&args) {
         let rc = if (w, h) == current() { 0 } else { unsafe { Rs2SetDisplayMode(w, h) } };
         if rc == 0 {
@@ -258,7 +347,7 @@ fn main(s: &os2::Startup) -> u32 {
         return rc;
     }
     unsafe {
-        *core::ptr::addr_of_mut!(APP) = Some(App { hab, frame: 0, client: 0, modes: modes(), asking: None, centred: (0, 0), now256: colors256_now(), saved256: colors256_saved() });
+        *core::ptr::addr_of_mut!(APP) = Some(App { hab, frame: 0, client: 0, modes: modes(), asking: None, centred: (0, 0), now256: colors256_now(), saved256: colors256_saved(), scale_now: scale_now(), scale_saved: scale_saved() });
         WinRegisterClass(hab, CLASS.as_ptr(), client_proc, WS_CLIPCHILDREN, 0);
     }
     let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_MINBUTTON | FCF_TASKLIST | 0x0200; // FCF_DLGBORDER
@@ -285,7 +374,7 @@ fn main(s: &os2::Startup) -> u32 {
 /// changed size).
 fn centre(show: bool) {
     let a = app();
-    let (cx, cy) = (340, 320);
+    let (cx, cy) = (k(340), k(350));
     let mut r = RectL { l: 0, b: 0, r: cx, t: cy };
     unsafe { WinCalcFrameRect(a.frame, &mut r, 0) };
     let (fw, fh) = (r.r - r.l, r.t - r.b);
@@ -297,17 +386,27 @@ fn centre(show: bool) {
 
 fn control(parent: u32, class: &[u8], text: &str, style: u32, id: u32, x: i32, y: i32, cx: i32, cy: i32) -> u32 {
     let t = z(text);
-    unsafe { WinCreateWindow(parent, class.as_ptr(), t.as_ptr(), style | WS_VISIBLE, x, y, cx, cy, parent, HWND_TOP, id, core::ptr::null(), core::ptr::null()) }
+    // Laid out for 96 dpi: at the UI scale.
+    unsafe { WinCreateWindow(parent, class.as_ptr(), t.as_ptr(), style | WS_VISIBLE, k(x), k(y), k(cx), k(cy), parent, HWND_TOP, id, core::ptr::null(), core::ptr::null()) }
 }
 
 /// The controls (client coordinates, from the bottom left).
 fn build(h: u32) {
     let label = SS_TEXT | DT_LEFT | DT_VCENTER;
-    control(h, WC_STATIC, "Screen resolution:", label, ID_LABEL, 12, 288, 316, 20);
-    control(h, WC_LISTBOX, "", WS_TABSTOP | WS_GROUP, ID_MODES, 12, 152, 316, 132);
-    control(h, WC_STATIC, "Colors:", label, ID_COLORS, 12, 124, 70, 20);
-    control(h, WC_BUTTON, "16 million", BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, ID_TRUE, 84, 124, 120, 20);
-    control(h, WC_BUTTON, "256", BS_AUTORADIOBUTTON, ID_256, 212, 124, 100, 20);
+    control(h, WC_STATIC, "Screen resolution:", label, ID_LABEL, 12, 318, 316, 20);
+    control(h, WC_LISTBOX, "", WS_TABSTOP | WS_GROUP, ID_MODES, 12, 182, 316, 132);
+    control(h, WC_STATIC, "Colors:", label, ID_COLORS, 12, 154, 70, 20);
+    control(h, WC_BUTTON, "16 million", BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, ID_TRUE, 84, 154, 120, 20);
+    control(h, WC_BUTTON, "256", BS_AUTORADIOBUTTON, ID_256, 212, 154, 100, 20);
+    control(h, WC_STATIC, "UI scale:", label, ID_SCALELABEL, 12, 124, 70, 20);
+    // A combo box's rectangle includes its list, below the field.
+    control(h, WC_COMBOBOX, "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_GROUP, ID_SCALE, 84, 24, 120, 120);
+    for &n in SCALES.iter() {
+        let t = z(&alloc::format!("{n}%"));
+        unsafe { WinSendMsg(item(ID_SCALE), LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
+    }
+    let i = SCALES.iter().position(|&n| n == app().scale_saved).unwrap_or(0);
+    unsafe { WinSendMsg(item(ID_SCALE), LM_SELECTITEM, i as u32, 1) };
     control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 48, 316, 70);
     unsafe { WinSendMsg(item(if app().saved256 { ID_256 } else { ID_TRUE }), BM_SETCHECK, 1, 0) };
     control(h, WC_BUTTON, "~Apply", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_APPLY, 120, 10, 100, 30);
@@ -335,15 +434,26 @@ fn fill_list() {
     }
 }
 
-/// The colours now and after the next start.
+/// The colours and UI scale now and after the next start.
 fn colors_note() -> String {
     let name = |c: bool| if c { "256" } else { "16 million" };
     let a = app();
-    if a.now256 == a.saved256 {
+    let mut t = if a.now256 == a.saved256 {
         alloc::format!(" {} colors.", name(a.now256))
     } else {
         alloc::format!(" {} colors now, {} after the next start.", name(a.now256), name(a.saved256))
+    };
+    if a.scale_now == a.scale_saved {
+        t += &alloc::format!(" UI scale {}%.", a.scale_now);
+    } else {
+        t += &alloc::format!(" UI scale {}% now, {}% after the next start.", a.scale_now, a.scale_saved);
     }
+    t
+}
+
+fn chosen_scale() -> u32 {
+    let i = unsafe { WinSendMsg(item(ID_SCALE), LM_QUERYSELECTION, LIT_FIRST, 0) } as i32;
+    SCALES.get(i as usize).copied().filter(|_| i >= 0).unwrap_or(app().scale_saved)
 }
 
 fn chosen256() -> bool {
@@ -367,6 +477,15 @@ fn apply() {
             return;
         }
         app().saved256 = c;
+        fill_list();
+    }
+    if chosen_scale() != app().scale_saved {
+        let n = chosen_scale();
+        if !save_scale(n) {
+            set_text(ID_STATUS, "The UI scale could not be saved in CONFIG.SYS.");
+            return;
+        }
+        app().scale_saved = n;
         fill_list();
     }
     if (w, h) == old {

@@ -43,7 +43,9 @@ const EN_OVERFLOW: u32 = 0x0020;
 const EN_INSERTMODETOGGLE: u32 = 0x0040;
 
 /// Margin drawn around ES_MARGIN fields (the window grows by it).
-const MARGIN: i32 = 3;
+fn margin() -> i32 {
+    crate::scale::px(3)
+}
 
 wndproc! {
     entry_entry => entry_proc;
@@ -68,7 +70,7 @@ fn sel(e: &Entry) -> (usize, usize) {
 }
 
 fn inset(h: u32) -> i32 {
-    if ctl::style(h) & ES_MARGIN != 0 { MARGIN } else { 1 }
+    if ctl::style(h) & ES_MARGIN != 0 { margin() } else { 1 }
 }
 
 /// The text as shown (asterisks in an ES_UNREADABLE field).
@@ -332,7 +334,7 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             ctl::set_data(h, Entry { limit: limit.max(len), cursor: 0, anchor: 0, first: 0, changed: false, insert: true, tracking: false });
             if ctl::style(h) & ES_MARGIN != 0 {
                 if let Some(w) = st().desk.get(h) {
-                    let (x, y, cx, cy) = (w.x - MARGIN, w.y - MARGIN, w.cx + 2 * MARGIN, w.cy + 2 * MARGIN);
+                    let (x, y, cx, cy) = (w.x - margin(), w.y - margin(), w.cx + 2 * margin(), w.cy + 2 * margin());
                     st().desk.set_pos(h, x, y, cx, cy);
                 }
             }

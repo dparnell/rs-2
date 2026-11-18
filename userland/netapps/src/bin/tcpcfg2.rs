@@ -2,12 +2,20 @@
 //!
 //! Pages: Network (the first adapter, lan0: on or off, DHCP or a fixed
 //! address, subnet mask and router), Host Names (the host name, the local
-//! domain and up to three name servers) and Hosts (the HOSTS file). Save
+//! domain and up to three name servers), Hosts (the HOSTS file) and Mail
+//! (two pages: the mail user and how mail arrives; the POP server). Save
 //! writes the settings where rs2 reads them: `NETWORK=dhcp|off|address/
 //! prefix,router,dns...` and `SET HOSTNAME=` in CONFIG.SYS (the kernel
 //! and the programs take them at the next start), %ETC%\RESOLV2
-//! (`domain`, `nameserver`: the resolver calls of the socket DLLs) and
-//! %ETC%\HOSTS. The current state of the interfaces is shown too.
+//! (`domain`, `nameserver`: the resolver calls of the socket DLLs),
+//! %ETC%\HOSTS, and the mail settings in %ETC%\TCPOS2.INI, application
+//! `LAN`, with the keys IBM's notebook (its Mail page, CNBMAIL.DLL) and
+//! UltiMail Lite use: LOGIN_ID, POPSRVR, POP_ID, POP_PWD (as typed:
+//! UltiMail scrambles it itself), REPLY_DOMAIN, MAIL_USE_LAN (YES: the
+//! LAN, NO: a dial-up provider, BOTH), PROMPT, PROMPT_POP, MULTI_USER
+//! (YES/NO) and MAIL_STORE (UltiMail's mail store; when there is none
+//! and UMAILER.EXE is on the PATH, its MAILSTOR directory, as IBM's).
+//! The current state of the interfaces is shown too.
 //! Save also applies the Network page to lan0 at once (on or off, DHCP
 //! or the fixed address, mask and router, through IFCONFIG's and ROUTE's
 //! kernel calls, with its name servers); the host name follows at the
@@ -15,7 +23,8 @@
 //!
 //! Without PM, or for scripts: `TCPCFG2 /QUERY` prints the settings,
 //! `TCPCFG2 setting=value ...` changes them without the window
-//! (NETWORK=, HOSTNAME=, DOMAIN=, NAMESERVERS=a[,b,c]).
+//! (NETWORK=, HOSTNAME=, DOMAIN=, NAMESERVERS=a[,b,c], MAILUSER=,
+//! MAILVIA=LAN|DIAL|BOTH, POPSERVER=, POPID=, POPPASSWORD=, REPLYDOMAIN=).
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -88,9 +97,37 @@ const ID_HOST: u32 = 300;
 const ID_DOMAIN: u32 = 301;
 const ID_NS: u32 = 302; // ..304
 const ID_HOSTS: u32 = 400;
+const ID_MAILUSER: u32 = 500;
+const ID_PROMPT: u32 = 501;
+const ID_MULTI: u32 = 502;
+const ID_VIA_LAN: u32 = 503;
+const ID_VIA_DIAL: u32 = 504;
+const ID_VIA_BOTH: u32 = 505;
+const ID_REPLY: u32 = 506;
+const ID_POPSRV: u32 = 507;
+const ID_POPID: u32 = 508;
+const ID_POPPWD: u32 = 509;
+const ID_PROMPTPOP: u32 = 510;
+const ES_UNREADABLE: u32 = 0x0080;
 
 static PAGE_CLASS: &[u8] = b"Rs2TcpCfgPage\0";
 static CLASS: &[u8] = b"Rs2TcpCfg\0";
+
+/// The mail settings (TCPOS2.INI, application LAN).
+#[derive(Clone, Default)]
+struct Mail {
+    user: String,
+    prompt: bool,
+    multi: bool,
+    /// MAIL_USE_LAN: "YES" (the LAN), "NO" (dial-up), "BOTH".
+    via: &'static str,
+    reply: String,
+    pop_server: String,
+    pop_id: String,
+    pop_pwd: String,
+    prompt_pop: bool,
+    store: String,
+}
 
 /// The settings.
 #[derive(Clone, Default)]
@@ -104,6 +141,104 @@ struct Settings {
     domain: String,
     ns: Vec<String>,
     hosts: String,
+    mail: Mail,
+}
+
+unsafe extern "C" {
+    #[link_name = "PMSHAPI.102"]
+    fn PrfOpenProfile(hab: u32, name: *const u8) -> u32;
+    #[link_name = "PMSHAPI.103"]
+    fn PrfCloseProfile(hini: u32) -> u32;
+    #[link_name = "PMSHAPI.115"]
+    fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, cb: u32) -> u32;
+    #[link_name = "PMSHAPI.116"]
+    fn PrfWriteProfileString(hini: u32, app: *const u8, key: *const u8, data: *const u8) -> u32;
+}
+
+/// The mail settings from %ETC%\TCPOS2.INI.
+fn load_mail() -> Mail {
+    let mut m = Mail { via: "YES", ..Default::default() };
+    let path = etc_path("TCPOS2.INI");
+    if read_file(&path).is_some() {
+        let p = z(&path);
+        let hini = unsafe { PrfOpenProfile(0, p.as_ptr()) };
+        if hini != 0 {
+            let get = |key: &str| -> String {
+                let k = z(key);
+                let mut b = [0u8; 260];
+                let n = unsafe { PrfQueryProfileString(hini, b"LAN\0".as_ptr(), k.as_ptr(), b"\0".as_ptr(), b.as_mut_ptr(), b.len() as u32) } as usize;
+                b[..n.min(b.len())].iter().take_while(|&&c| c != 0).map(|&c| c as char).collect()
+            };
+            m.user = get("LOGIN_ID");
+            m.pop_server = get("POPSRVR");
+            m.pop_id = get("POP_ID");
+            m.pop_pwd = get("POP_PWD");
+            m.reply = get("REPLY_DOMAIN");
+            m.store = get("MAIL_STORE");
+            m.via = match get("MAIL_USE_LAN").to_ascii_uppercase().as_str() {
+                "NO" => "NO",
+                "BOTH" => "BOTH",
+                _ => "YES",
+            };
+            m.prompt = get("PROMPT").eq_ignore_ascii_case("YES");
+            m.prompt_pop = get("PROMPT_POP").eq_ignore_ascii_case("YES");
+            m.multi = get("MULTI_USER").eq_ignore_ascii_case("YES");
+            unsafe { PrfCloseProfile(hini) };
+        }
+    }
+    m
+}
+
+/// UltiMail's mail store when TCPOS2.INI names none: the MAILSTOR
+/// directory beside UMAILER.EXE, if that is on the PATH (as IBM's
+/// notebook finds it).
+fn default_store() -> Option<String> {
+    let path = env("PATH")?;
+    for d in path.split(';').map(str::trim).filter(|d| !d.is_empty()) {
+        let d = d.trim_end_matches('\\');
+        if read_file(&alloc::format!("{d}\\UMAILER.EXE")).is_some() {
+            return Some(alloc::format!("{d}\\MAILSTOR"));
+        }
+    }
+    None
+}
+
+/// Write the mail settings to %ETC%\TCPOS2.INI.
+fn save_mail(m: &Mail) -> Result<(), String> {
+    for (what, v) in [("mail user ID", &m.user), ("POP user ID", &m.pop_id), ("POP mail server", &m.pop_server)] {
+        if v.trim().contains(' ') {
+            return Err(alloc::format!("The {what} may not contain blanks."));
+        }
+    }
+    let path = etc_path("TCPOS2.INI");
+    let p = z(&path);
+    let hini = unsafe { PrfOpenProfile(0, p.as_ptr()) };
+    if hini == 0 {
+        return Err(alloc::format!("{path} could not be opened."));
+    }
+    let yes = |b: bool| if b { "YES" } else { "NO" };
+    let store = if m.store.trim().is_empty() { default_store().unwrap_or_default() } else { String::from(m.store.trim()) };
+    let mut keys: Vec<(&str, &str)> = alloc::vec![
+        ("POPSRVR", m.pop_server.trim()),
+        ("POP_ID", m.pop_id.trim()),
+        ("POP_PWD", m.pop_pwd.as_str()),
+        ("LOGIN_ID", m.user.trim()),
+        ("REPLY_DOMAIN", m.reply.trim()),
+        ("MAIL_USE_LAN", m.via),
+        ("PROMPT", yes(m.prompt)),
+        ("PROMPT_POP", yes(m.prompt_pop)),
+        ("MULTI_USER", yes(m.multi)),
+    ];
+    if !store.is_empty() {
+        keys.push(("MAIL_STORE", store.as_str()));
+    }
+    let mut ok = true;
+    for (k, v) in keys {
+        let (k, v) = (z(k), z(v));
+        ok &= unsafe { PrfWriteProfileString(hini, b"LAN\0".as_ptr(), k.as_ptr(), v.as_ptr()) } != 0;
+    }
+    unsafe { PrfCloseProfile(hini) };
+    if ok { Ok(()) } else { Err(alloc::format!("{path} could not be written.")) }
 }
 
 fn config_path() -> String {
@@ -161,6 +296,7 @@ fn load() -> Settings {
         s.ns = ns;
     }
     s.hosts = text(&read_file(&etc_path("HOSTS")).unwrap_or_default());
+    s.mail = load_mail();
     s
 }
 
@@ -278,7 +414,7 @@ fn save(s: &Settings) -> Result<(), String> {
     if !write_all(&etc_path("HOSTS"), &os2::text_bytes(&hosts)) {
         return Err(String::from("HOSTS could not be written."));
     }
-    Ok(())
+    save_mail(&s.mail)
 }
 
 /// Apply the Network page to lan0 now. Ok says what was done.
@@ -347,6 +483,16 @@ fn query(s: &Settings) {
     outln(&alloc::format!("HOSTNAME={}", s.host));
     outln(&alloc::format!("DOMAIN={}", s.domain));
     outln(&alloc::format!("NAMESERVERS={}", s.ns.join(",")));
+    let via = match s.mail.via {
+        "NO" => "DIAL",
+        "BOTH" => "BOTH",
+        _ => "LAN",
+    };
+    outln(&alloc::format!("MAILUSER={}", s.mail.user));
+    outln(&alloc::format!("MAILVIA={via}"));
+    outln(&alloc::format!("POPSERVER={}", s.mail.pop_server));
+    outln(&alloc::format!("POPID={}", s.mail.pop_id));
+    outln(&alloc::format!("REPLYDOMAIN={}", s.mail.reply));
     for l in current().lines() {
         outln(&alloc::format!("now: {l}"));
     }
@@ -375,6 +521,22 @@ fn command_line(a: &[String]) -> u32 {
             "HOSTNAME" => s.host = String::from(v),
             "DOMAIN" => s.domain = String::from(v),
             "NAMESERVERS" => s.ns = v.split(',').filter(|n| !n.is_empty()).map(String::from).collect(),
+            "MAILUSER" => s.mail.user = String::from(v),
+            "MAILVIA" => {
+                s.mail.via = match v.to_ascii_uppercase().as_str() {
+                    "LAN" | "YES" => "YES",
+                    "DIAL" | "NO" => "NO",
+                    "BOTH" => "BOTH",
+                    _ => {
+                        eprint(&alloc::format!("TCPCFG2: MAILVIA is LAN, DIAL or BOTH\r\n"));
+                        return 1;
+                    }
+                }
+            }
+            "POPSERVER" => s.mail.pop_server = String::from(v),
+            "POPID" => s.mail.pop_id = String::from(v),
+            "POPPASSWORD" => s.mail.pop_pwd = String::from(v),
+            "REPLYDOMAIN" => s.mail.reply = String::from(v),
             _ => {
                 eprint(&alloc::format!("TCPCFG2: unknown setting {k}\r\n"));
                 return 1;
@@ -477,6 +639,18 @@ fn show(s: &Settings) {
         set_text(ID_NS + i, s.ns.get(i as usize).map(String::as_str).unwrap_or(""));
     }
     set_text(ID_HOSTS, &s.hosts);
+    let m = &s.mail;
+    set_text(ID_MAILUSER, &m.user);
+    check(ID_PROMPT, m.prompt);
+    check(ID_MULTI, m.multi);
+    check(ID_VIA_LAN, m.via == "YES");
+    check(ID_VIA_DIAL, m.via == "NO");
+    check(ID_VIA_BOTH, m.via == "BOTH");
+    set_text(ID_REPLY, &m.reply);
+    set_text(ID_POPSRV, &m.pop_server);
+    set_text(ID_POPID, &m.pop_id);
+    set_text(ID_POPPWD, &m.pop_pwd);
+    check(ID_PROMPTPOP, m.prompt_pop);
     set_text(ID_NOW, &alloc::format!("Now:\n{}", current()));
     enable_manual();
 }
@@ -493,6 +667,24 @@ fn entered() -> Settings {
         domain: get_text(ID_DOMAIN),
         ns: (0..3).map(|i| get_text(ID_NS + i)).filter(|n| !n.trim().is_empty()).collect(),
         hosts: get_text(ID_HOSTS),
+        mail: Mail {
+            user: get_text(ID_MAILUSER),
+            prompt: checked(ID_PROMPT),
+            multi: checked(ID_MULTI),
+            via: if checked(ID_VIA_DIAL) {
+                "NO"
+            } else if checked(ID_VIA_BOTH) {
+                "BOTH"
+            } else {
+                "YES"
+            },
+            reply: get_text(ID_REPLY),
+            pop_server: get_text(ID_POPSRV),
+            pop_id: get_text(ID_POPID),
+            pop_pwd: get_text(ID_POPPWD),
+            prompt_pop: checked(ID_PROMPTPOP),
+            store: app().saved.mail.store.clone(),
+        },
     }
 }
 
@@ -554,6 +746,41 @@ fn build_hosts_file(p: u32, h: i32, w: i32) {
     unsafe { WinSendMsg(m, MLM_SETTEXTLIMIT, 65535, 0) };
 }
 
+fn build_mail(p: u32, h: i32) {
+    let mut y = h - 40;
+    label(p, "Mail user ID:", 16, y, 150);
+    entry(p, ID_MAILUSER, 170, y, 180, 63);
+    y -= 28;
+    control(p, WC_BUTTON, "~Ask for the mail user ID each time", BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP, ID_PROMPT, 32, y, 340, 22);
+    y -= 24;
+    control(p, WC_BUTTON, "Several ~users share this workstation's mail", BS_AUTOCHECKBOX | WS_TABSTOP, ID_MULTI, 32, y, 360, 22);
+    y -= 34;
+    label(p, "Mail arrives through:", 16, y, 300);
+    y -= 26;
+    control(p, WC_BUTTON, "The ~LAN only", BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, ID_VIA_LAN, 32, y, 320, 22);
+    y -= 24;
+    control(p, WC_BUTTON, "A ~dial-up provider only", BS_AUTORADIOBUTTON, ID_VIA_DIAL, 32, y, 320, 22);
+    y -= 24;
+    control(p, WC_BUTTON, "~Both the LAN and a dial-up provider", BS_AUTORADIOBUTTON, ID_VIA_BOTH, 32, y, 320, 22);
+    y -= 34;
+    label(p, "Reply domain:", 16, y, 150);
+    entry(p, ID_REPLY, 170, y, 180, 127);
+}
+
+fn build_pop(p: u32, h: i32) {
+    let mut y = h - 40;
+    label(p, "Mail is fetched from a POP3 server (UltiMail Lite).", 16, y, 400);
+    y -= 34;
+    for (t, id, limit) in [("POP mail server:", ID_POPSRV, 127), ("POP user ID:", ID_POPID, 127), ("POP password:", ID_POPPWD, 127)] {
+        label(p, t, 16, y, 150);
+        let e = control(p, WC_ENTRYFIELD, "", ES_MARGIN | ES_AUTOSCROLL | WS_TABSTOP | if id == ID_POPPWD { ES_UNREADABLE } else { 0 }, id, 170, y, 180, 22);
+        unsafe { WinSendMsg(e, EM_SETTEXTLIMIT, limit, 0) };
+        y -= 28;
+    }
+    y -= 6;
+    control(p, WC_BUTTON, "Ask for the POP ~information each time", BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP, ID_PROMPTPOP, 32, y, 340, 22);
+}
+
 fn message(s: &str) {
     set_text(ID_MSG, s);
 }
@@ -594,21 +821,28 @@ fn main(s: &os2::Startup) -> u32 {
     let mut pr = RectL { l: 0, b: 0, r: cw - 12, t: ch - 80 };
     unsafe { WinSendMsg(nb, BKM_CALCPAGERECT, &mut pr as *mut RectL as u32, 1) };
     let (pw, ph) = ((pr.r - pr.l).max(200), (pr.t - pr.b).max(200));
-    let tabs = ["Network", "Host Names", "Hosts"];
-    for (i, t) in tabs.iter().enumerate() {
+    // (tab, status line): a page without a tab continues the one before.
+    let pages: [(Option<&str>, &str); 5] =
+        [(Some("Network"), "Page 1 of 1"), (Some("Host Names"), "Page 1 of 1"), (Some("Hosts"), "Page 1 of 1"), (Some("Mail"), "Page 1 of 2"), (None, "Page 2 of 2")];
+    for (i, (t, status)) in pages.iter().enumerate() {
         let page = unsafe { WinCreateWindow(nb, PAGE_CLASS.as_ptr(), b"\0".as_ptr(), WS_CLIPCHILDREN, 0, 0, pw, ph, nb, HWND_TOP, 1000 + i as u32, core::ptr::null(), core::ptr::null()) };
         app().pages.push(page);
         match i {
             0 => build_network(page, ph),
             1 => build_hosts_page(page, ph),
-            _ => build_hosts_file(page, ph, pw),
+            2 => build_hosts_file(page, ph, pw),
+            3 => build_mail(page, ph),
+            _ => build_pop(page, ph),
         }
-        let id = unsafe { WinSendMsg(nb, BKM_INSERTPAGE, 0, (BKA_MAJOR | BKA_STATUSTEXTON | BKA_AUTOPAGESIZE) | BKA_LAST << 16) };
-        let tt = z(t);
-        let st = z(&alloc::format!("Page {} of {}", i + 1, tabs.len()));
+        let style = if t.is_some() { BKA_MAJOR } else { 0 };
+        let id = unsafe { WinSendMsg(nb, BKM_INSERTPAGE, 0, (style | BKA_STATUSTEXTON | BKA_AUTOPAGESIZE) | BKA_LAST << 16) };
+        let st = z(status);
         unsafe {
             WinSendMsg(nb, BKM_SETPAGEWINDOWHWND, id, page);
-            WinSendMsg(nb, BKM_SETTABTEXT, id, tt.as_ptr() as u32);
+            if let Some(t) = t {
+                let tt = z(t);
+                WinSendMsg(nb, BKM_SETTABTEXT, id, tt.as_ptr() as u32);
+            }
             WinSendMsg(nb, BKM_SETSTATUSLINETEXT, id, st.as_ptr() as u32);
         }
     }

@@ -195,21 +195,19 @@ pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
         2 | 3 => 4,                  // SV_CX/CYDBLCLK
         20 | 36 => s.surface.width,  // SV_CXSCREEN, SV_CXFULLSCREEN
         21 => s.surface.height,      // SV_CYSCREEN
-        37 => s.surface.height - win::TITLE_H, // SV_CYFULLSCREEN
-        4 | 5 => 4,                  // SV_CX/CYSIZEBORDER
+        37 => s.surface.height - win::title_h(), // SV_CYFULLSCREEN
+        4 | 5 => crate::frame::border(crate::frame::FCF_SIZEBORDER), // SV_CX/CYSIZEBORDER
         9 => 500,                    // SV_CURSORRATE
         10 => 300,                   // SV_FIRSTSCROLLRATE
         11 => 50,                    // SV_SCROLLRATE
-        22 | 23 => 16,               // SV_CXVSCROLL / SV_CYHSCROLL
-        24 | 25 => 16,               // SV_CYVSCROLLARROW / SV_CXHSCROLLARROW
-        26 | 27 => 1,                // SV_CX/CYBORDER
-        28 | 29 => 3,                // SV_CX/CYDLGFRAME
-        30 => win::TITLE_H,          // SV_CYTITLEBAR
-        31 | 32 => 16,               // SV_CYVSLIDER / SV_CXHSLIDER
-        33 | 34 => 18,               // SV_CX/CYMINMAXBUTTON
-        35 => crate::frame::MENU_H,  // SV_CYMENU: the menu bar
-        38 | 39 => 32,               // SV_CX/CYICON
-        40 | 41 => 32,               // SV_CX/CYPOINTER
+        22..=25 => crate::frame::scroll_w(), // SV_CXVSCROLL, SV_CYHSCROLL, SV_CYVSCROLLARROW, SV_CXHSCROLLARROW
+        26 | 27 => crate::frame::border(crate::frame::FCF_BORDER), // SV_CX/CYBORDER
+        28 | 29 => crate::frame::border(crate::frame::FCF_DLGBORDER), // SV_CX/CYDLGFRAME
+        30 => win::title_h(),          // SV_CYTITLEBAR
+        31 | 32 => crate::frame::scroll_w(), // SV_CYVSLIDER / SV_CXHSLIDER
+        33 | 34 => win::title_h(),   // SV_CX/CYMINMAXBUTTON
+        35 => crate::frame::menu_h(),  // SV_CYMENU: the menu bar
+        38..=41 => crate::pointer::icon_size(), // SV_CX/CYICON, SV_CX/CYPOINTER
         43 => 3,                     // SV_CMOUSEBUTTONS
         44 => -s.ptr_level.min(0),   // SV_POINTERLEVEL
         48 => 1,                     // SV_MOUSEPRESENT
@@ -217,9 +215,9 @@ pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
         59 => 1,                     // SV_INSERTMODE
         66 => 1,                     // SV_ALTMNEMONIC
         64 | 65 => 0,                // SV_MENUROLLDOWN/UPDELAY
-        68 => 75,                    // SV_CXICONTEXTWIDTH
+        68 => crate::scale::px(75),  // SV_CXICONTEXTWIDTH
         69 => 3,                     // SV_CICONTEXTLINES
-        73 | 74 => 2,                // SV_CX/CYMOTIONSTART
+        73 | 74 => crate::scale::px(2), // SV_CX/CYMOTIONSTART
         93 => 1,                     // SV_ANIMATION
         97 => 1,                     // SV_PRINTSCREEN
         100..=102 => 1,              // Input page: Alt+Tab, VIO mouse, async focus
@@ -591,15 +589,26 @@ pub extern "C" fn WinCancelShutdown(_hmq: u32, _always: u32) -> u32 {
     1
 }
 
-/// WinEnableWindowUpdate(hwnd, fEnable): drawing is not held back, so
-/// turning updates on again only repaints the window.
+/// WinEnableWindowUpdate(hwnd, fEnable): as IBM's, WS_VISIBLE becomes
+/// fEnable. Off, the window's image stays on the screen (nothing below
+/// repaints) and drawing into it is not seen; on, it shows again and
+/// repaints. WM_SHOW tells the window when the bit changes. A window
+/// created without WS_VISIBLE and enabled so becomes visible (UltiMail's
+/// In-basket container).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinEnableWindowUpdate(h: u32, on: u32) -> u32 {
-    if !st().desk.exists(h) {
-        return 0;
-    }
-    if on != 0 {
+    let Some(was) = st().desk.get(h).map(|w| w.visible_style()) else { return 0 };
+    let on = on != 0;
+    if on {
+        if !was {
+            st().desk.set_visible(h, true);
+        }
         st().desk.invalidate(h, None, true);
+    } else if was {
+        st().desk.set_visible_bit(h, false);
+    }
+    if was != on {
+        crate::msg::notify(h, win::WM_SHOW, on as u32, 0);
     }
     1
 }

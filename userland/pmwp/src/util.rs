@@ -401,3 +401,10 @@ pub fn debug(s: &str) {
         }
     }
 }
+
+/// `n` pels at 96 dpi, at PM's UI scale for high-dpi screens (RS2SCALE
+/// in CONFIG.SYS): SV_CXICON is 32 at 100%, and grows with the scale.
+pub fn ui(n: i32) -> i32 {
+    let icon = unsafe { crate::pm::WinQuerySysValue(1, 38) };
+    if icon <= 0 || icon == 32 { n } else { (n * icon + 16) / 32 }
+}

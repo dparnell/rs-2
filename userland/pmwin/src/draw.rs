@@ -179,6 +179,21 @@ impl Canvas<'_> {
         self.vline(r.right - 1, r.bottom, r.top, br);
     }
 
+    /// A solid arrow head of `n` rows (each a pel shorter at both ends)
+    /// centred on (cx, cy), pointing up (0), down (1), left (2) or right (3).
+    pub fn triangle(&mut self, cx: i32, cy: i32, dir: u8, n: i32, col: u32) {
+        let d = n / 2;
+        for i in 0..n {
+            let r = match dir {
+                0 => Rect::new(cx - i, cy + d - i, cx + i + 1, cy + d + 1 - i),
+                1 => Rect::new(cx - i, cy - d + i, cx + i + 1, cy - d + 1 + i),
+                2 => Rect::new(cx - d + i, cy - i, cx - d + 1 + i, cy + i + 1),
+                _ => Rect::new(cx + d - i, cy - i, cx + d + 1 - i, cy + i + 1),
+            };
+            self.fill(r, col);
+        }
+    }
+
     pub fn raised(&mut self, r: Rect) {
         self.bevel(r, light(), shadow());
     }

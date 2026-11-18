@@ -17,6 +17,7 @@ use alloc::vec::Vec;
 use gpi::Rect;
 use pmwin::{ws, HWND_DESKTOP};
 
+use crate::scale::{du, from_du};
 use crate::ctl::{self, *};
 use crate::frame::{self, FCF_BORDER, FCF_DLGBORDER, FCF_SIZEBORDER, SC_CLOSE};
 use crate::lock::wndproc;
@@ -46,10 +47,6 @@ const EDI_PREVGROUPITEM: u32 = 7;
 
 const EM_SETSEL: u32 = 0x0142;
 const BM_CLICK: u32 = 0x0120;
-
-/// Pixels per dialog unit.
-const DU_X: i32 = 2;
-const DU_Y: i32 = 2;
 
 wndproc! {
     def_dlg_entry => WinDefDlgProc;
@@ -101,10 +98,10 @@ pub extern "C" fn WinCreateDlg(parent: u32, owner: u32, proc_: u32, pdlgt: *cons
 /// screen. The template size is the area inside the frame controls.
 fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
     let b = frame::border(fcf);
-    let title = if fcf & (frame::FCF_TITLEBAR | frame::FCF_SYSMENU) != 0 { frame::TITLE_H } else { 0 };
+    let title = if fcf & (frame::FCF_TITLEBAR | frame::FCF_SYSMENU) != 0 { frame::title_h() } else { 0 };
     let s = st();
-    let (cx, cy) = (t.cx * DU_X + 2 * b, t.cy * DU_Y + 2 * b + title);
-    let (mut x, mut y) = (t.x * DU_X, t.y * DU_Y);
+    let (cx, cy) = (du(t.cx) + 2 * b, du(t.cy) + 2 * b + title);
+    let (mut x, mut y) = (du(t.x), du(t.y));
     if t.style & FS_MOUSEALIGN != 0 {
         x += s.pointer.x;
         y += s.pointer.y;
@@ -123,22 +120,28 @@ fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
 
 pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32 {
     let parent = if parent == 0 { HWND_DESKTOP } else { parent };
-    // The actual owner is the ancestor of hwndOwner that is a child of
-    // the dialog's parent (a client window's frame, for a dialog on the
-    // desktop).
+    // The actual owner is the ancestor of hwndOwner (or hwndOwner) that
+    // is a child of the dialog's parent (a client window's frame, for a
+    // dialog on the desktop); without one it is NULLHANDLE, as in IBM's
+    // dialog manager. UltiMail's text viewer loads its dialog with its
+    // parent as owner and posts to the owner, so to its own queue.
     let mut owner = owner;
-    while owner != 0 && st().desk.get(owner).is_some_and(|w| w.parent != parent && w.parent != 0) {
-        owner = ctl::parent(owner);
-    }
-    if !st().desk.exists(owner) {
-        owner = 0;
+    loop {
+        match st().desk.get(owner) {
+            Some(w) if w.parent == parent => break,
+            Some(w) if w.parent != 0 => owner = w.parent,
+            _ => {
+                owner = 0;
+                break;
+            }
+        }
     }
     // A template whose window is not a frame (PMREXXIO's input line is
     // an entry field): that class, subclassed by the dialog procedure,
     // which passes the rest to WinDefDlgProc and so to the class (the
     // window keeps its class's control data, no dialog data).
     if t.class != b"#1" && st().class(&t.class).is_some() {
-        let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y);
+        let pos = Rect::new(du(t.x), du(t.y), du(t.x + t.cx), du(t.y + t.cy));
         crate::pp::set_pending(t.pres as u32);
         let h = win::create(parent, &t.class, &t.text, t.style & !ws::VISIBLE, pos, owner, t.id, t.ctl as u32);
         if h == 0 {
@@ -219,7 +222,7 @@ fn create_item(parent: u32, dlg: u32, t: &DlgItemT, off: i32) {
         class = b"#5".to_vec();
         style = (style & 0xffff_0000) | 0x09;
     }
-    let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y).offset(off, off);
+    let pos = Rect::new(du(t.x), du(t.y), du(t.x + t.cx), du(t.y + t.cy)).offset(off, off);
     crate::pp::set_pending(t.pres as u32);
     let h = win::create(parent, &class, &t.text, style, pos, dlg, t.id, t.ctl as u32);
     for c in &t.children {
@@ -589,7 +592,7 @@ pub extern "C" fn WinMapDlgPoints(_dlg: u32, pts: *mut i32, n: u32, to_window: u
     for i in 0..n as usize {
         unsafe {
             let (x, y) = (pts.add(2 * i).read_unaligned(), pts.add(2 * i + 1).read_unaligned());
-            let (x, y) = if to_window != 0 { (x * DU_X, y * DU_Y) } else { (x / DU_X, y / DU_Y) };
+            let (x, y) = if to_window != 0 { (du(x), du(y)) } else { (from_du(x), from_du(y)) };
             pts.add(2 * i).write_unaligned(x);
             pts.add(2 * i + 1).write_unaligned(y);
         }

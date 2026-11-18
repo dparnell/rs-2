@@ -359,12 +359,21 @@ impl Ctx<'_> {
         Some(s.iter().map(|&b| b as char).collect())
     }
 
-    /// Write a NUL-terminated string.
+    /// Write a NUL-terminated string. Like `read_str`, one byte per
+    /// character (OS/2 text in the code page: U+0080..U+00FF are its
+    /// bytes 0x80..0xFF), not UTF-8.
     pub fn write_str(&self, addr: u32, s: &str) -> bool {
-        let mut v: Vec<u8> = s.bytes().collect();
+        let mut v = os2_bytes(s);
         v.push(0);
         self.write(addr, &v)
     }
+}
+
+/// OS/2 text as the kernel holds it (one character per byte, as
+/// `Ctx::read_str` reads it) back to its bytes; characters beyond U+00FF
+/// become '?'.
+pub fn os2_bytes(s: &str) -> Vec<u8> {
+    s.chars().map(|ch| u8::try_from(ch as u32).unwrap_or(b'?')).collect()
 }
 
 /// True if a gate entry uses the 16-bit convention.
@@ -546,6 +555,13 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
             stack_linear
         );
     }
+    // As IBM's router: the KBD and MOU calls first check the caller's
+    // process type (a PM or detached process has no keyboard or mouse).
+    let forced = forced.or_else(|| match gate::MODULES[module as usize] {
+        "KBDCALLS" => kbdapi::refused(&ctx),
+        "MOUCALLS" => mou::refused(&ctx),
+        _ => None,
+    });
     if forced.is_none() && route && subsys::route(&mut ctx, module as u8, ordinal as u16) {
         return;
     }

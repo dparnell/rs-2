@@ -119,7 +119,7 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     if hp != 0 {
                         ctl::set_data::<u32>(h, hp);
                         if let Some(w) = crate::state::st().desk.get(h) {
-                            let n = crate::pointer::ICON;
+                            let n = crate::pointer::icon_size();
                             let (x, y) = (w.x + w.cx / 2 - n / 2, w.y + w.cy - n);
                             crate::state::st().desk.set_pos(h, x, y, n, n);
                         }

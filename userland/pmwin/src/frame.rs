@@ -68,11 +68,17 @@ const TBM_SETHILITE: u32 = 0x01e3;
 const TBM_QUERYHILITE: u32 = 0x01e4;
 
 /// Height of a frame's title bar.
-pub const TITLE_H: i32 = 22;
+pub fn title_h() -> i32 {
+    crate::scale::px(22)
+}
 /// Height of the menu bar.
-pub const MENU_H: i32 = 20;
+pub fn menu_h() -> i32 {
+    crate::scale::px(20)
+}
 /// Width of frame scroll bars.
-pub const SCROLL_W: i32 = 16;
+pub fn scroll_w() -> i32 {
+    crate::scale::px(16)
+}
 
 wndproc! {
     frame_entry => frame_proc;
@@ -90,11 +96,11 @@ pub fn is_frame(h: u32) -> bool {
 /// Frame border width.
 pub fn border(fcf: u32) -> i32 {
     if fcf & FCF_SIZEBORDER != 0 {
-        4
+        crate::scale::px(4)
     } else if fcf & FCF_DLGBORDER != 0 {
-        3
+        crate::scale::px(3)
     } else if fcf & FCF_BORDER != 0 {
-        1
+        crate::scale::px(1)
     } else {
         0
     }
@@ -258,17 +264,17 @@ fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
     let title = WinWindowFromID(frame, FID_TITLEBAR);
     let minmax = WinWindowFromID(frame, FID_MINMAX);
     if sys != 0 || title != 0 || minmax != 0 {
-        let y = top - TITLE_H;
+        let y = top - title_h();
         let mut tl = l;
         let mut tr = r;
         if sys != 0 {
-            out.push((sys, Rect::new(l, y, l + TITLE_H, top)));
-            tl += TITLE_H;
+            out.push((sys, Rect::new(l, y, l + title_h(), top)));
+            tl += title_h();
         }
         if minmax != 0 {
             let n = menu::item_count(minmax).max(1);
-            out.push((minmax, Rect::new(r - n * TITLE_H, y, r, top)));
-            tr -= n * TITLE_H;
+            out.push((minmax, Rect::new(r - n * title_h(), y, r, top)));
+            tr -= n * title_h();
         }
         if title != 0 {
             out.push((title, Rect::new(tl, y, tr, top)));
@@ -281,18 +287,18 @@ fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
     // GUI library puts its menu bar in so, and it never came back).
     let m = WinWindowFromID(frame, FID_MENU);
     if m != 0 {
-        out.push((m, Rect::new(l, top - MENU_H, r, top)));
-        top -= MENU_H;
+        out.push((m, Rect::new(l, top - menu_h(), r, top)));
+        top -= menu_h();
     }
     let vs = WinWindowFromID(frame, FID_VERTSCROLL);
     let hs = WinWindowFromID(frame, FID_HORZSCROLL);
     if hs != 0 {
-        out.push((hs, Rect::new(l, bot, r - if vs != 0 { SCROLL_W } else { 0 }, bot + SCROLL_W)));
-        bot += SCROLL_W;
+        out.push((hs, Rect::new(l, bot, r - if vs != 0 { scroll_w() } else { 0 }, bot + scroll_w())));
+        bot += scroll_w();
     }
     if vs != 0 {
-        out.push((vs, Rect::new(r - SCROLL_W, bot, r, top)));
-        r -= SCROLL_W;
+        out.push((vs, Rect::new(r - scroll_w(), bot, r, top)));
+        r -= scroll_w();
     }
     let rc = Rect::new(l, bot, r.max(l), top.max(bot));
     if client != 0 {
@@ -377,16 +383,16 @@ pub fn insets(frame: u32) -> (i32, i32, i32, i32) {
     let b = border(fcf(frame));
     let (mut bot, mut r, mut top) = (b, b, b);
     if [FID_SYSMENU, FID_TITLEBAR, FID_MINMAX].into_iter().any(|id| WinWindowFromID(frame, id) != 0) {
-        top += TITLE_H;
+        top += title_h();
     }
     if WinWindowFromID(frame, FID_MENU) != 0 {
-        top += MENU_H;
+        top += menu_h();
     }
     if WinWindowFromID(frame, FID_HORZSCROLL) != 0 {
-        bot += SCROLL_W;
+        bot += scroll_w();
     }
     if WinWindowFromID(frame, FID_VERTSCROLL) != 0 {
-        r += SCROLL_W;
+        r += scroll_w();
     }
     (b, bot, r, top)
 }
@@ -511,7 +517,7 @@ pub fn is_minimized(h: u32) -> bool {
 pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
     let r = c.rect();
     c.fill(r, color::sys(color::SYSCLR_BACKGROUND));
-    let n = crate::pointer::ICON;
+    let n = crate::pointer::icon_size();
     let ir = Rect::new(r.left, r.top - n - 2, r.right, r.top - 2);
     let icon = if icon != 0 && crate::pointer::get(icon).is_some() { icon } else { crate::pointer::system(pmwin::sysptr::SPTR_APPICON) };
     crate::pointer::draw_in(c, ir, icon, false, false);
@@ -652,6 +658,17 @@ pub extern "C" fn Rs2SetMinButtonType(hide_button: u32, hide_window: u32) -> u32
         }
     }
     prev
+}
+
+/// Where a minimized or maximized frame goes when it is restored (the
+/// window words QWS_XRESTORE... of IBM's frame).
+pub fn set_restore_pos(h: u32, r: (i32, i32, i32, i32)) {
+    let Some(f) = st().frames.get_mut(&h) else { return };
+    if let Some(m) = f.min.as_mut() {
+        m.pos = r;
+    } else {
+        f.restore = Some(r);
+    }
 }
 
 /// Restore a minimized frame (or a maximized one).
@@ -985,7 +1002,7 @@ pub fn track(p: Point, buttons: u8) {
         x += dx;
         y += dy;
     } else {
-        let (minw, minh) = (120, TITLE_H + 2 * border(fcf(h)) + 8);
+        let (minw, minh) = (120, title_h() + 2 * border(fcf(h)) + 8);
         if e & 1 != 0 {
             let ncx = (cx - dx).max(minw);
             x += cx - ncx;

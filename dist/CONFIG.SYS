@@ -22,6 +22,9 @@ SET PM_HANGTIME=2000
 REM The WarpCenter: Ctrl and a click on the window list button list the
 REM processes, to end one (as IBM's; SCKILLCONFIRMDISABLED=YES ends it unasked)
 SET SCKILLFEATUREENABLED=YES
+REM The WarpCenter's menus highlight the item under the pointer (IBM's
+REM follow only while a mouse button is down without it)
+SET MENUSFOLLOWPOINTER=YES
 REM During boot, CHKDSK /F runs on every volume that was not shut down cleanly
 REM (HPFS, FAT and JFS: rs2 has no separate drivers, this line is for all of
 REM them). To choose drives list their letters, as /AUTOCHECK:CD; without the

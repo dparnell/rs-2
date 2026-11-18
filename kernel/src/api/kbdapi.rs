@@ -27,6 +27,24 @@ fn detached(c: &Ctx) -> bool {
     c.process.background.load(core::sync::atomic::Ordering::Relaxed) && c.process.exe.app_type & 7 != 3
 }
 
+const ERROR_KBD_EXTENDED_SG: u32 = 504;
+
+/// IBM's _KbdCheckProcType (DOSCALL1, before every KBD call, studied with
+/// Ghidra): a detached process gets ERROR_KBD_DETACHED, and one that is
+/// neither a full-screen nor a windowed text program (a PM program) gets
+/// ERROR_KBD_EXTENDED_SG. IBM Works' database engine shows its errors as
+/// text and waits for a key with its C runtime's getch: in the PIM (a PM
+/// program) that returns at once instead of waiting for ever.
+pub fn refused(c: &Ctx) -> Option<u32> {
+    if detached(c) {
+        Some(ERROR_KBD_DETACHED)
+    } else if c.process.exe.app_type & 7 == 3 {
+        Some(ERROR_KBD_EXTENDED_SG)
+    } else {
+        None
+    }
+}
+
 fn sid() -> u32 {
     crate::session::io_session()
 }

@@ -1879,6 +1879,47 @@ there), and the labels show `~` mnemonics.
   name, `flStyle`, weight, em height) follows the choice as it changes,
   since applications' procedures read it when OK or Apply arrives.
 
+**UI scale for high-dpi screens.** `SET RS2SCALE=150` in CONFIG.SYS
+(100 to 300, in steps of 25) makes PM's user interface that much bigger
+while the screen keeps its resolution, as OS/2's "large fonts" (120
+dpi) display drivers did, further. Display (`DISPLAY.EXE`, its UI
+scale list; `DISPLAY SCALE=150` from a script) and the System object's
+Screen page save it; PM reads it once (`scale.rs`, the first PM
+process puts it in the shared state), so it takes effect at the next
+start. What follows it (`scale::px` turns 96-dpi pels into scaled ones):
+
+- the system metrics: SV_CYTITLEBAR, SV_CYMENU, the scroll bar sizes,
+  the border widths (SV_CXBORDER, SV_CXDLGFRAME, SV_CXSIZEBORDER),
+  SV_CX/CYMINMAXBUTTON, SV_CXICONTEXTWIDTH; the frame controls,
+  menus (item heights, gaps, the check mark and cascade arrow), list
+  boxes, MLEs, entry field margins, check boxes and radio buttons, the
+  arrows of scroll bars, combo boxes, spin buttons, sliders and
+  notebooks, the title-bar buttons and the system bitmaps
+  (`WinGetSysBitmap`);
+- icons and pointers: SV_CXICON/SV_CXPOINTER are 32 x the scale (48 at
+  150%); icons are chosen and scaled to it as they are loaded, the
+  system pointers with them (hot spots kept on the same pel). The
+  hardware cursor takes at most 64 x 64, so above 200% it gets the
+  pointer made smaller;
+- dialog units: 2 x the scale pels each (3 at 150%), so every dialog
+  template, IBM's included, grows;
+- fonts: the system font is 13 x the scale pels; DevQueryCaps reports
+  CAPS_HORIZONTAL/VERTICAL_FONT_RES as 96 x the scale (FONTMETRICS
+  sXDeviceRes too), a presentation parameter font of N points is
+  N x that / 72 pels, and IBM's WarpSans and other image fonts are used
+  only at the resolution they were made for (a 120 dpi one at 125%),
+  else the outline faces draw them. Programs that size
+  fonts from the font resolution get bigger text too;
+- the Workplace Shell (`util::ui`, from SV_CXICON): the WarpCenter, the
+  LaunchPad (laid out for 96 dpi, then scaled), folder and desktop icon
+  grids.
+
+CAPS_HORIZONTAL_RESOLUTION stays the screen's, so page units (PU_LOMETRIC
+and the like) keep their size, and programs that place controls in pels
+(`WinCreateWindow` with fixed sizes) keep them: their text and controls'
+insides grow, their windows do not, as on other systems with programs
+that do not know about the scale.
+
 ## Fonts
 
 PM draws text anti-aliased from outline fonts, rendered by rs2's own

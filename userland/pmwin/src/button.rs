@@ -243,11 +243,13 @@ fn push(c: &mut Canvas, r: Rect, style: u32, text: &[u8], fg: u32, down: bool, f
     }
 }
 
-const BOX: i32 = 13;
+fn box_w() -> i32 {
+    crate::scale::px(13)
+}
 
 fn box_rect(r: Rect) -> Rect {
-    let y = r.bottom + (r.height() - BOX) / 2;
-    Rect::new(r.left + 1, y, r.left + 1 + BOX, y + BOX)
+    let y = r.bottom + (r.height() - box_w()) / 2;
+    Rect::new(r.left + 1, y, r.left + 1 + box_w(), y + box_w())
 }
 
 fn check_box(c: &mut Canvas, r: Rect, check: u32, down: bool) {
@@ -256,32 +258,30 @@ fn check_box(c: &mut Canvas, r: Rect, check: u32, down: bool) {
     c.sunken(b);
     c.sunken(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1));
     if check == 1 {
-        let (x, y) = (b.left + 3, b.bottom + 5);
-        for i in 0..3 {
-            c.fill(Rect::new(x + i, y - i + 1, x + i + 1, y - i + 4), draw::text());
-        }
-        for i in 0..5 {
-            c.fill(Rect::new(x + 3 + i, y - 2 + i, x + 4 + i, y + i + 1), draw::text());
-        }
+        crate::sysdraw::check_mark(c, b.left + crate::scale::px(1), b.bottom + crate::scale::px(1), draw::text());
     }
 }
 
 fn radio(c: &mut Canvas, r: Rect, on: bool, down: bool) {
     let b = box_rect(r);
-    let (cx, cy) = (b.left + BOX / 2, b.bottom + BOX / 2);
+    let (cx, cy) = (b.left + box_w() / 2, b.bottom + box_w() / 2);
     // Filled disc, then the 3D ring, row by row.
-    for dy in -6i32..=6 {
-        let w = isqrt(36 - dy * dy);
+    let rr = box_w() / 2;
+    for dy in -rr..=rr {
+        let w = isqrt(rr * rr - dy * dy);
         c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), if down { draw::face() } else { draw::window() });
         let col = if dy > 0 { draw::shadow() } else { draw::light() };
         c.fill(Rect::new(cx - w, cy + dy, cx - w + 1, cy + dy + 1), if dy >= 0 { draw::shadow() } else { col });
         c.fill(Rect::new(cx + w, cy + dy, cx + w + 1, cy + dy + 1), if dy > 0 { draw::shadow() } else { draw::light() });
     }
-    c.hline(cx - 2, cx + 3, cy + 6, draw::shadow());
-    c.hline(cx - 2, cx + 3, cy - 6, draw::light());
+    let e = isqrt(rr * rr - (rr - 1) * (rr - 1));
+    c.hline(cx - e + 1, cx + e, cy + rr, draw::shadow());
+    c.hline(cx - e + 1, cx + e, cy - rr, draw::light());
     if on {
-        for dy in -2i32..=2 {
-            let w = isqrt(6 - dy * dy);
+        let d = crate::scale::px(2);
+        let d2 = d * d + crate::scale::px(2);
+        for dy in -d..=d {
+            let w = isqrt(d2 - dy * dy);
             c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), draw::text());
         }
     }
@@ -296,7 +296,7 @@ fn isqrt(v: i32) -> i32 {
 }
 
 fn label(c: &mut Canvas, r: Rect, text: &[u8], fg: u32, focus: bool) {
-    let t = Rect::new(r.left + BOX + 6, r.bottom, r.right, r.top);
+    let t = Rect::new(r.left + box_w() + crate::scale::px(6), r.bottom, r.right, r.top);
     c.text_in(t, text, fg, draw::DT_VCENTER | draw::DT_MNEMONIC);
     if focus {
         let f = c.font();

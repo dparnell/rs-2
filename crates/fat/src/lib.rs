@@ -1513,6 +1513,23 @@ mod tests {
         (c.findings.clone(), c.totals.clone())
     }
 
+    /// Code page characters in 8.3 names (rs2's paths hold them one per
+    /// character, U+0080..U+00FF): UltiMail names its mail store files
+    /// with bytes 0xE0..0xED; they are stored as those bytes.
+    #[test]
+    fn code_page_characters_in_short_names() {
+        let mut v = sample(FatType::Fat16, 32 << 20);
+        let now = Timestamp::new(2026, 11, 18, 8, 0, 0);
+        let name = "E0G004\u{e7}\u{eb}.{\u{ed}-";
+        assert_eq!(to_83(name).as_deref(), Some(name));
+        v.create_file(name, 0, now).unwrap();
+        let e = v.lookup(name).unwrap();
+        assert_eq!(e.short, name);
+        assert_eq!(&name::pack_83(name).unwrap(), b"E0G004\xe7\xeb{\xed-");
+        // Nine characters do not fit, whatever their bytes.
+        assert!(to_83("E0G004\u{e7}\u{eb}X.A").is_none());
+    }
+
     #[test]
     fn dirty_flag_follows_the_mount() {
         for (ty, size, at) in [(FatType::Fat16, 32 << 20, 0x25), (FatType::Fat32, 80 << 20, 0x41)] {

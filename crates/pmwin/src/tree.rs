@@ -793,6 +793,19 @@ impl Desktop {
         self.windows.values().filter(|w| w.queue == queue).map(|w| w.hwnd).collect()
     }
 
+    /// Only the WS_VISIBLE bit (WinEnableWindowUpdate FALSE): what the
+    /// window shows stays on the screen, nothing below is repainted.
+    pub fn set_visible_bit(&mut self, h: Hwnd, on: bool) {
+        if let Some(w) = self.windows.get_mut(&h) {
+            if on {
+                w.style |= ws::VISIBLE;
+            } else {
+                w.style &= !ws::VISIBLE;
+            }
+        }
+        self.generation = self.generation.wrapping_add(1);
+    }
+
     pub fn set_visible(&mut self, h: Hwnd, on: bool) {
         let r = self.screen_rect(h);
         let above = if on { self.above_painted(h) } else { self.above(h) };

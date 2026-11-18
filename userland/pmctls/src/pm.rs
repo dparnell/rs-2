@@ -109,6 +109,7 @@ pub const LM_QUERYITEMTEXT: u32 = 0x0168;
 pub const LM_DELETEALL: u32 = 0x016e;
 pub const LM_SEARCHSTRING: u32 = 0x016b;
 pub const LM_SETTOPINDEX: u32 = 0x0162;
+pub const LM_SETITEMHANDLE: u32 = 0x0169;
 pub const LIT_END: u32 = 0xffff_ffff;
 pub const LIT_NONE: u32 = 0xffff_ffff;
 pub const BM_SETCHECK: u32 = 0x0125;

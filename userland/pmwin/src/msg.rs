@@ -610,7 +610,7 @@ fn run_timers(q: u32) -> u32 {
         // Timers are generated as the thread reads its queue: they do not
         // count as input it fails to take.
         let waited = x.msgs.waited(t);
-        x.msgs.post(QMsg { hwnd: h, msg: WM_TIMER, mp1: id, mp2: 0, time: t, x: p.x, y: p.y, reserved: 0 });
+        x.msgs.post(QMsg { hwnd: h, msg: WM_TIMER, mp1: id, mp2: 0, time: t, x: p.x, y: p.y, reserved: hooks::QMSG_TIMER });
         if waited == 0 {
             x.msgs.retrieved(t, false);
         }
@@ -655,14 +655,23 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
         if !queue.sent.is_empty() {
             continue;
         }
-        let found = if hooked && hooks::any(hooks::HK_CHECKMSGFILTER) {
-            take_checked(q, filter, first, last, remove, fl)
-        } else {
-            queue.msgs.take(filter, first, last, remove)
+        // IBM's order: posted messages, keyboard and mouse input,
+        // WM_PAINT, then WM_TIMER.
+        let checked = hooked && hooks::any(hooks::HK_CHECKMSGFILTER);
+        let take = |below: u8| {
+            if checked {
+                take_checked(q, filter, first, last, remove, fl, below)
+            } else {
+                st().queues.get_mut(&q)?.msgs.take_ranked(filter, first, last, remove, hooks::rank, below)
+            }
         };
+        let paint_ok = (first == 0 && last == 0) || (first..=last).contains(&WM_PAINT);
+        let paint = || st().desk.paint_pending(q).filter(|&h| paint_ok && (filter == 0 || filter == h));
+        let found = take(2).or_else(|| if paint().is_some() { None } else { take(3) });
         if let Some(mut m) = found {
             let input = m.reserved & hooks::QMSG_INPUT != 0;
-            m.reserved &= !hooks::QMSG_INPUT;
+            let orig_reserved = m.reserved;
+            m.reserved &= !hooks::QMSG_FLAGS;
             if remove {
                 let Some(queue) = st().queues.get_mut(&q) else { return None };
                 queue.msg_pos = gpi::Point::new(m.x, m.y);
@@ -688,7 +697,7 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
                 if !remove {
                     if let Some(x) = st().queues.get_mut(&q) {
                         let mut orig = m;
-                        orig.reserved |= if input { hooks::QMSG_INPUT } else { 0 };
+                        orig.reserved = orig_reserved;
                         x.msgs.take_msg(&orig, true);
                     }
                 }
@@ -697,8 +706,7 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
             return Some(m);
         }
         let s = st();
-        let paint_ok = (first == 0 && last == 0) || (first..=last).contains(&WM_PAINT);
-        if let Some(h) = s.desk.paint_pending(q).filter(|&h| paint_ok && (filter == 0 || filter == h)) {
+        if let Some(h) = paint() {
             if let Some(x) = s.queues.get_mut(&q) {
                 x.msgs.retrieved(t, false);
             }
@@ -730,11 +738,12 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
 
 /// The first message for `filter` that the check message filter hooks
 /// let through (they decide instead of the range `first..=last`).
-fn take_checked(q: u32, filter: u32, first: u32, last: u32, remove: bool, fl: u32) -> Option<QMsg> {
-    let cands: alloc::vec::Vec<QMsg> = st().queues.get(&q)?.msgs.for_window(filter).copied().collect();
+fn take_checked(q: u32, filter: u32, first: u32, last: u32, remove: bool, fl: u32, below: u8) -> Option<QMsg> {
+    let mut cands: alloc::vec::Vec<QMsg> = st().queues.get(&q)?.msgs.for_window(filter).filter(|m| hooks::rank(m) < below).copied().collect();
+    cands.sort_by_key(hooks::rank);
     for c in cands {
         let mut shown = c;
-        shown.reserved &= !hooks::QMSG_INPUT;
+        shown.reserved &= !hooks::QMSG_FLAGS;
         let skip = hooks::check_filter(&shown, first, last, fl).unwrap_or(false);
         if !skip {
             if let Some(m) = st().queues.get_mut(&q)?.msgs.take_msg(&c, remove) {

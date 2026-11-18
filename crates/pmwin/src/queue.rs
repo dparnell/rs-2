@@ -85,6 +85,29 @@ impl MsgQueue {
         if remove { self.msgs.remove(i) } else { Some(self.msgs[i]) }
     }
 
+    /// As `take`, but by priority: of the matching messages, the oldest
+    /// one with the lowest `rank` below `below` (IBM's WinGetMsg takes
+    /// posted messages before keyboard and mouse input, and WM_TIMER
+    /// last).
+    pub fn take_ranked(&mut self, filter: u32, first: u32, last: u32, remove: bool, rank: impl Fn(&QMsg) -> u8, below: u8) -> Option<QMsg> {
+        let range = |m: u32| (first == 0 && last == 0) || (first <= last && (first..=last).contains(&m)) || (first > last && (m >= first || m <= last));
+        let mut best: Option<(usize, u8)> = None;
+        for (i, m) in self.msgs.iter().enumerate() {
+            if !((filter == 0 || m.hwnd == filter || m.hwnd == 0) && range(m.msg)) {
+                continue;
+            }
+            let r = rank(m);
+            if r < below && best.is_none_or(|(_, b)| r < b) {
+                best = Some((i, r));
+                if r == 0 {
+                    break;
+                }
+            }
+        }
+        let (i, _) = best?;
+        if remove { self.msgs.remove(i) } else { Some(self.msgs[i]) }
+    }
+
     /// The messages for `filter` (as `take` matches windows), oldest
     /// first: the candidates a message filter hook looks at.
     pub fn for_window(&self, filter: u32) -> impl Iterator<Item = &QMsg> {
@@ -164,6 +187,22 @@ mod tests {
         assert_eq!(q.take(0, 0x2a, 0x2a, true).unwrap().msg, 0x2a);
         assert_eq!(q.take(0, 0x70, 0x7f, false), None);
         assert_eq!(q.len(), 1);
+    }
+
+    #[test]
+    fn ranked() {
+        let mut q = MsgQueue::new();
+        q.post(QMsg { reserved: 1, ..m(5, 0x7a, 0) });
+        q.post(QMsg { reserved: 2, ..m(5, 0x24, 0) });
+        q.post(m(5, 0x20, 0));
+        q.post(QMsg { reserved: 1, ..m(5, 0x7a, 1) });
+        let rank = |m: &QMsg| m.reserved as u8;
+        // Posted first, then input in its order, the timer only when asked.
+        assert_eq!(q.take_ranked(0, 0, 0, true, rank, 2).unwrap().msg, 0x20);
+        assert_eq!(q.take_ranked(0, 0, 0, true, rank, 2).unwrap().time, 0);
+        assert_eq!(q.take_ranked(0, 0, 0, true, rank, 2).unwrap().time, 1);
+        assert_eq!(q.take_ranked(0, 0, 0, true, rank, 2), None);
+        assert_eq!(q.take_ranked(0, 0, 0, true, rank, 3).unwrap().msg, 0x24);
     }
 
     #[test]

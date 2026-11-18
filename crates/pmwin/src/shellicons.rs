@@ -67,7 +67,11 @@ pub const TRAY: u32 = 32;
 pub const BATTERY: u32 = 33;
 /// On external power: a plug.
 pub const PLUG: u32 = 34;
-pub const LAST: u32 = 34;
+/// The WarpCenter's mail indicator, no new mail: a pale envelope.
+pub const MAIL: u32 = 35;
+/// New mail delivered: an envelope with a stamp and an address.
+pub const MAIL_NEW: u32 = 36;
+pub const LAST: u32 = 36;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -267,6 +271,25 @@ fn draw(id: u32, size: i32) -> Option<Image> {
             p.frame(3.0, 9.0, 27.0, 23.0, DARK);
             p.rect(27.0, 13.0, 30.0, 19.0, DARK);
             p.rect(5.0, 11.0, 19.0, 21.0, rgb(0x30a040));
+        }
+        MAIL | MAIL_NEW => {
+            // An envelope (as IBM's: dark blue edge, white, a red stamp
+            // and blue address lines when there is new mail).
+            let new = id == MAIL_NEW;
+            let (edge, face) = if new { (rgb(0x000080), WHITE) } else { (rgb(0x808890), rgb(0xe8e8e8)) };
+            p.rect(3.0, 7.0, 29.0, 25.0, face);
+            p.frame(3.0, 7.0, 29.0, 25.0, edge);
+            p.frame(4.0, 8.0, 28.0, 24.0, edge);
+            if new {
+                p.rect(22.0, 18.0, 26.0, 22.0, rgb(0xff0000));
+                p.rect(7.0, 20.0, 10.0, 22.0, rgb(0x0000ff));
+                p.rect(11.0, 13.0, 21.0, 14.0, rgb(0x0000ff));
+                p.rect(11.0, 10.5, 21.0, 11.5, rgb(0x0000ff));
+            } else {
+                // The flap.
+                p.line((4.5, 23.5), (16.0, 15.0), 1.0, edge);
+                p.line((16.0, 15.0), (27.5, 23.5), 1.0, edge);
+            }
         }
         PLUG => {
             p.line((10.0, 22.0), (10.0, 29.0), 2.5, DARK);

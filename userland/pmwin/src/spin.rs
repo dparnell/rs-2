@@ -89,11 +89,11 @@ fn has_arrows(h: u32) -> bool {
 }
 
 fn arrow_w(h: u32) -> i32 {
-    if has_arrows(h) { (ctl::size(h).1).clamp(10, 18) } else { 0 }
+    if has_arrows(h) { (ctl::size(h).1).clamp(crate::scale::px(10), crate::scale::px(18)) } else { 0 }
 }
 
 fn border(h: u32) -> i32 {
-    if ctl::style(h) & SPBS_NOBORDER != 0 { 0 } else { 2 }
+    if ctl::style(h) & SPBS_NOBORDER != 0 { 0 } else { crate::scale::px(2) }
 }
 
 fn layout(h: u32) {
@@ -163,10 +163,7 @@ fn paint(h: u32) {
                 c.fill(rr, draw::face());
                 if held == dir { c.sunken(rr) } else { c.raised(rr) }
                 let (mx, my) = (rr.left + rr.width() / 2, rr.bottom + rr.height() / 2);
-                for i in 0..3 {
-                    let y = if dir > 0 { my + 1 - i } else { my - 1 + i };
-                    c.fill(Rect::new(mx - i, y, mx + i + 1, y + 1), col);
-                }
+                c.triangle(mx, my, if dir > 0 { 0 } else { 1 }, crate::scale::px(3), col);
             }
         }
     });

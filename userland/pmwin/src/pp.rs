@@ -185,13 +185,10 @@ pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
     if !st().desk.exists(h) || (pv == 0 && cb != 0) {
         return 0;
     }
+    // Any font name is kept, as IBM's SetPresParam keeps it: a face the
+    // system does not have paints in the default font (draw::font_of).
+    // UltiMail's FONT.c logs "WinSetPresParam failed" when this fails.
     let data = if cb == 0 { Vec::new() } else { unsafe { core::slice::from_raw_parts(pv as *const u8, cb as usize) }.to_vec() };
-    if id == PP_FONTNAMESIZE {
-        let name = &data[..data.iter().position(|&c| c == 0).unwrap_or(data.len())];
-        if crate::fonts::by_name(name).is_none() {
-            return 0;
-        }
-    }
     // An RGB colour and its index form replace each other.
     if id < 0x32 && id != PP_FONTNAMESIZE && id != PP_FONTNAMESIZE + 1 {
         let other = if id % 2 == 1 { id + 1 } else { id - 1 };
@@ -336,10 +333,7 @@ pub fn take_pending(h: u32) {
             break;
         }
         let data = unsafe { core::slice::from_raw_parts((p as usize + at + 8) as *const u8, cb) };
-        let ok = id != PP_FONTNAMESIZE || crate::fonts::by_name(&data[..data.iter().position(|&c| c == 0).unwrap_or(data.len())]).is_some();
-        if ok {
-            store(h, id, data);
-        }
+        store(h, id, data);
         at += 8 + cb;
     }
 }
