@@ -18,6 +18,7 @@
 //! SCKILLCONFIRMDISABLED (or KILLCONFIRMDISABLED) is set.
 //! Its menus follow the pointer only with MENUSFOLLOWPOINTER set
 //! (otherwise only while a mouse button is down), as IBM's.
+//! With SCROLLUP set its button menus roll out of the bar.
 //!
 //! IBM's layout, behaviour and setup strings (studied in SCENTER.DLL):
 //! the bar is 22 pixels high with small icons; shown on top of maximized
@@ -478,6 +479,8 @@ unsafe extern "C" {
     fn WinDrawPointer(hps: u32, x: i32, y: i32, h: u32, fs: u32) -> u32;
     #[link_name = "PMWIN.804"]
     fn WinQueryCapture(desk: u32) -> u32;
+    #[link_name = "PMWIN.892"]
+    fn WinUpdateWindow(h: u32) -> u32;
     #[link_name = "PMWIN.1068"]
     fn WinSetDesktopWorkArea(desk: u32, r: *const RectL) -> u32;
     #[link_name = "PMSHAPI.126"]
@@ -1476,7 +1479,43 @@ fn popup(b: usize, items: &[Menu], it: Hit) {
     bars()[b].menu_up = true;
     track(menu);
     unsafe { WinPopupMenu(HWND_DESKTOP, bars()[b].hwnd, menu, p[0].x, p[0].y.max(0), 0, PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2) };
+    roll(menu, wd(o).flags & F_BOTTOM != 0);
 }
+
+/// IBM's SCROLLUP: the bar's menus roll out of it (IBM's RollBitmap: 10
+/// pixels at a time, a bar at the bottom's menus scrolling up out of it).
+/// IBM draws the menu into a bitmap and shows more of it each step; rs2's
+/// PM menu window grows from the bar's edge instead, repainting itself
+/// (its items hang from its top, so a menu above the bar slides up out
+/// of it and one below unrolls downwards). Its submenus and the bar's
+/// context menu do not roll, as IBM's.
+fn roll(menu: u32, above: bool) {
+    if !env_set(b"SCROLLUP\0") {
+        return;
+    }
+    let s = window_pos(menu);
+    if s.cy <= ROLL_STEP {
+        return;
+    }
+    let mut h = ROLL_STEP;
+    while h < s.cy {
+        // Above the bar the bottom edge stays; below it, the top.
+        let y = if above { s.y } else { s.y + s.cy - h };
+        unsafe {
+            WinSetWindowPos(menu, 0, s.x, y, s.cx, h, SWP_MOVE | SWP_SIZE);
+            WinUpdateWindow(menu);
+            os2::DosSleep(ROLL_MS);
+        }
+        h += ROLL_STEP;
+    }
+    unsafe {
+        WinSetWindowPos(menu, 0, s.x, s.y, s.cx, s.cy, SWP_MOVE | SWP_SIZE);
+        WinUpdateWindow(menu);
+    }
+}
+
+const ROLL_STEP: i32 = 10;
+const ROLL_MS: u32 = 10;
 
 /// The window list: the switch list's visible, jumpable entries.
 fn window_menu(b: usize) {
