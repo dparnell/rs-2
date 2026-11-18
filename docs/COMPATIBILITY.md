@@ -463,8 +463,10 @@ receiver), reached as 10.0.2.100 through `--guestfwd
 | In-basket object | works | Starts `UMAIL.EXE /HIDE` and opens the In-basket; first time, UltiMail asks for the user's name and its own password; the In-basket fetches the mail over POP3 (USER, PASS, STAT, RETR, DELE, QUIT) and lists it; letters open with their header and text, and stay in the mail store across restarts. |
 | New Letter object | works | Opens an empty letter (To, Cc, Subject, the SentMail folder). Sending not tried. |
 | Names and Addresses object | works | Opens the nickname notebook (its index, New Person, New Group). |
-| Letter window | partial | The header fields are drawn too short (their text is cut), the tool bar is black. |
+| Letter window | partial | The header fields (From, Subject) are drawn too short and their text is cut; the tool bar (IBM's UCMENUS control: a WC_MENU whose bitmap items it measures and draws itself) is black. |
 | In-basket list | partial | The Date and Icon column titles and values are cut short. |
+| Windows menu | partial | "Address Book" is cut to "Address Boo" (its items have icons). |
+| UMAIL.EXE started by hand after a session | partial | Its main window, saved minimized (hidden in the Minimized Window Viewer), comes back drawn as a large icon at its full size; restoring it works. |
 
 What it needed from rs2 (each with its check):
 
