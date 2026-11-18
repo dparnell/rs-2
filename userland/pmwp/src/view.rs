@@ -27,6 +27,7 @@ use crate::classes_gen::m;
 use crate::obj::{self, OPEN_CONTENTS, OPEN_DEFAULT, OPEN_DETAILS, OPEN_SETTINGS, OPEN_TREE};
 use crate::pm::*;
 use crate::{abs, som, util, wps};
+use crate::util::ui;
 
 unsafe extern "C" {
     #[link_name = "PMWIN.800"]
@@ -702,7 +703,7 @@ pub fn save_positions(w: usize) {
 /// as the widest title needs and as tall as the most title lines: a
 /// long title never reaches into the next icon's place.
 pub fn cell(w: usize) -> (i32, i32) {
-    let (bw, bh) = if wins()[w].desktop { (96, 86) } else { (88, 70) };
+    let (bw, bh) = if wins()[w].desktop { (ui(96), ui(86)) } else { (ui(88), ui(70)) };
     if !wins()[w].desktop && wins()[w].view != OPEN_CONTENTS {
         return (bw, bh);
     }
@@ -712,7 +713,7 @@ pub fn cell(w: usize) -> (i32, i32) {
         tw = tw.max(iw);
         th = th.max(h);
     }
-    (bw.max(tw + 8), bh.max(32 + 4 + th + 8))
+    (bw.max(tw + 8), bh.max(ui(32 + 4) + th + 8))
 }
 
 /// An icon view record's IconTextWidth (its widest title line plus 10,
@@ -731,8 +732,8 @@ fn extent(w: usize, rec: u32) -> (i32, i32) {
 /// The place an icon at `p` (its lower left corner) takes with its title
 /// below it, for its extent `e`: left, bottom, right, top.
 fn footprint(p: (i32, i32), e: (i32, i32)) -> (i32, i32, i32, i32) {
-    let cx = p.0 + 16;
-    (cx - e.0 / 2, p.1 - 4 - e.1, cx + e.0 / 2, p.1 + 32)
+    let cx = p.0 + ui(16);
+    (cx - e.0 / 2, p.1 - 4 - e.1, cx + e.0 / 2, p.1 + ui(32))
 }
 
 /// The grid place `i` for cells of `cell`: rows from the top left (the
@@ -745,11 +746,11 @@ fn slot(w: usize, i: i32, cell: (i32, i32)) -> (i32, i32) {
     if wins()[w].desktop {
         let per_col = ((ah - 16) / ch).max(1);
         let (col, row) = (i / per_col, i % per_col);
-        (16 + col * cw + (cw - 32) / 2 - 16, ah - 12 - 32 - row * ch)
+        (ui(16) + col * cw + (cw - ui(32)) / 2 - ui(16), ah - ui(12 + 32) - row * ch)
     } else {
         let per_row = ((aw - 8) / cw).max(1);
         let (row, col) = (i / per_row, i % per_row);
-        (4 + col * cw + (cw - 32) / 2, ah - 8 - 32 - row * ch)
+        (ui(4) + col * cw + (cw - ui(32)) / 2, ah - ui(8 + 32) - row * ch)
     }
 }
 

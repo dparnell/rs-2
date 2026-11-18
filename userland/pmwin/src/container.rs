@@ -203,7 +203,6 @@ const F_NEXT: u32 = 24;
 const F_WIDTH: u32 = 28;
 const FIELDINFO: u32 = 32;
 
-const SCROLL_W: i32 = 16;
 const MAGIC_REC: u32 = 0x4345_5243; // "CREC"
 const MAGIC_FLD: u32 = 0x444c_4643; // "CFLD"
 
@@ -437,7 +436,7 @@ fn parts(h: u32) -> Parts {
     let Some(c) = data(h) else { return Parts { title: Rect::default(), heads: Rect::default(), area: Rect::default() } };
     let vs = c.vs != 0 && st().desk.get(c.vs).is_some_and(|w| w.visible_style());
     let hs = c.hs != 0 && st().desk.get(c.hs).is_some_and(|w| w.visible_style());
-    let (l, b, r, t) = (1, 1 + if hs { SCROLL_W } else { 0 }, cx - 1 - if vs { SCROLL_W } else { 0 }, cy - 1);
+    let (l, b, r, t) = (1, 1 + if hs { crate::frame::scroll_w() } else { 0 }, cx - 1 - if vs { crate::frame::scroll_w() } else { 0 }, cy - 1);
     let th = title_h(h, c);
     let title = Rect::new(l, t - th, r, t);
     let hh = if view(c) == View::Detail && c.attr & CA_DETAILSVIEWTITLES != 0 { draw::font_of(h).height + 6 } else { 0 };
@@ -452,13 +451,13 @@ fn metrics(h: u32, c: &Cnr, area: Rect) -> Metrics {
     let icon = if v == View::Text || (v == View::Tree && c.attr & layout::CV_TEXT != 0) {
         0
     } else if v == View::Detail {
-        if mini(c) { crate::pointer::MINI } else { c.icon_size.1.max(0).min(64) }
+        if mini(c) { crate::pointer::mini_size() } else { c.icon_size.1.max(0).min(64) }
     } else if mini(c) || (v == View::Tree && c.attr & layout::CV_ICON == 0 && c.attr & layout::CV_NAME == 0) {
-        crate::pointer::MINI
+        crate::pointer::mini_size()
     } else if c.icon_size.1 > 0 {
         c.icon_size.1.min(64)
     } else {
-        crate::pointer::ICON
+        crate::pointer::icon_size()
     };
     let _ = h;
     Metrics {
@@ -590,8 +589,8 @@ fn sync_scroll(h: u32) {
             }
         }
         let hs_shown = need_h;
-        st().desk.set_pos(vs, cx - 1 - SCROLL_W, 1 + if hs_shown { SCROLL_W } else { 0 }, SCROLL_W, (cy - 2 - if hs_shown { SCROLL_W } else { 0 }).max(0));
-        st().desk.set_pos(hs, 1, 1, (cx - 2 - if need_v { SCROLL_W } else { 0 }).max(0), SCROLL_W);
+        st().desk.set_pos(vs, cx - 1 - crate::frame::scroll_w(), 1 + if hs_shown { crate::frame::scroll_w() } else { 0 }, crate::frame::scroll_w(), (cy - 2 - if hs_shown { crate::frame::scroll_w() } else { 0 }).max(0));
+        st().desk.set_pos(hs, 1, 1, (cx - 2 - if need_v { crate::frame::scroll_w() } else { 0 }).max(0), crate::frame::scroll_w());
         if !changed {
             // Positions count from the top (vertical) and left.
             let (vpos, vmax) = (ext.top - vp.top, (ext.height() - a.height()).max(0));
@@ -720,7 +719,7 @@ fn paint(h: u32) {
     let heads: Vec<(Vec<u8>, u32)> = l.cols.iter().map(|&f| (if rd(f, F_TITLEFL) & CFA_BITMAPORICON != 0 { Vec::new() } else { text_at(rd(f, F_TITLE)) }, rd(f, F_TITLEFL) | rd(f, F_DATA) & (CFA_SEPARATOR | CFA_HORZSEPARATOR))).collect();
     let split_after = l.cols.iter().position(|&f| f == field_last);
     let scroll_x = c.scroll.0;
-    let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::MINI);
+    let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::mini_size());
     let f = draw::font_of(h);
     // Presentation parameter colours (a desktop's background).
     let bg = crate::pp::color_set(h, crate::pp::PP_BACKGROUNDCOLOR);
@@ -1138,7 +1137,7 @@ fn arrange(h: u32) {
     let m = metrics(h, c, p.area);
     let recs: Vec<u32> = c.top.iter().copied().filter(|&r| attr(r) & CRA_FILTERED == 0).collect();
     let items: Vec<Item> = recs.iter().map(|&r| Item { text: text_at(rd(r, R_PSZICON)), ..Default::default() }).collect();
-    let m = Metrics { icon: if m.icon == 0 { crate::pointer::ICON } else { m.icon }, ..m };
+    let m = Metrics { icon: if m.icon == 0 { crate::pointer::icon_size() } else { m.icon }, ..m };
     for (r, (x, y)) in recs.iter().zip(layout::arrange(&items, &m)) {
         wr(*r, R_X, x as u32);
         wr(*r, R_Y, y as u32);

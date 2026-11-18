@@ -54,7 +54,7 @@ const QW_BOTTOM: i32 = 3;
 const QW_OWNER: i32 = 4;
 const QW_PARENT: i32 = 5;
 
-pub use frame::TITLE_H;
+pub use frame::title_h;
 
 fn cstr(p: *const u8) -> Vec<u8> {
     if p.is_null() {

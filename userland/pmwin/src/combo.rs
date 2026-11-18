@@ -181,10 +181,9 @@ fn paint(h: u32) {
             // A down arrow.
             let col = if enabled { draw::text() } else { draw::shadow() };
             let (mx, my) = (br.left + br.width() / 2, br.bottom + br.height() / 2);
-            for i in 0..4 {
-                c.fill(Rect::new(mx - 3 + i, my + 1 - i, mx + 4 - i, my + 2 - i), col);
-            }
-            c.fill(Rect::new(mx - 4, my - 5, mx + 5, my - 4), col);
+            let px = crate::scale::px;
+            c.triangle(mx, my - 1, 1, px(4), col);
+            c.fill(Rect::new(mx - px(4), my - px(5), mx + px(4) + 1, my - px(5) + px(1)), col);
         }
     });
 }

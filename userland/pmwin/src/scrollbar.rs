@@ -101,15 +101,7 @@ fn arrow(c: &mut Canvas, r: Rect, dir: u8, enabled: bool) {
     c.raised(r);
     let col = if enabled { draw::text() } else { draw::shadow() };
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
-    for i in 0..4 {
-        let rr = match dir {
-            0 => Rect::new(cx - i, cy + 2 - i, cx + i + 1, cy + 3 - i),
-            1 => Rect::new(cx - i, cy - 2 + i, cx + i + 1, cy - 1 + i),
-            2 => Rect::new(cx - 2 + i, cy - i, cx - 1 + i, cy + i + 1),
-            _ => Rect::new(cx + 2 - i, cy - i, cx + 3 - i, cy + i + 1),
-        };
-        c.fill(rr, col);
-    }
+    c.triangle(cx, cy, dir, crate::scale::px(4), col);
 }
 
 fn paint(h: u32) {

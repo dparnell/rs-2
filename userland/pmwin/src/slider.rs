@@ -288,16 +288,13 @@ fn paint(h: u32) {
                 let (mx, my) = (br.left + br.width() / 2, br.bottom + br.height() / 2);
                 let col = if enabled { draw::text() } else { draw::shadow() };
                 let toward_low = dec != home_far(h);
-                for i in 0..4 {
-                    let rr = if vertical(h) {
-                        let y = if toward_low { my - 2 + i } else { my + 2 - i };
-                        Rect::new(mx - i, y, mx + i + 1, y + 1)
-                    } else {
-                        let x = if toward_low { mx - 2 + i } else { mx + 2 - i };
-                        Rect::new(x, my - i, x + 1, my + i + 1)
-                    };
-                    c.fill(rr, col);
-                }
+                let dir = match (vertical(h), toward_low) {
+                    (true, true) => 1,
+                    (true, false) => 0,
+                    (false, true) => 2,
+                    (false, false) => 3,
+                };
+                c.triangle(mx, my, dir, crate::scale::px(4), col);
             }
         }
     });

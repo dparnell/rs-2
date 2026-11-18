@@ -10,6 +10,8 @@ use crate::{check, WndProc};
 use os2::DosAllocSharedMem;
 
 unsafe extern "C" {
+    #[link_name = "PMWIN.829"]
+    fn WinQuerySysValue(desk: u32, i: i32) -> i32;
     #[link_name = "PMWIN.715"]
     fn WinCreateCursor(h: u32, x: i32, y: i32, cx: i32, cy: i32, fs: u32, clip: *const i32) -> u32;
     #[link_name = "PMWIN.880"]
@@ -119,10 +121,12 @@ fn cursor_checks(hab: u32, client: u32, other: u32) {
     unsafe {
         check("WinCreateCursor", WinCreateCursor(client, 3, 4, 0, 12, 4, null()) != 0);
         let c = cursor_info();
-        check("WinQueryCursorInfo (cx 0: the border width)", c.is_some_and(|c| c[0] as u32 == client && c[1..6] == [3, 4, 1, 12, 4]));
+        // SV_CXBORDER: 1 at 96 dpi, more at a UI scale.
+        let bw = WinQuerySysValue(1, 26);
+        check("WinQueryCursorInfo (cx 0: the border width)", c.is_some_and(|c| c[0] as u32 == client && c[1..6] == [3, 4, bw, 12, 4]));
         check("a new cursor is hidden: one WinShowCursor shows it", WinShowCursor(client, 1) != 0 && WinShowCursor(client, 1) == 0);
         check("WinShowCursor of a window without the cursor", WinShowCursor(other, 0) == 0);
-        check("CURSOR_SETPOS moves it", WinCreateCursor(client, 9, 8, 0, 0, 0x8000, null()) != 0 && cursor_info().is_some_and(|c| c[1..5] == [9, 8, 1, 12]));
+        check("CURSOR_SETPOS moves it", WinCreateCursor(client, 9, 8, 0, 0, 0x8000, null()) != 0 && cursor_info().is_some_and(|c| c[1..5] == [9, 8, bw, 12]));
         check("CURSOR_SETPOS of another window fails", WinCreateCursor(other, 1, 1, 0, 0, 0x8000, null()) == 0);
         WinGetLastError(hab);
         check("invalid cursor flags", WinCreateCursor(client, 1, 1, 0, 0, 0x40, null()) == 0 && WinGetLastError(hab) & 0xffff == 0x1019);

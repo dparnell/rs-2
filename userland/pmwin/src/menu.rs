@@ -70,8 +70,12 @@ const MM_SETDEFAULTITEMID: u32 = 0x0432;
 const MIT_END: i16 = -1;
 const MIT_NONE: u32 = 0xffff;
 
-const ITEM_H: i32 = 20;
-const SEP_H: i32 = 8;
+fn item_h() -> i32 {
+    crate::scale::px(20)
+}
+fn sep_h() -> i32 {
+    crate::scale::px(8)
+}
 
 wndproc! {
     menu_entry => menu_proc;
@@ -286,10 +290,11 @@ fn label(t: &[u8]) -> (&[u8], &[u8]) {
 fn popup_size(h: u32) -> (i32, i32) {
     measure(h);
     let Some(m) = data(h) else { return (0, 0) };
+    let px = crate::scale::px;
     let (mut wl, mut wr, mut hh, mut wo) = (0, 0, 6, 0);
     for it in &m.items {
         if it.style & MIS_SEPARATOR != 0 {
-            hh += SEP_H;
+            hh += sep_h();
             continue;
         }
         if let Some((w, ih)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
@@ -300,9 +305,9 @@ fn popup_size(h: u32) -> (i32, i32) {
         let (l, r) = label(&it.text);
         wl = wl.max(draw::font_of(h).text_width(&draw::strip_mnemonic(l).0));
         wr = wr.max(draw::font_of(h).text_width(r));
-        hh += ITEM_H;
+        hh += item_h();
     }
-    let text_w = if wl > 0 || wr > 0 { 6 + 22 + wl + if wr > 0 { 24 + wr } else { 0 } + 22 } else { 0 };
+    let text_w = if wl > 0 || wr > 0 { 6 + px(22) + wl + if wr > 0 { px(24) + wr } else { 0 } + px(22) } else { 0 };
     (text_w.max(wo + 6), hh)
 }
 
@@ -370,11 +375,11 @@ fn rects(h: u32) -> Vec<Rect> {
             let mut x = 2;
             for it in &m.items {
                 let w = if it.style & MIS_SEPARATOR != 0 {
-                    8
+                    crate::scale::px(8)
                 } else if let Some((w, _)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
                     w
                 } else {
-                    draw::font_of(h).text_width(&draw::strip_mnemonic(&it.text).0) + 16
+                    draw::font_of(h).text_width(&draw::strip_mnemonic(&it.text).0) + crate::scale::px(16)
                 };
                 v.push(Rect::new(x, 0, x + w, cy));
                 x += w;
@@ -384,11 +389,11 @@ fn rects(h: u32) -> Vec<Rect> {
             let mut top = cy - 3;
             for it in &m.items {
                 let ih = if it.style & MIS_SEPARATOR != 0 {
-                    SEP_H
+                    sep_h()
                 } else if let Some((_, ih)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
                     ih
                 } else {
-                    ITEM_H
+                    item_h()
                 };
                 v.push(Rect::new(3, top - ih, cx - 3, top));
                 top -= ih;
@@ -521,29 +526,25 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
     let f = c.font();
     let y = r.bottom + (r.height() - f.height) / 2 + f.descender;
     let (l, rt) = label(text);
+    let px = crate::scale::px;
     if k == MS_ACTIONBAR {
-        c.mnemonic_text(r.left + 8, y, l, fg, r);
+        c.mnemonic_text(r.left + px(8), y, l, fg, r);
         return;
     }
-    c.mnemonic_text(r.left + 20, y, l, fg, r);
+    c.mnemonic_text(r.left + px(20), y, l, fg, r);
     if !rt.is_empty() {
-        c.text(r.right - 20 - f.text_width(rt), y, rt, fg, r);
+        c.text(r.right - px(20) - f.text_width(rt), y, rt, fg, r);
     }
     if attr & MIA_CHECKED != 0 {
         // A check mark.
-        let (x, b) = (r.left + 5, r.bottom + r.height() / 2 - 3);
-        for i in 0..3 {
-            c.fill(Rect::new(x + i, b + 2 - i + 2, x + i + 1, b + 5 - i + 2), fg);
-        }
-        for i in 0..6 {
-            c.fill(Rect::new(x + 3 + i, b + i, x + 4 + i, b + i + 3), fg);
-        }
+        crate::sysdraw::check_mark(c, r.left + px(3), r.bottom + r.height() / 2 - px(6), fg);
     }
     if has_sub {
         // A small triangle pointing right.
-        let (x, cy) = (r.right - 12, r.bottom + r.height() / 2);
-        for i in 0..4 {
-            c.fill(Rect::new(x + i, cy - 3 + i, x + i + 1, cy + 4 - i), fg);
+        let (x, cy) = (r.right - px(12), r.bottom + r.height() / 2);
+        let n = px(4);
+        for i in 0..n {
+            c.fill(Rect::new(x + i, cy - n + 1 + i, x + i + 1, cy + n - i), fg);
         }
     }
 }
@@ -559,24 +560,33 @@ fn title_button(c: &mut Canvas, r: Rect, id: u32, down: bool, maximized: bool, i
     }
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
     let k = draw::text();
+    let px = crate::scale::px;
+    // Lines `l` pels wide at a UI scale.
+    let l = px(1);
+    let outline = |c: &mut Canvas, r: Rect| {
+        for i in 0..l {
+            c.frame(Rect::new(r.left + i, r.bottom + i, r.right - i, r.top - i), k);
+        }
+    };
     match id {
         // The frame's mini icon, or a bar.
         SC_SYSMENU if icon != 0 && crate::pointer::draw_in(c, r, icon, true, false) => {}
-        SC_SYSMENU => c.fill(Rect::new(r.left + 4, cy - 2, r.right - 4, cy + 2), k),
-        SC_MINIMIZE => c.fill(Rect::new(cx - 2, cy - 2, cx + 2, cy + 2), k),
-        SC_HIDE => c.fill(Rect::new(cx - 5, cy - 5, cx + 5, cy - 2), k),
+        SC_SYSMENU => c.fill(Rect::new(r.left + px(4), cy - px(2), r.right - px(4), cy + px(2)), k),
+        SC_MINIMIZE => c.fill(Rect::new(cx - px(2), cy - px(2), cx + px(2), cy + px(2)), k),
+        SC_HIDE => c.fill(Rect::new(cx - px(5), cy - px(5), cx + px(5), cy - px(2)), k),
         SC_MAXIMIZE | SC_RESTORE if maximized || id == SC_RESTORE => {
-            c.frame(Rect::new(cx - 6, cy - 5, cx + 3, cy + 3), k);
-            c.frame(Rect::new(cx - 3, cy - 2, cx + 6, cy + 6), k);
+            outline(c, Rect::new(cx - px(6), cy - px(5), cx + px(3), cy + px(3)));
+            outline(c, Rect::new(cx - px(3), cy - px(2), cx + px(6), cy + px(6)));
         }
         SC_MAXIMIZE => {
-            c.frame(Rect::new(cx - 6, cy - 6, cx + 7, cy + 7), k);
-            c.hline(cx - 6, cx + 7, cy + 5, k);
+            outline(c, Rect::new(cx - px(6), cy - px(6), cx + px(7), cy + px(7)));
+            c.fill(Rect::new(cx - px(6), cy + px(7) - 2 * l, cx + px(7), cy + px(7)), k);
         }
         SC_CLOSE => {
-            for i in -4..5 {
-                c.fill(Rect::new(cx + i, cy + i, cx + i + 2, cy + i + 1), k);
-                c.fill(Rect::new(cx + i, cy - i, cx + i + 2, cy - i + 1), k);
+            let n = px(4);
+            for i in -n..=n {
+                c.fill(Rect::new(cx + i, cy + i, cx + i + 2 * l, cy + i + l), k);
+                c.fill(Rect::new(cx + i, cy - i, cx + i + 2 * l, cy - i + l), k);
             }
         }
         _ => {}

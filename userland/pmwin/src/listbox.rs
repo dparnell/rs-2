@@ -55,7 +55,6 @@ const LSS_CASESENSITIVE: u32 = 0x0004;
 const SBM_SETSCROLLBAR: u32 = 0x01a0;
 const SBM_SETTHUMBSIZE: u32 = 0x01a6;
 
-const SCROLL_W: i32 = 16;
 
 wndproc! {
     listbox_entry => listbox_proc;
@@ -86,7 +85,7 @@ fn multi(h: u32) -> bool {
 /// Item area (inside the border, left of the scroll bar).
 fn area(h: u32) -> Rect {
     let (cx, cy) = ctl::size(h);
-    Rect::new(2, 2, cx - 2 - SCROLL_W, cy - 2)
+    Rect::new(2, 2, cx - 2 - crate::frame::scroll_w(), cy - 2)
 }
 
 fn rows(h: u32) -> usize {
@@ -110,7 +109,7 @@ fn place_scroll(h: u32) {
     let (cx, cy) = ctl::size(h);
     let sb = data(h).map_or(0, |l| l.scroll);
     if sb != 0 {
-        st().desk.set_pos(sb, cx - 2 - SCROLL_W, 2, SCROLL_W, (cy - 4).max(0));
+        st().desk.set_pos(sb, cx - 2 - crate::frame::scroll_w(), 2, crate::frame::scroll_w(), (cy - 4).max(0));
     }
     sync_scroll(h);
 }

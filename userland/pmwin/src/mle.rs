@@ -92,9 +92,10 @@ const MLFSEARCH_CHANGEALL: u32 = 0x0004;
 const SBM_SETSCROLLBAR: u32 = 0x01a0;
 const SBM_SETTHUMBSIZE: u32 = 0x01a6;
 
-const SCROLL_W: i32 = 16;
 /// Pels between the border and the text.
-const INSET: i32 = 2;
+fn inset() -> i32 {
+    crate::scale::px(2)
+}
 
 const FATTR_SEL_UNDERSCORE: u16 = 0x0002;
 const FATTR_SEL_BOLD: u16 = 0x0020;
@@ -177,9 +178,9 @@ fn text_area(h: u32) -> Rect {
     let (cx, cy) = ctl::size(h);
     let style = ctl::style(h);
     let b = if style & MLS_BORDER != 0 { 2 } else { 0 };
-    let r = if style & MLS_VSCROLL != 0 { SCROLL_W } else { 0 };
-    let bt = if style & MLS_HSCROLL != 0 { SCROLL_W } else { 0 };
-    Rect::new(b + INSET, b + bt + 1, (cx - b - r - INSET).max(b + INSET), (cy - b - 1).max(b + bt + 1))
+    let r = if style & MLS_VSCROLL != 0 { crate::frame::scroll_w() } else { 0 };
+    let bt = if style & MLS_HSCROLL != 0 { crate::frame::scroll_w() } else { 0 };
+    Rect::new(b + inset(), b + bt + 1, (cx - b - r - inset()).max(b + inset()), (cy - b - 1).max(b + bt + 1))
 }
 
 fn rows(h: u32) -> usize {
@@ -233,13 +234,13 @@ fn place_scrolls(h: u32) {
     let b = if style & MLS_BORDER != 0 { 2 } else { 0 };
     let Some(d) = data(h) else { return };
     let (vs, hs) = (d.vscroll, d.hscroll);
-    let bt = if hs != 0 { SCROLL_W } else { 0 };
-    let r = if vs != 0 { SCROLL_W } else { 0 };
+    let bt = if hs != 0 { crate::frame::scroll_w() } else { 0 };
+    let r = if vs != 0 { crate::frame::scroll_w() } else { 0 };
     if vs != 0 {
-        st().desk.set_pos(vs, cx - b - SCROLL_W, b + bt, SCROLL_W, (cy - 2 * b - bt).max(0));
+        st().desk.set_pos(vs, cx - b - crate::frame::scroll_w(), b + bt, crate::frame::scroll_w(), (cy - 2 * b - bt).max(0));
     }
     if hs != 0 {
-        st().desk.set_pos(hs, b, b, (cx - 2 * b - r).max(0), SCROLL_W);
+        st().desk.set_pos(hs, b, b, (cx - 2 * b - r).max(0), crate::frame::scroll_w());
     }
 }
 
@@ -548,9 +549,9 @@ fn paint(h: u32) {
         }
         if vs && hs {
             let b = if style & MLS_BORDER != 0 { 2 } else { 0 };
-            c.fill(Rect::new(r.right - b - SCROLL_W, b, r.right - b, b + SCROLL_W), draw::face());
+            c.fill(Rect::new(r.right - b - crate::frame::scroll_w(), b, r.right - b, b + crate::frame::scroll_w()), draw::face());
         }
-        let clip = Rect::new(area.left - INSET, area.bottom, area.right + INSET, area.top);
+        let clip = Rect::new(area.left - inset(), area.bottom, area.right + inset(), area.top);
         for (i, (l, cells)) in lines.iter().enumerate() {
             let top = area.top - i as i32 * ch;
             let bottom = top - ch;

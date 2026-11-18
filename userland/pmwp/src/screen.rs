@@ -14,7 +14,10 @@
 //!   resolution stays only if Keep is chosen within 15 seconds, as the
 //!   Display program does. A kept resolution is saved as `VIDEO=WxH`
 //!   (`x256` for 256 colours, which take effect at the next start) in
-//!   CONFIG.SYS, which the kernel applies when it starts.
+//!   CONFIG.SYS, which the kernel applies when it starts. The UI scale
+//!   for high-dpi screens (100% to 300%: PM's controls, title bars,
+//!   menus, icons, pointers and fonts bigger at the same resolution) is
+//!   saved as `SET RS2SCALE=n`; PM takes it at the next start.
 //! - **Screen, page 2 (display type)** shows what the display is: its
 //!   resolution, colours, line length and whether its driver can change
 //!   the resolution.
@@ -142,6 +145,55 @@ fn save(w: u32, h: u32, c256: bool) -> bool {
     write_file(&path, &with_video(&old, w, h, c256))
 }
 
+/// The UI scales offered (percent).
+const SCALES: [u32; 7] = [100, 125, 150, 175, 200, 250, 300];
+
+/// PM's UI scale now (percent): SV_CXICON is 32 at 100%.
+fn scale_now() -> u32 {
+    let icon = unsafe { WinQuerySysValue(HWND_DESKTOP, 38) };
+    if icon <= 0 { 100 } else { ((icon * 100 / 32 + 12) / 25 * 25) as u32 }
+}
+
+/// The value of a `SET RS2SCALE=n` line.
+fn rs2scale_value(line: &[u8]) -> Option<u32> {
+    let t: Vec<u8> = line.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
+    let v = t.strip_prefix(b"SETRS2SCALE=")?;
+    let v = v.strip_suffix(b"%").unwrap_or(v);
+    core::str::from_utf8(v).ok()?.parse().ok()
+}
+
+/// The UI scale CONFIG.SYS asks for (100 without SET RS2SCALE=).
+fn scale_saved() -> u32 {
+    read_file(&config_path()).unwrap_or_default().split(|&b| b == b'\n').filter_map(rs2scale_value).last().unwrap_or(100)
+}
+
+/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none at 100).
+pub fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
+    let text = match text.iter().position(|&b| b == 0x1a) {
+        Some(i) => &text[..i],
+        None => text,
+    };
+    let mut out = Vec::new();
+    for line in text.split_inclusive(|&b| b == b'\n') {
+        if rs2scale_value(line).is_none() {
+            out.extend_from_slice(line);
+        }
+    }
+    if !out.is_empty() && !out.ends_with(b"\n") {
+        out.extend_from_slice(b"\r\n");
+    }
+    if pct != 100 {
+        out.extend_from_slice(alloc::format!("SET RS2SCALE={pct}\r\n").as_bytes());
+    }
+    out
+}
+
+fn save_scale(pct: u32) -> bool {
+    let path = config_path();
+    let old = read_file(&path).unwrap_or_default();
+    write_file(&path, &with_scale(&old, pct))
+}
+
 // ---- Screen ----
 
 const ID_MODES: u16 = 1240;
@@ -151,6 +203,7 @@ const ID_APPLY: u16 = 1243;
 const ID_REVERT: u16 = 1244;
 const ID_STATUS: u16 = 1245;
 const ID_STATUS2: u16 = 1246;
+const ID_SCALE: u16 = 1247;
 const TID_KEEP: u32 = 0x5730;
 const KEEP_SECONDS: u32 = 15;
 
@@ -163,14 +216,19 @@ fn status(h: u32, a: &str, b: &str) {
     set_item_text(h, ID_STATUS2 as u32, b.as_bytes());
 }
 
-fn colors_note() -> &'static str {
+fn colors_note() -> alloc::string::String {
     let now = display_info().is_some_and(|d| d.3);
+    let (sn, ss) = (scale_now(), scale_saved());
+    if sn != ss {
+        return alloc::format!("UI scale {sn}% now, {ss}% after the next start.");
+    }
     match (now, saved256()) {
         (true, true) => "256 colors.",
         (false, false) => "16 million colors.",
         (true, false) => "256 colors now, 16 million after the next start.",
         (false, true) => "16 million colors now, 256 after the next start.",
     }
+    .into()
 }
 
 fn screen_fill(h: u32) {
@@ -196,8 +254,17 @@ fn screen_fill(h: u32) {
     if list.is_empty() {
         status(h, &alloc::format!("The screen stays at {} x {}: its driver", cur.0, cur.1), "cannot change the resolution.");
     } else {
-        status(h, &alloc::format!("The screen is at {} x {}.", cur.0, cur.1), colors_note());
+        status(h, &alloc::format!("The screen is at {} x {}.", cur.0, cur.1), &colors_note());
     }
+    let sc = unsafe { WinWindowFromID(h, ID_SCALE as u32) };
+    if unsafe { WinSendMsg(sc, LM_QUERYITEMCOUNT, 0, 0) } == 0 {
+        for n in SCALES {
+            let t = z(alloc::format!("{n}%").as_bytes());
+            unsafe { WinSendMsg(sc, LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
+        }
+    }
+    let i = SCALES.iter().position(|&n| n == scale_saved()).unwrap_or(0);
+    unsafe { WinSendMsg(sc, LM_SELECTITEM, i as u32, 1) };
     unsafe { LISTED = list };
 }
 
@@ -212,6 +279,14 @@ fn apply(h: u32) {
     let c = checked(h, ID_256);
     if c != saved256() && !save(old.0, old.1, c) {
         status(h, "The colors could not be saved", "in CONFIG.SYS.");
+        return;
+    }
+    let i = unsafe { WinSendDlgItemMsg(h, ID_SCALE as u32, LM_QUERYSELECTION, LIT_NONE, 0) } as usize;
+    if let Some(&n) = SCALES.get(i)
+        && n != scale_saved()
+        && !save_scale(n)
+    {
+        status(h, "The UI scale could not be saved", "in CONFIG.SYS.");
         return;
     }
     if (w, hh) == old {
@@ -294,9 +369,13 @@ pub extern "C" fn wpAddSystemScreenPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, screen_proc, alloc::vec![
         book::label(b"Screen resolution:", (6, 108, 120)),
         listbox((6, 46, 120, 60), ID_MODES),
-        group(b"Colors", (134, 66, 98, 50)),
-        radio(b"~16 million", (140, 92, 88), ID_TRUE, true),
-        radio(b"~256 (palette)", (140, 78, 88), ID_256, false),
+        group(b"Colors", (134, 72, 98, 44)),
+        radio(b"~16 million", (140, 94, 88), ID_TRUE, true),
+        radio(b"~256 (palette)", (140, 82, 88), ID_256, false),
+        book::label(b"UI s~cale:", (134, 56, 40)),
+        // CBS_DROPDOWNLIST: the window grows down over the status when
+        // the list drops.
+        item(2, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004, (176, 14, 54, 54), ID_SCALE),
         text(b"", (6, 32, 226), ID_STATUS),
         text(b"", (6, 22, 226), ID_STATUS2),
         push(b"~Apply", (4, 2), ID_APPLY),

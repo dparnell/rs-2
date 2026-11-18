@@ -30,7 +30,7 @@ use crate::methods;
 use crate::obj::{self, OPEN_DEFAULT, OPEN_SETTINGS};
 use crate::pm::*;
 use crate::som;
-use crate::util::{cstr, parse_dec, z};
+use crate::util::{cstr, parse_dec, ui, z};
 use crate::wps::{self, Impl};
 
 // ---- The object ----
@@ -300,8 +300,18 @@ fn icon_px(o: usize) -> i32 {
     if ld(o).flags & F_SMALL != 0 { 16 } else { 32 }
 }
 
-/// Lay out the bar: its items and its size.
+/// Lay out the bar: its items and its size, at the UI scale.
 fn layout_bar(o: usize) -> (Vec<(RectL, Hit)>, i32, i32) {
+    scaled(layout_bar_96(o))
+}
+
+/// The items and size of a layout made for 96 dpi, at the UI scale.
+fn scaled((items, w, h): (Vec<(RectL, Hit)>, i32, i32)) -> (Vec<(RectL, Hit)>, i32, i32) {
+    (items.into_iter().map(|(r, it)| (rect(ui(r.l), ui(r.b), ui(r.r), ui(r.t)), it)).collect(), ui(w), ui(h))
+}
+
+/// The bar's layout for 96 dpi.
+fn layout_bar_96(o: usize) -> (Vec<(RectL, Hit)>, i32, i32) {
     let d = ld(o);
     let vertical = d.flags & F_VERTICAL != 0;
     let text = d.flags & F_TEXT != 0;
@@ -393,7 +403,7 @@ fn layout_drawer(o: usize, n: usize) -> (Vec<(RectL, Hit)>, i32, i32) {
         let t = h - 4 - i as i32 * rh;
         items.push((rect(4, t - rh, w - 4, t), Hit::Object(i)));
     }
-    (items, w, h)
+    scaled((items, w, h))
 }
 
 fn find_client(client: u32) -> Option<usize> {
@@ -651,9 +661,9 @@ fn paint(h: u32) {
                         let mut tr = rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1);
                         WinDrawText(hps, ACTIONS[i].len() as i32, ACTIONS[i].as_ptr(), &mut tr, 0, -1, DT_CENTER | DT_VCENTER);
                     } else if style == ST_MINI {
-                        WinDrawPointer(hps, r.l + (r.r - r.l - 16) / 2, r.b + (r.t - r.b - 16) / 2, icon, DP_MINI);
+                        WinDrawPointer(hps, r.l + (r.r - r.l - ui(16)) / 2, r.b + (r.t - r.b - ui(16)) / 2, icon, DP_MINI);
                     } else {
-                        WinDrawPointer(hps, r.l + (r.r - r.l - 32) / 2, r.b + (r.t - r.b - 32) / 2, icon, 0);
+                        WinDrawPointer(hps, r.l + (r.r - r.l - ui(32)) / 2, r.b + (r.t - r.b - ui(32)) / 2, icon, 0);
                     }
                 }
                 Hit::Arrow(i) => {
@@ -662,33 +672,34 @@ fn paint(h: u32) {
                     let full = !list(o, i + 1).is_empty();
                     let c: u32 = if full { 0x000080 } else { 0x909090 };
                     let (cx, cy) = ((r.l + r.r) / 2, (r.b + r.t) / 2);
-                    for k in 0..4 {
+                    let n = ui(4);
+                    for k in 0..n {
                         if ld(o).flags & F_VERTICAL != 0 {
-                            WinFillRect(hps, &rect(cx - 2 + k, cy - 3 + k, cx - 1 + k, cy + 4 - k), c as i32);
+                            WinFillRect(hps, &rect(cx - n / 2 + k, cy - n + 1 + k, cx - n / 2 + 1 + k, cy + n - k), c as i32);
                         } else {
-                            WinFillRect(hps, &rect(cx - 3 + k, cy - 2 + k, cx + 4 - k, cy - 1 + k), c as i32);
+                            WinFillRect(hps, &rect(cx - n + 1 + k, cy - n / 2 + k, cx + n - k, cy - n / 2 + 1 + k), c as i32);
                         }
                     }
                 }
                 Hit::Object(i) => {
                     let Some(&x) = objs.get(i) else { continue };
                     let icon = crate::templates::view_icon(x);
-                    let px = if small { 16 } else { 32 };
+                    let px = ui(if small { 16 } else { 32 });
                     let fs = if small { DP_MINI } else { 0 };
                     let mut t: Vec<u8> = obj::title(x).into_iter().map(|c| if c == b'\n' { b' ' } else { c }).collect();
                     if lw.drawer != 0 {
                         // A drawer's row: the icon, its title beside it.
-                        WinDrawPointer(hps, r.l + 4, r.b + (r.t - r.b - px) / 2, icon, fs);
+                        WinDrawPointer(hps, r.l + ui(4), r.b + (r.t - r.b - px) / 2, icon, fs);
                         if text {
-                            let mut tr = rect(r.l + px + 10, r.b, r.r - 2, r.t);
+                            let mut tr = rect(r.l + px + ui(10), r.b, r.r - 2, r.t);
                             WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut tr, 0, -1, DT_VCENTER);
                         }
                     } else {
-                        let top = if text { r.t - 4 - px } else { r.b + (r.t - r.b - px) / 2 };
+                        let top = if text { r.t - ui(4) - px } else { r.b + (r.t - r.b - px) / 2 };
                         WinDrawPointer(hps, r.l + (r.r - r.l - px) / 2, top, icon, fs);
                         if text {
                             t.truncate(12);
-                            let mut tr = rect(r.l + 1, r.b + 1, r.r - 1, r.b + 15);
+                            let mut tr = rect(r.l + 1, r.b + 1, r.r - 1, r.b + ui(15));
                             WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut tr, 0, -1, DT_CENTER);
                         }
                     }

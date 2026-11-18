@@ -6,7 +6,7 @@
 //!
 //! - the system font (controls, menus, title bars): IBM's WarpSans (9
 //!   points, from OS2\DLL\DSPRES.DLL), else Liberation Sans at
-//!   `SYSTEM_EM` pels, anti-aliased;
+//!   `system_em()` pels, anti-aliased;
 //! - the monospaced font (MLEs): Liberation Mono;
 //! - the outline faces GPI offers (Helvetica, Times New Roman, Courier,
 //!   their bold and italic): IBM's Type 1 fonts (PSFONTS\*.PFB), else
@@ -30,7 +30,9 @@ use gpi::type1::Type1;
 use crate::state::st;
 
 /// The system font's size: pels to the em.
-pub const SYSTEM_EM: i32 = 13;
+pub fn system_em() -> i32 {
+    crate::scale::px(13)
+}
 
 /// The faces: (face name, files in PSFONTS, the first there wins).
 const FACES: &[(&[u8], &[&[u8]])] = &[
@@ -160,14 +162,16 @@ pub fn mono() -> &'static Font {
     st().fonts.mono.unwrap_or_else(gpi::font::vio)
 }
 
-/// IBM's WarpSans at 9 points for a 96 dpi screen, if installed.
+/// IBM's WarpSans at 9 points for the screen's font resolution (96 dpi,
+/// 120 at a UI scale of 125%), if installed.
 fn warpsans() -> Option<&'static Font> {
+    let dpi = crate::scale::dpi();
     st().fonts
         .public
         .iter()
-        .filter(|(_, i, _)| i.face.eq_ignore_ascii_case(b"WarpSans") && !i.face.is_empty())
+        .filter(|(_, i, _)| i.face.eq_ignore_ascii_case(b"WarpSans") && !i.face.is_empty() && i.fields[19] as i32 == dpi)
         // usNominalPointSize (decipoints), xDeviceRes.
-        .min_by_key(|(_, i, _)| (i.fields[25] as i32 - 90).abs() * 4 + (i.fields[19] as i32 - 96).abs())
+        .min_by_key(|(_, i, _)| (i.fields[25] as i32 - 90).abs())
         .map(|&(_, _, f)| f)
 }
 
@@ -186,8 +190,8 @@ pub fn init() {
                 st().fonts.public.push((name, info, f));
             }
         }
-        st().fonts.system = warpsans().or_else(|| face_index(b"System Proportional").and_then(|i| face(i, SYSTEM_EM)));
-        st().fonts.mono = face_index(b"System Monospaced").and_then(|i| face(i, SYSTEM_EM));
+        st().fonts.system = warpsans().or_else(|| face_index(b"System Proportional").and_then(|i| face(i, system_em())));
+        st().fonts.mono = face_index(b"System Monospaced").and_then(|i| face(i, system_em()));
     }
     let public: Vec<(&[u8], Os2FontInfo, &'static Font)> = st().fonts.public.iter().map(|(n, i, f)| (*n, i.clone(), *f)).collect();
     for (n, i, f) in public {
@@ -200,8 +204,9 @@ pub fn init() {
 
 /// A font by its presentation parameter name, "points.face[.Bold]
 /// [.Italic]" ("10.Helv", "12.Times New Roman.Bold"): IBM's bitmap at
-/// that size for 96 dpi where installed, else the outline face at
-/// points * 96 / 72 pels.
+/// that size for the screen's font resolution (96 dpi; more at a UI
+/// scale, scale.rs) where installed, else the outline face at points *
+/// dpi / 72 pels.
 pub fn by_name(name: &[u8]) -> Option<&'static Font> {
     let dot = name.iter().position(|&c| c == b'.')?;
     let pt: i32 = core::str::from_utf8(&name[..dot]).ok()?.trim().parse().ok()?;
@@ -216,10 +221,10 @@ pub fn by_name(name: &[u8]) -> Option<&'static Font> {
         italic |= a.eq_ignore_ascii_case(b"Italic");
     }
     if !bold && !italic
-        && let Some(&(_, _, f)) = st().fonts.public.iter().find(|(_, i, _)| i.face.eq_ignore_ascii_case(fname) && i.fields[25] as i32 == pt * 10 && i.fields[19] == 96)
+        && let Some(&(_, _, f)) = st().fonts.public.iter().find(|(_, i, _)| i.face.eq_ignore_ascii_case(fname) && i.fields[25] as i32 == pt * 10 && i.fields[19] as i32 == crate::scale::dpi())
     {
         return Some(f);
     }
     let i = face_index(fname)?;
-    face(styled(i, bold, italic), (pt * 96 + 36) / 72)
+    face(styled(i, bold, italic), (pt * crate::scale::dpi() + 36) / 72)
 }

@@ -45,7 +45,7 @@ use crate::methods;
 use crate::obj::{self, OPEN_DEFAULT, OPEN_SETTINGS};
 use crate::pm::*;
 use crate::som;
-use crate::util::{cstr, parse_dec, z};
+use crate::util::{cstr, parse_dec, ui, z};
 use crate::wps::{self, Impl};
 
 // ---- The object ----
@@ -479,11 +479,11 @@ fn large(o: usize) -> bool {
 
 /// The icon size and the bar's height.
 fn icon_px(o: usize) -> i32 {
-    if large(o) { 32 } else { 16 }
+    ui(if large(o) { 32 } else { 16 })
 }
 
 fn bar_h(o: usize) -> i32 {
-    icon_px(o) + 6
+    icon_px(o) + ui(6)
 }
 
 /// The objects of the current tray (the ones still there).
@@ -495,25 +495,25 @@ fn tray_objects(o: usize) -> Vec<usize> {
 /// Lay out the bar for a screen `sw` wide.
 fn layout(o: usize, sw: i32) -> Vec<(RectL, Hit)> {
     let h = bar_h(o);
-    let sq = icon_px(o) + 7;
+    let sq = icon_px(o) + ui(7);
     let mut items = Vec::new();
     let mut x = 0;
     for it in [Hit::Desktop, Hit::WinList, Hit::Lockup, Hit::Find, Hit::Shutdown] {
         items.push((rect(x, 0, x + sq, h), it));
         x += sq - 1;
     }
-    x += 3;
-    let mw = 8 * (16 + 7);
+    x += ui(3);
+    let mw = ui(8 * (16 + 7));
     items.push((rect(x, 0, x + mw, h), Hit::Monitor));
-    x += mw + 3;
+    x += mw + ui(3);
     items.push((rect(x, 0, x + sq, h), Hit::TrayButton));
     x += sq - 1;
     // The right end: the clock, the Assistance button left of it.
-    let cw = if large(o) { 128 } else { 104 };
+    let cw = ui(if large(o) { 128 } else { 104 });
     let clock = rect(sw - cw, 0, sw, h);
     // In timer mode the Timer options button, narrow, left of the clock.
     let left = if wd(o).date == CLOCK_TIMER {
-        let t = rect(clock.l - 13, 0, clock.l + 1, h);
+        let t = rect(clock.l - ui(13), 0, clock.l + 1, h);
         items.push((t, Hit::Timer));
         t.l
     } else {
@@ -833,7 +833,7 @@ fn text(hps: u32, t: &[u8], mut r: RectL, fg: u32, fl: u32) {
 }
 
 fn icon_at(hps: u32, r: RectL, icon: u32, px: i32) {
-    let fs = if px == 16 { DP_MINI } else { 0 };
+    let fs = if px < ui(32) { DP_MINI } else { 0 };
     unsafe { WinDrawPointer(hps, r.l + (r.r - r.l - px) / 2, r.b + (r.t - r.b - px) / 2, icon, fs) };
 }
 
@@ -928,8 +928,8 @@ fn paint_monitor(hps: u32, b: usize, r: RectL) {
             let a = mon.battery;
             let ac = a.is_some_and(|a| a.ac == 1);
             let icon = crate::icons::shell(if ac { crate::icons::PLUG } else { crate::icons::BATTERY });
-            let sq = rect(inner.l, inner.b, inner.l + 16 + 6, inner.t);
-            icon_at(hps, sq, icon, 16);
+            let sq = rect(inner.l, inner.b, inner.l + ui(16 + 6), inner.t);
+            icon_at(hps, sq, icon, ui(16));
             let life = a.map_or(0xff, |a| a.life);
             let pct = if life <= 100 { life as u32 } else { 0 };
             let mut t = if life <= 100 { alloc::format!("{life}%") } else { alloc::string::String::from("?") };
@@ -969,7 +969,7 @@ fn paint_monitor(hps: u32, b: usize, r: RectL) {
             match &mon.disk {
                 Some((_, label, free, total)) => {
                     let lab = alloc::format!("{letter}:");
-                    let lw = 24;
+                    let lw = ui(24);
                     text(hps, lab.as_bytes(), rect(inner.l + 3, inner.b, inner.l + lw, inner.t), 0, 0);
                     let pct = if *total == 0 { 0 } else { (*free as u64 * 100 / *total as u64) as u32 };
                     let _ = label;

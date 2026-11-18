@@ -39,9 +39,13 @@ pub struct PtrObj {
 const BASE: u32 = 0x2000_0001;
 
 /// Size of icons and pointers on this display (SV_CXICON).
-pub const ICON: i32 = 32;
+pub fn icon_size() -> i32 {
+    crate::scale::px(32)
+}
 /// Size of mini icons.
-pub const MINI: i32 = 16;
+pub fn mini_size() -> i32 {
+    crate::scale::px(16)
+}
 
 unsafe extern "C" {
     #[link_name = "RS2API.5"]
@@ -69,6 +73,12 @@ fn add(p: PtrObj) -> u32 {
     BASE + i as u32
 }
 
+/// A hot spot coordinate `v` of an image `from` pels wide, in one
+/// scaled to `to` pels: the pel whose centre is at the same place.
+fn hot_scaled(v: i32, from: i32, to: i32) -> i32 {
+    if from <= 0 || from == to { v } else { ((2 * v + 1) * to / (2 * from)).clamp(0, to - 1) }
+}
+
 /// System pointer `id`, created on first use.
 pub fn system(id: u32) -> u32 {
     if id == 0 || id > sysptr::SPTR_CPTR {
@@ -80,7 +90,10 @@ pub fn system(id: u32) -> u32 {
     }
     if s.sys_ptrs[id as usize] == 0 {
         let Some(p) = sysptr::system(id) else { return 0 };
-        let h = add(PtrObj { pid: 0, hot: p.hot, pointer: p.pointer, img: p.image, mini: p.mini, mono: false });
+        // Drawn for 96 dpi: scaled with the UI (scale.rs).
+        let (n, m) = (icon_size(), mini_size());
+        let hot = Point::new(hot_scaled(p.hot.x, p.image.w, n), hot_scaled(p.hot.y, p.image.h, n));
+        let h = add(PtrObj { pid: 0, hot, pointer: p.pointer, img: p.image.scaled(n, n), mini: p.mini.scaled(m, m), mono: false });
         st().sys_ptrs[id as usize] = h;
     }
     st().sys_ptrs[id as usize]
@@ -93,17 +106,17 @@ pub fn from_data(b: &[u8], owner: u32) -> u32 {
         let s = st();
         (s.surface.width, s.surface.height)
     };
-    let Some(big) = icon::choose(&entries, ICON, screen) else { return 0 };
-    let mini = icon::choose(&entries, MINI, screen).filter(|e| e.image.w <= ICON).unwrap_or(big);
+    let Some(big) = icon::choose(&entries, icon_size(), screen) else { return 0 };
+    let mini = icon::choose(&entries, mini_size(), screen).filter(|e| e.image.w <= icon_size()).unwrap_or(big);
     let scale = |e: &icon::Entry, n: i32| e.image.scaled(n, n);
-    let k = |v: i32, from: i32| if from > 0 { v * ICON / from } else { v };
+    let k = |v: i32, from: i32| hot_scaled(v, from, icon_size());
     let hot = Point::new(k(big.hot.x, big.image.w), k(big.hot.y, big.image.h));
     let p = PtrObj {
         pid: owner,
         hot,
         pointer: big.is_pointer(),
-        img: scale(big, ICON),
-        mini: scale(mini, MINI),
+        img: scale(big, icon_size()),
+        mini: scale(mini, mini_size()),
         mono: big.bits == 1,
     };
     add(p)
@@ -236,10 +249,10 @@ pub extern "C" fn WinCreatePointer(_desk: u32, hbm: u32, pointer: u32, x: i32, y
 
 fn make(img: Image, mini: Option<Image>, pointer: bool, hot: Point, mono: bool) -> u32 {
     let (w, h) = (img.w, img.h);
-    let k = |v: i32, from: i32| if from > 0 { v * ICON / from } else { v };
+    let k = |v: i32, from: i32| hot_scaled(v, from, icon_size());
     let hot = Point::new(k(hot.x, w), k(hot.y, h));
-    let mini = mini.map_or_else(|| img.scaled(MINI, MINI), |m| m.scaled(MINI, MINI));
-    add(PtrObj { pid: pid(), hot, pointer, img: img.scaled(ICON, ICON), mini, mono })
+    let mini = mini.map_or_else(|| img.scaled(mini_size(), mini_size()), |m| m.scaled(mini_size(), mini_size()));
+    add(PtrObj { pid: pid(), hot, pointer, img: img.scaled(icon_size(), icon_size()), mini, mono })
 }
 
 /// A template's look of an icon image `n` pixels square (IBM's shell
@@ -291,7 +304,7 @@ fn template_image(src: &Image, n: i32) -> Image {
 #[unsafe(no_mangle)]
 pub extern "C" fn Rs2TemplateIcon(h: u32) -> u32 {
     let Some(p) = get(h) else { return 0 };
-    let (img, mini) = (template_image(&p.img, ICON), template_image(&p.mini, MINI));
+    let (img, mini) = (template_image(&p.img, icon_size()), template_image(&p.mini, mini_size()));
     add(PtrObj { pid: pid(), hot: Point::new(0, 0), pointer: false, img, mini, mono: false })
 }
 
@@ -580,7 +593,7 @@ pub extern "C" fn Rs2DragPointer(base: u32, pdimg: *const DragImage, n: u32, fl:
     if let Some(a) = &arrow {
         put(Point::new(-hot.x, -hot.y), a);
     }
-    add(PtrObj { pid: pid(), hot: Point::new(-l, -b), pointer: true, mini: out.scaled(MINI, MINI), img: out, mono: false })
+    add(PtrObj { pid: pid(), hot: Point::new(-l, -b), pointer: true, mini: out.scaled(mini_size(), mini_size()), img: out, mono: false })
 }
 
 /// Rs2HoldPointer(hptr) (private, for PMDRAG): show `hptr` as the
@@ -635,11 +648,22 @@ fn upload(s: &mut State) {
         unsafe { Rs2SetPointerShape(1, 1, 0, 0, none.as_ptr()) };
         return;
     };
-    let px = p.img.argb();
-    let (w, h) = (p.img.w as u32, p.img.h as u32);
+    hardware_shape(p);
+}
+
+/// Give pointer `p` to the hardware cursor (at most 64 x 64 pels: a
+/// bigger one, at a UI scale above 200%, is made smaller).
+fn hardware_shape(p: &PtrObj) -> bool {
+    let (img, hot) = if p.img.w > 64 || p.img.h > 64 {
+        (p.img.scaled(64, 64), Point::new(hot_scaled(p.hot.x, p.img.w, 64), hot_scaled(p.hot.y, p.img.h, 64)))
+    } else {
+        (p.img.clone(), p.hot)
+    };
+    let px = img.argb();
+    let (w, h) = (img.w as u32, img.h as u32);
     // The kernel wants the hot spot from the top-left corner.
-    let (hx, hy) = (p.hot.x.max(0) as u32, (p.img.h - 1 - p.hot.y).max(0) as u32);
-    unsafe { Rs2SetPointerShape(w, h, hx, hy, px.as_ptr()) };
+    let (hx, hy) = (hot.x.clamp(0, img.w - 1) as u32, (img.h - 1 - hot.y).clamp(0, img.h - 1) as u32);
+    unsafe { Rs2SetPointerShape(w, h, hx, hy, px.as_ptr()) == 0 }
 }
 
 /// The PM server takes the pointer over: a hardware cursor if the display
@@ -653,9 +677,7 @@ pub fn init(s: &mut State) {
     let s = st();
     s.cur_ptr = arrow;
     let p = get(arrow).expect("arrow");
-    let px = p.img.argb();
-    let (hx, hy) = (p.hot.x as u32, (p.img.h - 1 - p.hot.y) as u32);
-    s.ptr_hardware = unsafe { Rs2SetPointerShape(p.img.w as u32, p.img.h as u32, hx, hy, px.as_ptr()) } == 0;
+    s.ptr_hardware = hardware_shape(p);
     draw(s);
 }
 

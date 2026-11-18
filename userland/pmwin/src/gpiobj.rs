@@ -1023,7 +1023,7 @@ fn caps(i: i32) -> i32 {
         31 => 1,                               // DEVICE_WINDOWING
         32 => 256 | 512 | 4096,                // ADDITIONAL_GRAPHICS: palette manager, wide lines, clip fills
         34 => 255,                             // COLOR_INDEX
-        37 | 38 => 96,                         // FONT_RES
+        37 | 38 => crate::scale::dpi(),        // FONT_RES: 96, or more at a UI scale
         40 => 2,                               // LINEWIDTH_THICK
         _ => 0,
     }

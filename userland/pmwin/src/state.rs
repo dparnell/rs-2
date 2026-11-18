@@ -255,6 +255,8 @@ pub struct State {
     /// (the rest are the defaults).
     pub sysvals: BTreeMap<i32, i32>,
     pub syscolors: BTreeMap<i32, u32>,
+    /// The UI scale in percent (scale.rs; RS2SCALE).
+    pub scale: i32,
     /// The fonts (fonts.rs).
     pub fonts: crate::fonts::Fonts,
     /// Virtual key states by VK_* (0x80: down, 0x01: toggled), as the
@@ -342,6 +344,7 @@ pub fn init(surface: Surface, colors256: bool) {
         pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
+        scale: crate::scale::from_env(),
         fonts: Default::default(),
         ptr_hidden: 0,
         ptr_hardware: false,

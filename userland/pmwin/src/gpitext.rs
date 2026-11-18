@@ -405,11 +405,11 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *c
         lf.bold &= !has(b"Bold");
         lf.italic &= !has(b"Italic");
         let px = if outline {
-            OUTLINE_EM
+            outline_em()
         } else if maxbe > 0 {
             (maxbe * 8 / 9).max(6)
         } else {
-            crate::fonts::SYSTEM_EM
+            crate::fonts::system_em()
         };
         if crate::fonts::face(j, px).is_some() {
             n = FACE_FONT | (j as u32) << 16 | px as u32;
@@ -505,7 +505,7 @@ pub extern "C" fn GpiQueryLogicalFont(hps: u32, lcid: i32, name: *mut [u8; 8], f
 
 /// The font a face of FONTS draws with (for listing).
 fn face_font(i: usize) -> &'static gpi::font::Font {
-    crate::fonts::face_index(FONTS[i].0).and_then(|k| crate::fonts::face(k, if FONTS[i].1 { OUTLINE_EM } else { crate::fonts::SYSTEM_EM })).unwrap_or_else(gpi::font::system)
+    crate::fonts::face_index(FONTS[i].0).and_then(|k| crate::fonts::face(k, if FONTS[i].1 { outline_em() } else { crate::fonts::system_em() })).unwrap_or_else(gpi::font::system)
 }
 
 /// FONTMETRICS of a font scaled by `scale` (device pels per
@@ -540,8 +540,8 @@ fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, 
     p32(&mut m, 112, y(h)); // lMaxBaselineExt
     p16(&mut m, 122, if bold { 7 } else { 5 }); // usWeightClass
     p16(&mut m, 124, 5); // usWidthClass
-    p16(&mut m, 126, 96); // sXDeviceRes
-    p16(&mut m, 128, 96);
+    p16(&mut m, 126, crate::scale::dpi()); // sXDeviceRes
+    p16(&mut m, 128, crate::scale::dpi());
     p16(&mut m, 130, 1); // sFirstChar
     p16(&mut m, 132, 254); // sLastChar (relative)
     p16(&mut m, 134, b'?' as i32 - 1); // sDefaultChar
@@ -688,7 +688,9 @@ fn loaded_font(n: u32) -> Option<&'static gpi::font::Font> {
 const FACE_FONT: u32 = 0x8000_0000;
 /// The em outline faces are made at before the character box scales
 /// them (text then uses the face made at the box's size).
-const OUTLINE_EM: i32 = 16;
+fn outline_em() -> i32 {
+    crate::scale::px(16)
+}
 
 /// The loaded font for a FATTRS: by lMatch, else by face at the nearest
 /// size.

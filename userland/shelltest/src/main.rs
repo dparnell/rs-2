@@ -303,7 +303,9 @@ fn pointers() {
     check("system pointers are distinct", uniq.len() == all.len());
     check("WinQuerySysPointer: no SPTR 15", unsafe { WinQuerySysPointer(1, 15, 0) } == 0);
     check("system pointers cannot be destroyed", unsafe { WinDestroyPointer(all[12]) } == 0);
-    check("SV_CXICON/SV_CYICON 32", unsafe { WinQuerySysValue(1, 38) == 32 && WinQuerySysValue(1, 39) == 32 });
+    // 32 pels at 96 dpi; more at a UI scale (RS2SCALE).
+    let n = unsafe { WinQuerySysValue(1, 38) } as u32;
+    check("SV_CXICON/SV_CYICON 32 (or more at a UI scale)", n >= 32 && unsafe { WinQuerySysValue(1, 39) } as u32 == n);
     // POINTERINFO: fPointer, xHot, yHot, hbmPointer, hbmColor, mini x2.
     let mut pi = [0u32; 7];
     let ok = unsafe { WinQueryPointerInfo(all[12], pi.as_mut_ptr()) } != 0;
@@ -312,10 +314,10 @@ fn pointers() {
     bmp[0] = 12;
     unsafe { GpiQueryBitmapParameters(pi[3], bmp.as_mut_ptr()) };
     let (cx, cy) = (bmp[1] & 0xffff, bmp[1] >> 16);
-    check("pointer mask bitmap is 32 x 64", (cx, cy) == (32, 64));
+    check("pointer mask bitmap is SV_CXICON x 2 SV_CYICON", (cx, cy) == (n, 2 * n));
     let mut ai = [0u32; 7];
     unsafe { WinQueryPointerInfo(all[0], ai.as_mut_ptr()) };
-    check("arrow is a pointer with its hot spot at the tip", ai[0] == 1 && ai[1] == 0 && ai[2] == 31);
+    check("arrow is a pointer with its hot spot at the tip", ai[0] == 1 && ai[1] == 0 && ai[2] == n - 1);
     let copy = unsafe { WinCreatePointerIndirect(1, pi.as_ptr()) };
     check("WinCreatePointerIndirect", copy != 0 && !all.contains(&copy));
     let mut ci = [0u32; 7];
