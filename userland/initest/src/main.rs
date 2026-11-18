@@ -236,7 +236,12 @@ fn basic_checks() {
     unsafe {
         check("PrfQueryProfileSize string", PrfQueryProfileSize(h, a1.as_ptr(), k1.as_ptr(), &mut n) != 0 && n == 6);
         check("PrfQueryProfileSize data", PrfQueryProfileSize(h, a1.as_ptr(), kb.as_ptr(), &mut n) != 0 && n == 4);
-        check("PrfQueryProfileSize missing key", PrfQueryProfileSize(h, a1.as_ptr(), b"Nope\0".as_ptr(), &mut n) == 0);
+        // As IBM's: the size of a missing value is set to 0 (UCMenus reads
+        // it whatever the result).
+        n = 0x55;
+        check("PrfQueryProfileSize missing key: FALSE, size 0", PrfQueryProfileSize(h, a1.as_ptr(), b"Nope\0".as_ptr(), &mut n) == 0 && n == 0);
+        n = 0x55;
+        check("PrfQueryProfileSize missing application: FALSE, size 0", PrfQueryProfileSize(h, b"NoApp\0".as_ptr(), b"Nope\0".as_ptr(), &mut n) == 0 && n == 0);
     }
     check("PrfQueryProfileData", data(h, "App1", "Bin").as_deref() == Some(&[1, 2, 0, 3][..]));
     let mut b = [0xeeu8; 8];

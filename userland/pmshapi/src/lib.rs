@@ -71,6 +71,12 @@ impl Query {
 /// list (each name NUL-terminated, then a final NUL). None when there is
 /// no such value, or no names to list.
 fn lookup(hini: u32, q: &Query) -> Option<Vec<u8>> {
+    lookup_in(hini, q).flatten()
+}
+
+/// As [`lookup`], but None only when `hini` is no profile handle (and
+/// Some(None) when the profiles have no such value or names).
+fn lookup_in(hini: u32, q: &Query) -> Option<Option<Vec<u8>>> {
     prf::read(hini, |ps: &[&Profile]| match q {
         Query::Value(a, k) => ps.iter().find_map(|p| p.get(a, k)).map(|v| v.to_vec()),
         Query::Apps => {
@@ -92,7 +98,6 @@ fn lookup(hini: u32, q: &Query) -> Option<Vec<u8>> {
             (!names.is_empty()).then(|| name_list(names))
         }
     })
-    .flatten()
 }
 
 #[unsafe(no_mangle)]
@@ -117,10 +122,19 @@ pub extern "C" fn PrfQueryProfileSize(hini: u32, app: *const u8, key: *const u8,
     if size.is_null() {
         return 0;
     }
-    match lookup(hini, &unsafe { Query::new(app, key) }) {
-        Some(v) => {
+    match lookup_in(hini, &unsafe { Query::new(app, key) }) {
+        Some(Some(v)) => {
             unsafe { *size = v.len() as u32 };
             1
+        }
+        // As IBM's PRF32QUERYPROFILESIZE: an application or key name
+        // that is not there (PMERR_NOT_IN_IDX) sets the size to 0.
+        // UCMenus' UCMenuLoadStyleIni reads it without looking at the
+        // result, and took stack garbage for a stored style (UltiMail's
+        // letter tool bar came out black).
+        Some(None) => {
+            unsafe { *size = 0 };
+            0
         }
         None => 0,
     }
