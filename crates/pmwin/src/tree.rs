@@ -679,22 +679,43 @@ impl Desktop {
     }
 
     /// The siblings `h` owns, directly or through other siblings it owns.
+    /// Whether sibling `w` (a child of `p`, as `h`) is owned by `h`,
+    /// directly or through other siblings it owns. An owner inside a
+    /// sibling (a frame's client) counts as that sibling: Borland's OWL
+    /// gives its floating palettes the client of the window they serve
+    /// as owner (Resource Workshop's dialog editor tools), and they fell
+    /// behind the frame when it was activated.
+    fn owned_by(&self, w: Hwnd, h: Hwnd, p: Hwnd, kids: &[Hwnd]) -> bool {
+        let level = |mut o: Hwnd| {
+            for _ in 0..64 {
+                let Some(x) = self.get(o) else { return 0 };
+                if x.parent == p {
+                    return o;
+                }
+                if x.parent == 0 || x.parent == o {
+                    return 0;
+                }
+                o = x.parent;
+            }
+            0
+        };
+        let mut o = level(self.get(w).map_or(0, |x| x.owner));
+        for _ in 0..kids.len() {
+            if o == h {
+                return true;
+            }
+            if o == 0 || o == w || !kids.contains(&o) {
+                return false;
+            }
+            o = level(self.get(o).map_or(0, |x| x.owner));
+        }
+        false
+    }
+
     fn ownees(&self, h: Hwnd) -> Vec<Hwnd> {
         let Some(p) = self.get(h).map(|w| w.parent) else { return Vec::new() };
         let Some(kids) = self.windows.get(&p).map(|pw| pw.children.clone()) else { return Vec::new() };
-        let owned = |w: Hwnd| {
-            let mut o = self.get(w).map_or(0, |x| x.owner);
-            for _ in 0..kids.len() {
-                if o == h {
-                    return true;
-                }
-                if o == 0 || o == w || !kids.contains(&o) {
-                    return false;
-                }
-                o = self.get(o).map_or(0, |x| x.owner);
-            }
-            false
-        };
+        let owned = |w: Hwnd| self.owned_by(w, h, p, &kids);
         kids.iter().copied().filter(|&c| c != h && owned(c)).collect()
     }
 
@@ -702,19 +723,7 @@ impl Desktop {
     fn reorder_ownees(&mut self, h: Hwnd) {
         let Some(p) = self.get(h).map(|w| w.parent) else { return };
         let Some(kids) = self.windows.get(&p).map(|pw| pw.children.clone()) else { return };
-        let owned = |w: Hwnd| {
-            let mut o = self.get(w).map_or(0, |x| x.owner);
-            for _ in 0..kids.len() {
-                if o == h {
-                    return true;
-                }
-                if o == 0 || o == w || !kids.contains(&o) {
-                    return false;
-                }
-                o = self.get(o).map_or(0, |x| x.owner);
-            }
-            false
-        };
+        let owned = |w: Hwnd| self.owned_by(w, h, p, &kids);
         let Some(at) = kids.iter().position(|&c| c == h) else { return };
         let ownees: Vec<Hwnd> = kids.iter().copied().filter(|&c| c != h && owned(c)).collect();
         // Already right above it, in order?
@@ -1006,6 +1015,18 @@ mod tests {
         }
         d.raise(main);
         assert!(d.get(pal).unwrap().update.is_empty() && d.get(main).unwrap().update.is_empty());
+    }
+
+    #[test]
+    fn a_palette_owned_by_a_frames_client_comes_up_with_the_frame() {
+        let mut d = desk();
+        let main = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(10, 10, 200, 200), 1, 7, 0, 0).unwrap();
+        let client = d.create(main, main, 1, ws::VISIBLE, Rect::new(5, 5, 180, 180), 2, 8, 0, 0).unwrap();
+        let pal = d.create(HWND_DESKTOP, client, 1, ws::VISIBLE, Rect::new(150, 150, 250, 250), 3, 9, 0, 0).unwrap();
+        let other = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 300, 300), 4, 7, 0, 0).unwrap();
+        d.raise(other);
+        d.raise(main);
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().children.iter().rev().take(2).copied().collect::<Vec<_>>(), alloc::vec![pal, main]);
     }
 
     #[test]
