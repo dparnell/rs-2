@@ -197,6 +197,15 @@ fn trace_call(idx: u32, args: u32) {
             let _ = core::fmt::Write::write_fmt(&mut s, format_args!(" [{:x} {:x} {:x} {:x}]", f(0), f(1), f(2), f(3)));
         }
     }
+    // The font a WinSetPresParam(PP_FONTNAMESIZE) sets (hwnd, id, cb, pv).
+    if name == "WinSetPresParam" {
+        let f = |i: u32| unsafe { ((args + i * 4) as *const u32).read_unaligned() };
+        if f(1) == crate::pp::PP_FONTNAMESIZE && f(3) != 0 && f(2) < 256 {
+            let b = unsafe { core::slice::from_raw_parts(f(3) as *const u8, f(2) as usize) };
+            let b = b.split(|&c| c == 0).next().unwrap_or(&[]);
+            let _ = core::fmt::Write::write_fmt(&mut s, format_args!(" \"{}\"", alloc::string::String::from_utf8_lossy(b)));
+        }
+    }
     // The caller: the return address above the arguments.
     let from = unsafe { ((args - 4) as *const u32).read_unaligned() };
     crate::trace(format_args!("{} {s} from {from:x}", tid()));
