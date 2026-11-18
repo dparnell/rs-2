@@ -50,6 +50,9 @@ const CLR_RED: i32 = 2;
 const CLR_BLUE: i32 = 1;
 
 const ID_LIST: u32 = 100;
+const ID_LIST2: u32 = 101;
+/// The height the owner gives the second list box's items (0: none yet).
+static LIST2_H: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 const ID_MENU: u32 = 200;
 const ID_ITEM: u32 = 201;
 const ID_BUTTON: u32 = 300;
@@ -80,6 +83,7 @@ pub fn client_msg(_h: u32, msg: u32, mp1: u32, mp2: u32) -> Option<u32> {
             seen().measured.push((mp1 & 0xffff, mp2));
             Some(22)
         }
+        WM_MEASUREITEM if mp1 & 0xffff == ID_LIST2 => Some(LIST2_H.load(core::sync::atomic::Ordering::Relaxed)),
         WM_MEASUREITEM if mp1 & 0xffff == ID_MENU => {
             let oi = unsafe { &mut *(mp2 as *mut OwnerItem) };
             seen().measured.push((mp1 & 0xffff, oi.h_item));
@@ -160,6 +164,36 @@ pub fn owner_checks(hab: u32, client: u32) {
     let (p0, p1) = (at(item(0)), at(item(1)));
     unsafe { WinReleasePS(hps) };
     check("what the owner draws stays, an item it leaves is drawn by the list box", p0 == CLR_RED && p1 != CLR_RED);
+    unsafe { WinDestroyWindow(lb) };
+
+    // An owner that answers WM_MEASUREITEM only after the list box is made
+    // (Borland's OWL subclasses it then and sets a presentation
+    // parameter): as IBM's, a presentation parameter change asks again.
+    // An item only partly in view gets its whole rectangle.
+    unsafe extern "C" {
+        #[link_name = "PMWIN.938"]
+        fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: *const u8) -> u32;
+        #[link_name = "PMWIN.765"]
+        fn WinInvalidateRect(h: u32, rcl: *const i32, children: u32) -> u32;
+    }
+    LIST2_H.store(0, core::sync::atomic::Ordering::Relaxed);
+    let lb = create(client, 0xffff_0007, 0x0002, (10, 10, 180, 50), ID_LIST2, null());
+    for t in [b"one\0", b"two\0", b"six\0", b"ten\0"] {
+        unsafe { WinSendMsg(lb, 0x0161, 0xffff, t.as_ptr() as u32) };
+    }
+    LIST2_H.store(20, core::sync::atomic::Ordering::Relaxed);
+    let clr = 15u32; // CLR_PALEGRAY
+    unsafe { WinSetPresParam(lb, 4, 4, (&raw const clr).cast()) }; // PP_BACKGROUNDCOLORINDEX
+    s.drawn.clear();
+    unsafe {
+        WinInvalidateRect(lb, null(), 0);
+        WinUpdateWindow(lb);
+    }
+    let d = drawn(ID_LIST2);
+    check(
+        &alloc::format!("LS_OWNERDRAW: a presentation parameter change measures the items again; a part item's whole rectangle ({:?})", d.iter().map(|o| o.rcl.top - o.rcl.bottom).collect::<Vec<_>>()),
+        d.len() >= 2 && d.iter().all(|o| o.rcl.top - o.rcl.bottom == 20),
+    );
     unsafe { WinDestroyWindow(lb) };
 
     // A pop-up menu with an owner-drawn item.

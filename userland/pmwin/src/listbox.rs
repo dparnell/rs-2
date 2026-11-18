@@ -14,6 +14,7 @@ use crate::state::st;
 use crate::win::{self, WM_BUTTON1DOWN, WM_CHAR, WM_PAINT, WM_SETFOCUS, WM_SIZE};
 
 const WM_CREATE: u32 = 0x0001;
+const WM_SYSCOLORCHANGE: u32 = 0x002b;
 
 const LS_MULTIPLESEL: u32 = 0x0001;
 const LS_OWNERDRAW: u32 = 0x0002;
@@ -213,9 +214,9 @@ fn visible(h: u32) -> Vec<(usize, Vec<u8>, bool, bool, u32, Rect)> {
         .enumerate()
         .map(|(k, (i, it))| {
             let top = a.top - k as i32 * ih;
-            (i, it.text.clone(), it.selected, i == l.cursor, it.handle, Rect::new(a.left, top - ih, a.right, top).intersect(&a))
+            (i, it.text.clone(), it.selected, i == l.cursor, it.handle, Rect::new(a.left, top - ih, a.right, top))
         })
-        .filter(|v| !v.5.is_empty())
+        .filter(|v| !v.5.intersect(&a).is_empty())
         .collect()
 }
 
@@ -250,7 +251,9 @@ fn paint(h: u32) {
         c.sunken(r);
         c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
         if !owner {
+            let a = area(h);
             for (_, text, sel, cur, _, ir) in &items {
+                let ir = &ir.intersect(&a);
                 draw_text_item(c, h, *ir, text, *sel);
                 if focus && *cur {
                     c.focus_rect(*ir);
@@ -258,6 +261,10 @@ fn paint(h: u32) {
             }
         }
     });
+    // An owner gets the whole rectangle of an item only partly in view
+    // (drawing is clipped to the list): Borland's OWL places its text from
+    // the bottom of the rectangle, so a clipped one drew the last item over
+    // the one above (Resource Workshop's resource list).
     if owner {
         let clip = area(h);
         for (i, text, sel, cur, handle, ir) in &items {
@@ -517,6 +524,27 @@ pub extern "C" fn listbox_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         LM_QUERYITEMHANDLE => data(h).and_then(|l| l.items.get(mp1 as usize)).map_or(0, |it| it.handle),
         LM_SEARCHSTRING => search(h, lo(mp1), hi(mp1) as i16 as i32, &ctl::cstr(mp2 as *const u8)),
+        // As IBM's list box: a change of presentation parameters or of
+        // the system colours reads the font again and asks an owner-drawn
+        // list's owner for the item height again (a 0 answer keeps it).
+        // Borland's OWL answers WM_MEASUREITEM only once it has subclassed
+        // the list box, after its creation, and then sets a presentation
+        // parameter: Resource Workshop's resource list drew every item 1
+        // pel below the last.
+        crate::pp::WM_PRESPARAMCHANGED | WM_SYSCOLORCHANGE => {
+            let item_h = if ctl::style(h) & LS_OWNERDRAW != 0 {
+                let r = send(ctl::owner(h), ctl::WM_MEASUREITEM, ctl::id(h), 0) as u16 as i16 as i32;
+                (r != 0).then_some(r)
+            } else {
+                Some(draw::font_of(h).height + 2)
+            };
+            if let (Some(n), Some(l)) = (item_h, data(h)) {
+                l.item_h = n;
+            }
+            ctl::invalidate(h);
+            sync_scroll(h);
+            WinDefWindowProc(h, msg, mp1, mp2)
+        }
         LM_SETITEMHEIGHT => {
             if let Some(l) = data(h) {
                 l.item_h = (mp1 as i32).max(4);
