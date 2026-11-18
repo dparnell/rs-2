@@ -70,6 +70,8 @@ unsafe extern "C" {
     fn WinQueryWindowPos(h: u32, swp: *mut i32) -> u32;
     #[link_name = "PMWIN.829"]
     fn WinQuerySysValue(desk: u32, i: i32) -> i32;
+    #[link_name = "PMWIN.828"]
+    fn WinQuerySysPointer(desk: u32, id: i32, copy: u32) -> u32;
     #[link_name = "PMWIN.899"]
     fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.918"]
@@ -342,6 +344,26 @@ fn entry_combo_checks(hab: u32, client: u32) {
     let only_moved = (swp[4], swp[3], swp[2], swp[1]) == (50 - m, 50 - m, 120 + 2 * m, 15 + 2 * m);
     check("ES_MARGIN: the margin goes around the position given (created, moved and sized, moved)", created && moved && only_moved);
     unsafe { WinDestroyWindow(e) };
+    // An image button's BTNCDATA through WM_QUERY/SETWINDOWPARAMS (as
+    // IBM's; UltiMail swaps its folder button's icon so): cb 10, the
+    // states, hImage.
+    let (p1, p2) = unsafe { (WinQuerySysPointer(1, 1, 0), WinQuerySysPointer(1, 2, 0)) }; // SPTR_ARROW, SPTR_TEXT
+    let mut bd = [0u8; 10];
+    bd[0] = 10;
+    bd[6..10].copy_from_slice(&p1.to_le_bytes());
+    let b = create(client, 3, b"", 0x0080, (0, 0, 40, 40), 115, bd.as_ptr()); // BS_PUSHBUTTON | BS_ICON
+    let query = |b: u32| {
+        let mut cd = [0u8; 10];
+        let wp = [0x0002 | 0x0010, 0, 0, 0, 0, 10, cd.as_mut_ptr() as u32]; // WPM_CTLDATA | WPM_CBCTLDATA
+        let ok = send(b, 0x000b, wp.as_ptr() as u32, 0) != 0; // WM_QUERYWINDOWPARAMS
+        (ok, u16::from_le_bytes([cd[0], cd[1]]), u32::from_le_bytes([cd[6], cd[7], cd[8], cd[9]]))
+    };
+    check("image button: WM_QUERYWINDOWPARAMS gives the BTNCDATA of its creation", query(b) == (true, 10, p1));
+    bd[6..10].copy_from_slice(&p2.to_le_bytes());
+    let wp = [0x0002u32, 0, 0, 0, 0, 10, bd.as_ptr() as u32];
+    let set = send(b, 0x000a, wp.as_ptr() as u32, 0) != 0; // WM_SETWINDOWPARAMS
+    check("image button: WM_SETWINDOWPARAMS takes a new image", set && query(b) == (true, 10, p2));
+    unsafe { WinDestroyWindow(b) };
     // At the text limit (32 without ENTRYFDATA) EN_OVERFLOW goes to the
     // owner; when it makes room the character goes in.
     let e = create(client, 6, b"0123456789012345678901234567890", 0, (0, 0, 300, 20), 113, null());
