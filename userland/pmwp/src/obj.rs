@@ -702,6 +702,67 @@ fn set_icon_from(obj: usize, key: &[u8], v: &[u8]) {
     }
 }
 
+/// The value of `key` in a setup string, as IBM's ShlScanSetupString finds
+/// it: entries end at ';' (`^;` is a ';' of the value), the key matches
+/// case-insensitively and is followed by blanks or '=', an empty value
+/// does not count.
+pub fn scan_setup(s: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+    let mut i = 0;
+    while i < s.len() {
+        // The entry: up to a ';' that is not escaped by '^'.
+        let mut end = i;
+        while end < s.len() && !(s[end] == b';' && (end == i || s[end - 1] != b'^')) {
+            end += 1;
+        }
+        let e = &s[i..end];
+        if e.len() > key.len() && e[..key.len()].eq_ignore_ascii_case(key) && matches!(e[key.len()], b' ' | b'=') {
+            let mut v = key.len();
+            let mut eq = false;
+            while v < e.len() && (e[v] == b' ' || (e[v] == b'=' && !eq)) {
+                eq |= e[v] == b'=';
+                v += 1;
+            }
+            if v < e.len() {
+                let mut out = Vec::new();
+                let mut k = v;
+                while k < e.len() {
+                    if e[k] == b'^' && e.get(k + 1) == Some(&b';') {
+                        k += 1;
+                    }
+                    out.push(e[k]);
+                    k += 1;
+                }
+                return Some(out);
+            }
+        }
+        i = end + 1;
+    }
+    None
+}
+
+/// wpScanSetupString(pszSetupString, pszKey, pszValue, pcbValue): TRUE
+/// with the value (and its size with the NUL in *pcbValue) when the key
+/// is there; a NULL pszValue asks for the size; a buffer too small gives
+/// FALSE (IBM's ShlScanSetupString). UltiMail's objects take MAILTYPE so.
+extern "C" fn wpScanSetupString(_obj: usize, setup: *const u8, key: *const u8, value: *mut u8, pcb: *mut u32) -> u32 {
+    if setup.is_null() || key.is_null() || pcb.is_null() {
+        return 0;
+    }
+    let Some(v) = scan_setup(&crate::cstr(setup), &crate::cstr(key)) else { return 0 };
+    let need = v.len() as u32 + 1;
+    let room = unsafe { pcb.read_unaligned() };
+    unsafe { pcb.write_unaligned(need) };
+    if value.is_null() {
+        return 1;
+    }
+    let n = (v.len()).min(room.saturating_sub(1) as usize);
+    unsafe {
+        core::ptr::copy_nonoverlapping(v.as_ptr(), value, n);
+        value.add(n).write(0);
+    }
+    (need <= room) as u32
+}
+
 extern "C" fn wpSetup(obj: usize, setup: *const u8) -> u32 {
     let style_bits: &[(&[u8], u32)] = &[
         (b"NOMOVE", OBJSTYLE_NOMOVE),
@@ -1187,6 +1248,7 @@ methods! {
     __m_wpSetObjectID => wpSetObjectID, 2;
     __m_wpQueryObjectID => wpQueryObjectID, 1;
     __m_wpSetup => wpSetup, 2;
+    __m_wpScanSetupString => wpScanSetupString, 5;
     __m_wpSetupOnce => wpSetupOnce, 2;
     __m_wpIsObjectInitialized => wpIsObjectInitialized, 1;
     __m_wpLockObject => wpLockObject, 1;
@@ -1263,6 +1325,7 @@ fn impl_object_own() -> Impl {
             ("wpSetObjectID", __m_wpSetObjectID as usize),
             ("wpQueryObjectID", __m_wpQueryObjectID as usize),
             ("wpSetup", __m_wpSetup as usize),
+            ("wpScanSetupString", __m_wpScanSetupString as usize),
             ("wpSetupOnce", __m_wpSetupOnce as usize),
             ("wpIsObjectInitialized", __m_wpIsObjectInitialized as usize),
             ("wpLockObject", __m_wpLockObject as usize),

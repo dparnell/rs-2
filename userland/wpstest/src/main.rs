@@ -315,6 +315,26 @@ fn make() {
     let po = object(p);
     check("program object", po != 0);
     check("program title", title(po) == b"Editor");
+    // wpScanSetupString (IBM's ShlScanSetupString): case-insensitive key,
+    // '^;' in a value, the size with the NUL, a NULL buffer asks for it,
+    // too small a buffer fails. UltiMail's objects read MAILTYPE so.
+    {
+        let p = unsafe { somResolveByName(po, b"wpScanSetupString\0".as_ptr()) };
+        let scan: Option<extern "C" fn(usize, *const u8, *const u8, *mut u8, *mut u32) -> u32> = if p == 0 { None } else { Some(unsafe { core::mem::transmute(p) }) };
+        let setup = b"OBJECTID=<X>;mailtype=2;NOTE=a^;b;EMPTY=;\0";
+        let mut v = [0u8; 16];
+        let mut cb = 16u32;
+        let ok = scan.is_some_and(|f| f(po, setup.as_ptr(), b"MAILTYPE\0".as_ptr(), v.as_mut_ptr(), &mut cb) != 0) && &v[..2] == b"2\0" && cb == 2;
+        let mut cb2 = 16u32;
+        let esc = scan.is_some_and(|f| f(po, setup.as_ptr(), b"NOTE\0".as_ptr(), v.as_mut_ptr(), &mut cb2) != 0) && &v[..4] == b"a;b\0" && cb2 == 4;
+        let mut cb3 = 0u32;
+        let size = scan.is_some_and(|f| f(po, setup.as_ptr(), b"NOTE\0".as_ptr(), core::ptr::null_mut(), &mut cb3) != 0) && cb3 == 4;
+        let mut cb4 = 2u32;
+        let small = scan.is_some_and(|f| f(po, setup.as_ptr(), b"NOTE\0".as_ptr(), v.as_mut_ptr(), &mut cb4) == 0);
+        let mut cb5 = 16u32;
+        let none = scan.is_some_and(|f| f(po, setup.as_ptr(), b"EMPTY\0".as_ptr(), v.as_mut_ptr(), &mut cb5) == 0 && f(po, setup.as_ptr(), b"MAIL\0".as_ptr(), v.as_mut_ptr(), &mut cb5) == 0);
+        check("wpScanSetupString: a key's value, ^; in it, the size, too small a buffer, empty and partial keys", ok && esc && size && small && none);
+    }
     let mut buf = [0u8; 512];
     let mut cb = buf.len() as u32;
     let ok = call(po, b"wpQueryProgDetails", &[buf.as_mut_ptr() as usize, &mut cb as *mut u32 as usize]) != 0;
