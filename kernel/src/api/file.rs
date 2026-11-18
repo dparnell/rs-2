@@ -1356,7 +1356,8 @@ fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<(u32, u3
     let mut last_off: Option<usize> = None;
     while (s.next < s.results.len()) && n < max {
         let i = &s.results[s.next];
-        let name = i.name.as_bytes();
+        let name_bytes = super::os2_bytes(&i.name);
+        let name = &name_bytes[..];
         let eas = if with_eas { entry_eas(s, i) } else { Vec::new() };
         let cb_list = if eas.is_empty() { 4 } else { ea::list_size(&eas, list16) };
         let list = if ea_level {
@@ -1680,7 +1681,7 @@ pub fn dos_edit_name(c: &mut Ctx) -> u32 {
         return err::INVALID_PARAMETER;
     }
     let (Some(s), Some(e)) = (c.read_str(ps, 260), c.read_str(pe, 260)) else { return err::INVALID_ADDRESS };
-    let last = |x: &str| -> Vec<u8> { x.rsplit(['\\', '/', ':']).next().unwrap_or("").bytes().collect() };
+    let last = |x: &str| -> Vec<u8> { super::os2_bytes(x.rsplit(['\\', '/', ':']).next().unwrap_or("")) };
     let mut t = edit_name(&last(&s), &last(&e));
     if t.len() + 1 > cb as usize {
         return err::BUFFER_OVERFLOW;
