@@ -647,6 +647,17 @@ pub extern "C" fn Rs2SetMinButtonType(hide_button: u32, hide_window: u32) -> u32
     prev
 }
 
+/// Where a minimized or maximized frame goes when it is restored (the
+/// window words QWS_XRESTORE... of IBM's frame).
+pub fn set_restore_pos(h: u32, r: (i32, i32, i32, i32)) {
+    let Some(f) = st().frames.get_mut(&h) else { return };
+    if let Some(m) = f.min.as_mut() {
+        m.pos = r;
+    } else {
+        f.restore = Some(r);
+    }
+}
+
 /// Restore a minimized frame (or a maximized one).
 pub fn restore(h: u32) {
     if !is_minimized(h) {
