@@ -338,6 +338,14 @@ pub fn run() {
         v.push(0);
         prf_write(HINI_USER, b"PM_Workplace", b"Rs2Desktop", Some(&v));
     }
+    // Once: the national conventions (`PM_National`), which IBM's
+    // MAKEINI puts in OS2.INI from INI.RC: the system country's (COUNTRY=,
+    // the kernel's country table). Programs read them with their own
+    // defaults for missing keys: IBM Works' file dialogs took the first
+    // character of its "M/d/yy" as the date separator ("11M18M2026").
+    if prf_read(HINI_USER, b"PM_National", b"iCountry").is_none() {
+        crate::country::store(&crate::country::of_country(0));
+    }
     // Once: the System Setup objects IBM keeps in WPCONFIG and WINCFG
     // (Country, Power, Special Needs, WIN-OS/2 Setup; syssetup.rs).
     pending.extend(crate::syssetup::install_entries());
