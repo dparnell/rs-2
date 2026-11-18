@@ -26,6 +26,19 @@ const BS_SYSCOMMAND: u32 = 0x0200;
 pub const BS_DEFAULT: u32 = 0x0400;
 const BS_NOPOINTERFOCUS: u32 = 0x0800;
 const BS_NOBORDER: u32 = 0x1000;
+/// Image buttons (IBM's ButtonCreate/ButtonDrawPushBtn): BS_TEXT shows
+/// the text under the image.
+const BS_TEXT: u32 = 0x0010;
+const BS_MINIICON: u32 = 0x0020;
+const BS_BITMAP: u32 = 0x0040;
+const BS_ICON: u32 = 0x0080;
+const BS_IMAGE: u32 = BS_MINIICON | BS_BITMAP | BS_ICON;
+const WM_SETWINDOWPARAMS: u32 = 0x000a;
+const WM_QUERYWINDOWPARAMS: u32 = 0x000b;
+const WPM_TEXT: u32 = 0x0001;
+const WPM_CTLDATA: u32 = 0x0002;
+const WPM_CCHTEXT: u32 = 0x0008;
+const WPM_CBCTLDATA: u32 = 0x0010;
 
 const BM_CLICK: u32 = 0x0120;
 const BM_QUERYCHECKINDEX: u32 = 0x0121;
@@ -54,6 +67,9 @@ struct Button {
     tracking: bool,
     /// BS_USERBUTTON: the state the owner last painted.
     state_old: u32,
+    /// BS_BITMAP/BS_ICON/BS_MINIICON: the image (BTNCDATA's hImage, or
+    /// loaded for a "#id" text).
+    image: u32,
 }
 
 fn data(h: u32) -> &'static mut Button {
@@ -156,6 +172,10 @@ fn paint(h: u32) {
         paint_user(h);
         return;
     }
+    if matches!(kind(h), BS_PUSHBUTTON | 8) && ctl::style(h) & BS_IMAGE != 0 {
+        paint_image(h);
+        return;
+    }
     let style = ctl::style(h);
     let text = ctl::text(h);
     let focus = ctl::has_focus(h);
@@ -180,6 +200,135 @@ fn paint(h: u32) {
             }
         }
     });
+}
+
+/// A push button with an image (IBM's ButtonDrawPushBtn): the frame, the
+/// image in the middle (a border width right and down while pressed),
+/// and with BS_TEXT the text under it.
+fn paint_image(h: u32) {
+    let style = ctl::style(h);
+    let text = ctl::text(h);
+    let focus = ctl::has_focus(h);
+    let enabled = ctl::enabled(h);
+    let (hilite, image) = (data(h).hilite, data(h).image);
+    let col = Colors::of(h, BS_PUSHBUTTON);
+    let hps = crate::win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    let mut at = None;
+    draw::with(h, hps, |c| {
+        let r = c.rect();
+        let fg = if enabled { col.fg } else { col.disabled };
+        push(c, r, style, &[], fg, hilite, false, &col);
+        let off = hilite as i32 * crate::frame::border(crate::frame::FCF_BORDER);
+        // BS_TEXT: the text along the bottom.
+        let th = if style & BS_TEXT != 0 && !text.is_empty() { c.font().height + 2 } else { 0 };
+        if th > 0 {
+            let t = Rect::new(r.left + 3 + off, r.bottom + 2 - off, r.right - 3 + off, r.bottom + 2 + th - off);
+            c.text_in(t, &text, fg, draw::DT_CENTER | draw::DT_VCENTER | draw::DT_MNEMONIC);
+        }
+        let area = Rect::new(r.left + off, r.bottom + th - off, r.right + off, r.top - off);
+        if style & (BS_ICON | BS_MINIICON) != 0 {
+            if image != 0 {
+                crate::pointer::draw_in(c, area, image, style & BS_ICON == 0, !enabled);
+            }
+        } else if let Some(s) = crate::gpiobj::bitmap_surface(image) {
+            at = Some((area.left + (area.width() - s.width) / 2, area.bottom + (area.height() - s.height) / 2));
+        }
+        if focus {
+            c.focus_rect(Rect::new(r.left + 3, r.bottom + 3, r.right - 3, r.top - 3));
+        }
+    });
+    if let Some((x, y)) = at {
+        let p = [x, y];
+        crate::gpiobj::WinDrawBitmap(hps, image, core::ptr::null(), p.as_ptr() as *const _, 0, 0, 0);
+    }
+    crate::win::WinEndPaint(hps);
+}
+
+/// The image an image button's "#id" text names, from the dialog's
+/// module (or the program's): a bitmap for BS_BITMAP, else a pointer
+/// (IBM's ButtonCreate).
+fn load_image(h: u32) -> u32 {
+    let Some(id) = crate::bitmap::static_id(h) else { return 0 };
+    let hmod = crate::dlg::RES_HMOD.load(core::sync::atomic::Ordering::Relaxed);
+    if ctl::style(h) & (BS_ICON | BS_MINIICON) == 0 {
+        crate::gpiobj::GpiLoadBitmap(0, hmod, id, 0, 0)
+    } else {
+        crate::pointer::WinLoadPointer(1, hmod, id)
+    }
+}
+
+/// BTNCDATA (cb, fsCheckState, fsHiliteState, hImage): the states, and
+/// with cb 10 the image.
+fn take_ctl_data(h: u32, p: u32) {
+    if p == 0 {
+        return;
+    }
+    let cb = unsafe { (p as *const u16).read_unaligned() };
+    if cb != 6 && cb != 10 {
+        return;
+    }
+    let (check, hilite) = unsafe { ((p as *const u16).add(1).read_unaligned(), (p as *const u16).add(2).read_unaligned()) };
+    let b = data(h);
+    b.check = check as u32;
+    b.hilite = hilite != 0;
+    if cb == 10 {
+        b.image = unsafe { ((p + 6) as *const u32).read_unaligned() };
+    }
+}
+
+/// WM_SETWINDOWPARAMS (IBM's): the text (WPM_TEXT), the states and the
+/// image (WPM_CTLDATA, a BTNCDATA); then it paints again.
+fn set_params(h: u32, wp: u32) -> u32 {
+    if wp == 0 {
+        return 0;
+    }
+    let f = |i: u32| unsafe { ((wp + i * 4) as *const u32).read_unaligned() };
+    if f(0) & WPM_TEXT != 0 && f(2) != 0 {
+        let t = unsafe { core::ffi::CStr::from_ptr(f(2) as *const core::ffi::c_char) }.to_bytes().to_vec();
+        crate::win::set_text(h, &t);
+    }
+    if f(0) & WPM_CTLDATA != 0 {
+        take_ctl_data(h, f(6));
+    }
+    ctl::invalidate(h);
+    1
+}
+
+/// WM_QUERYWINDOWPARAMS (IBM's): the text, its length, and a BTNCDATA
+/// with the states and the image.
+fn query_params(h: u32, wp: u32) -> u32 {
+    if wp == 0 {
+        return 0;
+    }
+    let p = wp as *mut u32;
+    let fl = unsafe { p.read_unaligned() };
+    let text = ctl::text(h);
+    unsafe {
+        if fl & WPM_CCHTEXT != 0 {
+            p.add(1).write_unaligned(text.len() as u32);
+        }
+        if fl & WPM_TEXT != 0 {
+            let (cch, buf) = (p.add(1).read_unaligned() as usize, p.add(2).read_unaligned() as *mut u8);
+            if !buf.is_null() && cch > 0 {
+                let n = text.len().min(cch - 1);
+                core::ptr::copy_nonoverlapping(text.as_ptr(), buf, n);
+                buf.add(n).write(0);
+            }
+        }
+        if fl & WPM_CBCTLDATA != 0 {
+            p.add(5).write_unaligned(10);
+        }
+        if fl & WPM_CTLDATA != 0 {
+            let cd = p.add(6).read_unaligned();
+            if cd != 0 && p.add(5).read_unaligned() >= 10 {
+                let b = data(h);
+                let v = [10u16, b.check as u16, b.hilite as u16];
+                core::ptr::copy_nonoverlapping(v.as_ptr() as *const u8, cd as *mut u8, 6);
+                ((cd + 6) as *mut u32).write_unaligned(b.image);
+            }
+        }
+    }
+    1
 }
 
 /// A button's colours: its presentation parameters as IBM's
@@ -335,11 +484,27 @@ pub extern "C" fn button_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CREATE => {
             ctl::set_data(h, Button::default());
+            take_ctl_data(h, mp1);
+            if ctl::style(h) & BS_IMAGE != 0 && matches!(kind(h), BS_PUSHBUTTON | 8) {
+                let img = load_image(h);
+                if img != 0 {
+                    data(h).image = img;
+                    // "#id\ttext" with BS_TEXT: the text after the tab.
+                    let t = ctl::text(h);
+                    let rest = match t.iter().position(|&c| c == b'\t') {
+                        Some(i) if ctl::style(h) & BS_TEXT != 0 => t[i + 1..].to_vec(),
+                        _ => Vec::new(),
+                    };
+                    crate::win::set_text(h, &rest);
+                }
+            }
             if ctl::style(h) & BS_AUTOSIZE != 0 {
                 autosize(h);
             }
             0
         }
+        WM_SETWINDOWPARAMS => set_params(h, mp1),
+        WM_QUERYWINDOWPARAMS => query_params(h, mp1),
         WM_PAINT => {
             paint(h);
             0

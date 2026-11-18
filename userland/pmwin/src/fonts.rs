@@ -225,6 +225,20 @@ pub fn by_name(name: &[u8]) -> Option<&'static Font> {
     {
         return Some(f);
     }
+    // "System VIO" (the VIO font, GPI's too): IBM's sizes 2 to 18 name
+    // cell sizes, whatever the resolution (DSPRES.DLL: 12 is 8x16, 10 is
+    // 8x12, ...). Size 12 is the built-in 8x16 cells, the others the
+    // monospaced face at the cell height. UltiMail's folders ask for
+    // "12.System VIO".
+    if fname.eq_ignore_ascii_case(b"System VIO") {
+        const CELL_H: [i32; 17] = [12, 16, 10, 14, 15, 25, 8, 10, 12, 14, 16, 18, 18, 16, 20, 22, 30];
+        let ch = CELL_H[(pt.clamp(2, 18) - 2) as usize];
+        let v = gpi::font::vio();
+        if pt == 12 {
+            return Some(v);
+        }
+        return face_index(b"System Monospaced").and_then(|i| face(i, ch));
+    }
     let i = face_index(fname)?;
     face(styled(i, bold, italic), (pt * crate::scale::dpi() + 36) / 72)
 }
