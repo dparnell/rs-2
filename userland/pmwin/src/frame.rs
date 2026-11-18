@@ -588,6 +588,12 @@ pub fn minimize(h: u32) {
     sysmenu_state(h);
     if viewer {
         win::show(h, false);
+        // As IBM's FrameMinMax when the shell keeps it in the minimized
+        // window viewer: an icon-sized window at (-32000, -32000), so a
+        // program that shows it again (UltiMail starting minimized) does
+        // not get a window-sized icon on the screen.
+        st().desk.set_pos(h, -32000, -32000, slot.width(), slot.height());
+        win::moved(h);
         let v = st().min_viewer;
         post(v, WM_RS2_MINWINDOW, h, 1);
     } else {

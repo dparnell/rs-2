@@ -589,6 +589,10 @@ fn frames(hab: u32, viewer: u32) {
     unsafe { WinSetWindowPos(f, 0, 0, 0, 0, 0, SWP_MINIMIZE) };
     pump(hab);
     check("with a viewer: minimized frames are hidden", unsafe { WinIsWindowVisible(f) } == 0 && unsafe { WinQueryWindowULong(f, -2) } & WS_MINIMIZED != 0);
+    // As IBM's FrameMinMax: icon-sized at (-32000, -32000), off the screen
+    // should the program show it.
+    let (mx, my, mcx, _, _) = pos(f);
+    check("with a viewer: the minimized frame is an icon at (-32000, -32000)", (mx, my) == (-32000, -32000) && mcx < 300);
     unsafe { WinSetWindowPos(f, 0, 0, 0, 0, 0, SWP_RESTORE) };
     pump(hab);
     check("with a viewer: restored and shown", unsafe { WinIsWindowVisible(f) } != 0 && pos(f).2 == 300);
