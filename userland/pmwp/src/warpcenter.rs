@@ -6,8 +6,10 @@
 //! Shut down; the monitor (the battery, the processors' activity or a
 //! fixed disk's free space; a click goes on to the next one); the tray
 //! button (a menu of the trays) and the current tray's objects. At the
-//! right end the Assistance button (a menu of the Assistance Center) and
-//! the clock (a click goes on from the time to the date, then to the
+//! right end the mail indicator (only while there is an In-basket,
+//! `<CCINBOX>`: an envelope, with a stamp on it once a mail program
+//! reports new mail; a click opens the In-basket), the Assistance button
+//! (a menu of the Assistance Center) and the clock (a click goes on from the time to the date, then to the
 //! timer, a stopwatch started, stopped and reset from the Timer options
 //! button beside it). A resting pointer shows what an item is (bubble
 //! help). With SCKILLFEATUREENABLED (or KILLFEATUREENABLED) set, Ctrl
@@ -341,6 +343,8 @@ enum Hit {
     Monitor,
     TrayButton,
     Tray(usize),
+    /// The mail indicator (while there is a `<CCINBOX>`).
+    Mail,
     Help,
     /// The timer's options button, beside the clock in timer mode.
     Timer,
@@ -374,6 +378,12 @@ struct Bar {
     timer_on: bool,
     /// The process list's processes (by command - CMD_KILL).
     kill: Vec<u32>,
+    /// The mail indicator: shown (there is an In-basket), new mail, when
+    /// last looked at, and the mail program's count (INBOX.MEM).
+    inbox: bool,
+    mail_new: bool,
+    mail_at: u32,
+    mail_mem: usize,
 }
 
 #[derive(Default)]
@@ -520,8 +530,16 @@ fn layout(o: usize, sw: i32) -> Vec<(RectL, Hit)> {
         clock.l
     };
     let help = rect(left - sq + 1, 0, left + 1, h);
+    // The mail indicator left of the Assistance button (IBM's order).
+    let help_l = if inbox() != 0 {
+        let r = rect(help.l - sq + 1, 0, help.l + 1, h);
+        items.push((r, Hit::Mail));
+        r.l
+    } else {
+        help.l
+    };
     for i in 0..tray_objects(o).len() {
-        if x + sq > help.l - 2 {
+        if x + sq > help_l - 2 {
             break;
         }
         items.push((rect(x, 0, x + sq, h), Hit::Tray(i)));
@@ -604,6 +622,10 @@ fn open_bar(o: usize) -> u32 {
         timer_at: 0,
         timer_on: false,
         kill: Vec::new(),
+        inbox: false,
+        mail_new: false,
+        mail_at: 0,
+        mail_mem: 0,
     });
     let b = bars().len() - 1;
     // The monitor starts on one there is.
@@ -622,9 +644,12 @@ fn open_bar(o: usize) -> u32 {
 
 fn close_bar(o: usize) {
     let Some(b) = bar_of(o) else { return };
-    let (h, bubble) = (bars()[b].hwnd, bars()[b].bubble);
+    let (h, bubble, mem) = (bars()[b].hwnd, bars()[b].bubble, bars()[b].mail_mem);
     bars().remove(b);
     unsafe {
+        if mem != 0 {
+            os2::DosFreeMem(mem as *mut u8);
+        }
         if bubble != 0 {
             WinDestroyWindow(bubble);
         }
@@ -896,6 +921,8 @@ fn paint(h: u32) {
                         Hit::Find => crate::icons::FIND,
                         Hit::Shutdown => crate::icons::SHUTDOWN,
                         Hit::TrayButton => crate::icons::TRAY,
+                        Hit::Mail if bars()[b].mail_new => crate::icons::MAIL_NEW,
+                        Hit::Mail => crate::icons::MAIL,
                         _ => crate::icons::ASSISTANCE,
                     };
                     icon_at(hps, r, ic(id), px);
@@ -994,6 +1021,8 @@ fn bubble_text(b: usize, it: Hit) -> Vec<u8> {
         Hit::Shutdown => "Shut down".into(),
         Hit::TrayButton => alloc::format!("Trays (now {})", core::str::from_utf8(&trays(o)[current(o)].name).unwrap_or("?")),
         Hit::Help => "Assistance".into(),
+        // IBM's hints.
+        Hit::Mail => if bars()[b].mail_new { "New mail delivered".into() } else { "New mail indicator".into() },
         // IBM's hints: Time, Date, Timer, Timer options.
         Hit::Clock => match wd(o).date {
             CLOCK_DATE => "Date (click for the timer)".into(),
@@ -1107,6 +1136,7 @@ fn tick(b: usize) {
         invalidate_item(b, Hit::Clock);
     }
     poll(b, false);
+    poll_mail(b, false);
     let p = pointer_pos();
     let s = window_pos(h);
     let over = p.x >= s.x && p.x < s.x + s.cx && p.y >= s.y && p.y < s.y + s.cy;
@@ -1160,6 +1190,58 @@ fn tick(b: usize) {
             if bub != 0 {
                 WinSetWindowPos(bub, HWND_TOP, 0, 0, 0, 0, SWP_ZORDER);
             }
+        }
+    }
+}
+
+// ---- The mail indicator ----
+
+/// The In-basket a mail program made (`<CCINBOX>`), or 0.
+fn inbox() -> usize {
+    wps::handle_of_id(b"<CCINBOX>").map(wps::object_from_handle).unwrap_or(0)
+}
+
+/// IBM's protocol: the mail program keeps the number of new messages in
+/// the first ULONG of the named shared memory \SHAREMEM\INBOX.MEM
+/// (999999999: not known). Looked at every 2 s; the indicator comes and
+/// goes with the In-basket.
+fn poll_mail(b: usize, force: bool) {
+    let t = now();
+    if !force && t.wrapping_sub(bars()[b].mail_at) < 2000 {
+        return;
+    }
+    bars()[b].mail_at = t;
+    let o = bars()[b].obj;
+    let shown = inbox() != 0;
+    if shown != bars()[b].inbox {
+        bars()[b].inbox = shown;
+        let (sw, _) = screen();
+        bars()[b].items = layout(o, sw);
+        unsafe { WinInvalidateRect(bars()[b].hwnd, core::ptr::null(), 0) };
+    }
+    if !shown && bars()[b].mail_mem != 0 {
+        unsafe { os2::DosFreeMem(core::mem::replace(&mut bars()[b].mail_mem, 0) as *mut u8) };
+    }
+    let mut new = false;
+    if shown {
+        if bars()[b].mail_mem == 0 {
+            let mut p: *mut u8 = core::ptr::null_mut();
+            // PAG_READ | PAG_WRITE
+            if unsafe { os2::DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\INBOX.MEM\0".as_ptr(), 3) } == 0 {
+                bars()[b].mail_mem = p as usize;
+            }
+        }
+        let m = bars()[b].mail_mem;
+        if m != 0 {
+            let n = unsafe { (m as *const u32).read_volatile() };
+            new = n != 0 && n != 999_999_999;
+        }
+    }
+    if new != bars()[b].mail_new {
+        bars()[b].mail_new = new;
+        invalidate_item(b, Hit::Mail);
+        if bars()[b].bubble != 0 && bars()[b].rest == Some(Hit::Mail) {
+            show_bubble(b, Hit::Mail);
         }
     }
 }
@@ -1512,6 +1594,12 @@ fn act(b: usize, it: Hit) {
             }
         }
         Hit::Timer => timer_menu(b),
+        Hit::Mail => {
+            let x = inbox();
+            if x != 0 {
+                obj::call(m::WPObject::wpViewObject, &[x, 0, OPEN_DEFAULT as usize, 0]);
+            }
+        }
         Hit::Lockup => {
             crate::desktop::WinLockupSystem(0);
         }
