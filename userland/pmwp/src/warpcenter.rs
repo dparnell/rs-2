@@ -7,8 +7,13 @@
 //! fixed disk's free space; a click goes on to the next one); the tray
 //! button (a menu of the trays) and the current tray's objects. At the
 //! right end the Assistance button (a menu of the Assistance Center) and
-//! the clock (a click shows the date instead). A resting pointer shows
-//! what an item is (bubble help).
+//! the clock (a click goes on from the time to the date, then to the
+//! timer, a stopwatch started, stopped and reset from the Timer options
+//! button beside it). A resting pointer shows what an item is (bubble
+//! help). With SCKILLFEATUREENABLED (or KILLFEATUREENABLED) set, Ctrl
+//! and a click on the window list button list the processes instead:
+//! one chosen is ended (DosKillProcess) once confirmed, unless
+//! SCKILLCONFIRMDISABLED (or KILLCONFIRMDISABLED) is set.
 //!
 //! IBM's layout, behaviour and setup strings (studied in SCENTER.DLL):
 //! the bar is 22 pixels high with small icons; shown on top of maximized
@@ -28,8 +33,7 @@
 //! grows by 4); the battery monitor shows the charge as text too and
 //! is offered only when there is a battery (IBM's whenever APM$ opens);
 //! the setup strings WCPOSITION=TOP|BOTTOM, WCMONITOR=BATTERY|CPU|d:,
-//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO and WCLARGEICONS=YES|NO; a clock
-//! with times and dates only (IBM's also has a stopwatch); the Desktop
+//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO and WCLARGEICONS=YES|NO; the Desktop
 //! and Assistance menus go one folder deep (deeper folders open).
 
 use alloc::boxed::Box;
@@ -71,6 +75,11 @@ const MODE_DRIVE_C: u32 = 2;
 
 const MAX_TRAYS: usize = 16;
 
+/// The clock's modes (a click goes on to the next).
+const CLOCK_TIME: u32 = 0;
+const CLOCK_DATE: u32 = 1;
+const CLOCK_TIMER: u32 = 2;
+
 #[repr(C)]
 pub struct WcData {
     trays: Option<Box<Vec<Tray>>>,
@@ -79,7 +88,7 @@ pub struct WcData {
     off: u32,
     mode: u32,
     current: u32,
-    /// The clock shows the date.
+    /// What the clock shows: CLOCK_TIME, CLOCK_DATE or CLOCK_TIMER.
     date: u32,
 }
 
@@ -243,7 +252,7 @@ extern "C" fn wc_restore_state(o: usize, r: u32) -> u32 {
     }
     if let Some(v) = obj::restored_long(o, b"SmartCenter", 2) {
         wd(o).off = v & 0xff;
-        wd(o).date = v >> 8 & 0xff;
+        wd(o).date = (v >> 8 & 0xff).min(CLOCK_TIMER);
         wd(o).current = v >> 16 & 0xff;
     }
     if let Some(v) = obj::restored_long(o, b"SmartCenter", 3) {
@@ -333,6 +342,8 @@ enum Hit {
     TrayButton,
     Tray(usize),
     Help,
+    /// The timer's options button, beside the clock in timer mode.
+    Timer,
     Clock,
 }
 
@@ -357,6 +368,12 @@ struct Bar {
     rest_ms: u32,
     bubble: u32,
     mon: Monitor,
+    /// The timer: milliseconds counted, when last counted, running.
+    timer_ms: u32,
+    timer_at: u32,
+    timer_on: bool,
+    /// The process list's processes (by command - CMD_KILL).
+    kill: Vec<u32>,
 }
 
 #[derive(Default)]
@@ -405,10 +422,15 @@ const CMD_ADDTRAY: u32 = 5;
 const CMD_RENAMETRAY: u32 = 6;
 const CMD_DELETETRAY: u32 = 7;
 const CMD_MONITOR: u32 = 8;
+// IBM's ids for the timer's menu.
+const CMD_TSTART: u32 = 0x23;
+const CMD_TSTOP: u32 = 0x24;
+const CMD_TRESET: u32 = 0x25;
 const CMD_TRAY: u32 = 0x100; // + tray
 const CMD_MON: u32 = 0x180; // + mode
 const CMD_LIST: u32 = 0x1000; // + object
 const CMD_SWITCH: u32 = 0x3000; // + switch entry
+const CMD_KILL: u32 = 0x4000; // + process
 
 unsafe extern "C" {
     #[link_name = "PMWIN.800"]
@@ -433,6 +455,8 @@ unsafe extern "C" {
     fn DosQueryCurrentDisk(disk: *mut u32, map: *mut u32) -> u32;
     #[link_name = "DOSCALLS.209"]
     fn DosError(fl: u32) -> u32;
+    #[link_name = "DOSCALLS.368"]
+    fn DosQuerySysState(list: u32, level: u32, pid: u32, tid: u32, buf: *mut u8, cb: u32) -> u32;
 }
 
 fn hab() -> u32 {
@@ -487,7 +511,15 @@ fn layout(o: usize, sw: i32) -> Vec<(RectL, Hit)> {
     // The right end: the clock, the Assistance button left of it.
     let cw = if large(o) { 128 } else { 104 };
     let clock = rect(sw - cw, 0, sw, h);
-    let help = rect(clock.l - sq + 1, 0, clock.l + 1, h);
+    // In timer mode the Timer options button, narrow, left of the clock.
+    let left = if wd(o).date == CLOCK_TIMER {
+        let t = rect(clock.l - 13, 0, clock.l + 1, h);
+        items.push((t, Hit::Timer));
+        t.l
+    } else {
+        clock.l
+    };
+    let help = rect(left - sq + 1, 0, left + 1, h);
     for i in 0..tray_objects(o).len() {
         if x + sq > help.l - 2 {
             break;
@@ -568,6 +600,10 @@ fn open_bar(o: usize) -> u32 {
         rest_ms: 0,
         bubble: 0,
         mon: Monitor::default(),
+        timer_ms: 0,
+        timer_at: 0,
+        timer_on: false,
+        kill: Vec::new(),
     });
     let b = bars().len() - 1;
     // The monitor starts on one there is.
@@ -831,6 +867,18 @@ fn paint(h: u32) {
                     let t = bars()[b].mon.clock.clone();
                     text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0, DT_CENTER);
                 }
+                Hit::Timer => {
+                    bevel(hps, r, pressed);
+                    // An arrow towards the screen's middle (where the menu
+                    // comes up).
+                    let cx = (r.l + r.r) / 2;
+                    let cy = (r.b + r.t) / 2;
+                    let down = wd(o).flags & F_BOTTOM == 0;
+                    for k in 0..4 {
+                        let y = if down { cy - 2 + k } else { cy + 1 - k };
+                        fill(hps, rect(cx - k, y, cx + k + 1, y + 1), 0);
+                    }
+                }
                 Hit::Tray(i) => {
                     if pressed {
                         bevel(hps, r, true);
@@ -946,7 +994,13 @@ fn bubble_text(b: usize, it: Hit) -> Vec<u8> {
         Hit::Shutdown => "Shut down".into(),
         Hit::TrayButton => alloc::format!("Trays (now {})", core::str::from_utf8(&trays(o)[current(o)].name).unwrap_or("?")),
         Hit::Help => "Assistance".into(),
-        Hit::Clock => "Time and date (click for the other)".into(),
+        // IBM's hints: Time, Date, Timer, Timer options.
+        Hit::Clock => match wd(o).date {
+            CLOCK_DATE => "Date (click for the timer)".into(),
+            CLOCK_TIMER => if bars()[b].timer_on { "Timer, running (click for the time)".into() } else { "Timer (click for the time)".into() },
+            _ => "Time (click for the date)".into(),
+        },
+        Hit::Timer => "Timer options".into(),
         Hit::Tray(i) => {
             let x = tray_objects(o).get(i).copied().unwrap_or(0);
             let t: Vec<u8> = obj::title(x).into_iter().map(|c| if c == b'\n' || c == b'\r' { b' ' } else { c }).collect();
@@ -1040,8 +1094,14 @@ extern "C" fn bubble_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 fn tick(b: usize) {
     let o = bars()[b].obj;
     let h = bars()[b].hwnd;
+    // The timer counts while it runs (in every clock mode, as IBM's).
+    if bars()[b].timer_on {
+        let t = now();
+        let at = core::mem::replace(&mut bars()[b].timer_at, t);
+        bars()[b].timer_ms = bars()[b].timer_ms.wrapping_add(t.wrapping_sub(at));
+    }
     // The clock: repainted when its text changes.
-    let c = clock_text(wd(o).date != 0);
+    let c = clock_now(b);
     if c != bars()[b].mon.clock {
         bars()[b].mon.clock = c;
         invalidate_item(b, Hit::Clock);
@@ -1102,6 +1162,27 @@ fn tick(b: usize) {
             }
         }
     }
+}
+
+/// What bar `b`'s clock shows now.
+fn clock_now(b: usize) -> Vec<u8> {
+    match wd(bars()[b].obj).date {
+        CLOCK_TIMER => timer_text(bars()[b].timer_ms),
+        m => clock_text(m == CLOCK_DATE),
+    }
+}
+
+/// The timer's text: hours, minutes and seconds counted, with the
+/// country's time separator.
+fn timer_text(ms: u32) -> Vec<u8> {
+    let n = crate::country::load();
+    let s = ms / 1000;
+    let mut out = alloc::format!("{}", s / 3600).into_bytes();
+    out.extend_from_slice(&n.s_time);
+    out.extend_from_slice(alloc::format!("{:02}", s / 60 % 60).as_bytes());
+    out.extend_from_slice(&n.s_time);
+    out.extend_from_slice(alloc::format!("{:02}", s % 60).as_bytes());
+    out
 }
 
 /// The clock's text: the time (hours and minutes), or the date, as the
@@ -1257,6 +1338,104 @@ fn window_menu(b: usize) {
     popup(b, &items, Hit::WinList);
 }
 
+/// The timer's options: Start or Stop, and Reset.
+fn timer_menu(b: usize) {
+    let items = [
+        if bars()[b].timer_on { Menu::Item(CMD_TSTOP as u16, b"Stop timer", true) } else { Menu::Item(CMD_TSTART as u16, b"Start timer", true) },
+        Menu::Item(CMD_TRESET as u16, b"Reset timer", true),
+    ];
+    popup(b, &items, Hit::Timer);
+}
+
+/// An environment variable is set (IBM's tests only that it is there).
+fn env_set(name: &[u8]) -> bool {
+    let mut v: *const u8 = core::ptr::null();
+    unsafe { os2::DosScanEnv(name.as_ptr(), &mut v) == 0 }
+}
+
+/// IBM's process list: every process, by its program's file name, with
+/// the title of its window list entry (if it has one) after it.
+fn process_menu(b: usize) {
+    let mut size = 64 * 1024;
+    let buf = loop {
+        let mut buf = alloc::vec![0u8; size];
+        // QS_PROCESS | QS_MTE
+        match unsafe { DosQuerySysState(5, 0, 0, 0, buf.as_mut_ptr(), size as u32) } {
+            0 => break buf,
+            111 if size < 1024 * 1024 => size *= 2,
+            _ => return,
+        }
+    };
+    let base = buf.as_ptr() as usize;
+    let end = base + buf.len();
+    let ok = |a: usize, n: usize| a >= base && a + n <= end;
+    let u16_at = |a: usize| if ok(a, 2) { unsafe { (a as *const u16).read_unaligned() } } else { 0 };
+    let u32_at = |a: usize| if ok(a, 4) { unsafe { (a as *const u32).read_unaligned() } } else { 0 };
+    // Modules: handle -> full name.
+    let mut mods: Vec<(u16, Vec<u8>)> = Vec::new();
+    let mut m = u32_at(base + 20) as usize;
+    while m != 0 && ok(m, 24) && mods.len() < 4096 {
+        let name = u32_at(m + 20) as usize;
+        let mut v = Vec::new();
+        let mut a = name;
+        while ok(a, 1) && v.len() < 260 {
+            let c = unsafe { *(a as *const u8) };
+            if c == 0 {
+                break;
+            }
+            v.push(c);
+            a += 1;
+        }
+        mods.push((u16_at(m + 4), v));
+        m = u32_at(m) as usize;
+    }
+    // Window list titles by process.
+    let hab = hab();
+    let n = unsafe { WinQuerySwitchList(hab, core::ptr::null_mut(), 0) } as usize;
+    let cb = 4 + n.max(1) * 100;
+    let mut sw = alloc::vec![0u8; cb];
+    let n = (unsafe { WinQuerySwitchList(hab, sw.as_mut_ptr(), cb as u32) } as usize).min((cb - 4) / 100);
+    let title_of = |pid: u32| -> Option<Vec<u8>> {
+        (0..n).map(|i| 4 + i * 100).find(|&e| u32::from_le_bytes([sw[e + 16], sw[e + 17], sw[e + 18], sw[e + 19]]) == pid).map(|e| {
+            sw[e + 32..e + 96].iter().copied().take_while(|&c| c != 0).filter(|&c| c != b'~').map(|c| if c < b' ' { b' ' } else { c }).collect()
+        })
+    };
+    bars()[b].kill.clear();
+    let mut names: Vec<Vec<u8>> = Vec::new();
+    let mut p = u32_at(base + 4) as usize;
+    while p != 0 && ok(p, 28) && u32_at(p) == 1 && names.len() < 0x1000 {
+        let pid = u16_at(p + 8) as u32;
+        let hmte = u16_at(p + 24);
+        if let Some((_, full)) = mods.iter().find(|(h, _)| *h == hmte) {
+            let file = full.rsplit(|&c| c == b'\\').next().unwrap_or(full);
+            let mut t: Vec<u8> = file.iter().copied().filter(|&c| c != b'~').collect();
+            if let Some(title) = title_of(pid) {
+                t.extend_from_slice(b" (");
+                t.extend_from_slice(&title);
+                t.push(b')');
+            }
+            t.truncate(80);
+            bars()[b].kill.push(pid);
+            names.push(t);
+        }
+        // The next process record follows its thread records.
+        p = u32_at(p + 4) as usize + u16_at(p + 26) as usize * 28;
+    }
+    let items: Vec<Menu> = names.iter().enumerate().map(|(i, t)| Menu::Item((CMD_KILL as usize + i) as u16, t, true)).collect();
+    popup(b, &items, Hit::WinList);
+}
+
+/// End process `pid` from the process list, once confirmed.
+fn kill(b: usize, pid: u32) {
+    if !(env_set(b"KILLCONFIRMDISABLED\0") || env_set(b"SCKILLCONFIRMDISABLED\0"))
+        && message(bars()[b].hwnd, b"Are you sure that you want to kill this process?", b"WarpCenter", MB_YESNO | MB_WARNING) != MBID_YES
+    {
+        return;
+    }
+    // DKP_PROCESS
+    unsafe { os2::DosKillProcess(1, pid) };
+}
+
 fn tray_menu(b: usize) {
     let o = bars()[b].obj;
     let names: Vec<Vec<u8>> = trays(o).iter().map(|t| t.name.iter().copied().filter(|&c| c != b'~').collect()).collect();
@@ -1325,7 +1504,14 @@ fn act(b: usize, it: Hit) {
                 folder_menu(b, a, it);
             }
         }
-        Hit::WinList => window_menu(b),
+        Hit::WinList => {
+            if (env_set(b"KILLFEATUREENABLED\0") || env_set(b"SCKILLFEATUREENABLED\0")) && unsafe { WinGetKeyState(HWND_DESKTOP, VK_CTRL) } & 0x8000 != 0 {
+                process_menu(b);
+            } else {
+                window_menu(b);
+            }
+        }
+        Hit::Timer => timer_menu(b),
         Hit::Lockup => {
             crate::desktop::WinLockupSystem(0);
         }
@@ -1353,9 +1539,14 @@ fn act(b: usize, it: Hit) {
             }
         }
         Hit::Clock => {
-            wd(o).date ^= 1;
-            bars()[b].mon.clock = clock_text(wd(o).date != 0);
-            invalidate_item(b, Hit::Clock);
+            // Time, date, timer (the timer's button comes and goes).
+            wd(o).date = if wd(o).date >= CLOCK_TIMER { CLOCK_TIME } else { wd(o).date + 1 };
+            let (sw, _) = screen();
+            bars()[b].items = layout(o, sw);
+            bars()[b].mon.clock = clock_now(b);
+            hide_bubble(b);
+            bars()[b].rest_ms = 0;
+            unsafe { WinInvalidateRect(bars()[b].hwnd, core::ptr::null(), 0) };
             obj::call(m::WPObject::wpSaveDeferred, &[o]);
         }
     }
@@ -1463,6 +1654,20 @@ fn command(b: usize, id: u32) {
                 select_tray(o, n);
             }
         }
+        CMD_TSTART => {
+            bars()[b].timer_on = true;
+            bars()[b].timer_at = now();
+        }
+        CMD_TSTOP => {
+            bars()[b].timer_on = false;
+            invalidate_item(b, Hit::Clock);
+        }
+        CMD_TRESET => {
+            bars()[b].timer_ms = 0;
+            bars()[b].timer_at = now();
+            bars()[b].mon.clock = clock_now(b);
+            invalidate_item(b, Hit::Clock);
+        }
         CMD_RENAMETRAY => rename_tray(o, current(o)),
         CMD_DELETETRAY => delete_tray(o, current(o)),
         id if (CMD_TRAY..CMD_TRAY + MAX_TRAYS as u32).contains(&id) => select_tray(o, (id - CMD_TRAY) as usize),
@@ -1470,6 +1675,11 @@ fn command(b: usize, id: u32) {
         id if (CMD_LIST..CMD_SWITCH).contains(&id) => {
             if let Some(&x) = bars()[b].list.get((id - CMD_LIST) as usize) {
                 obj::call(m::WPObject::wpViewObject, &[x, 0, OPEN_DEFAULT as usize, 0]);
+            }
+        }
+        id if id >= CMD_KILL => {
+            if let Some(&pid) = bars()[b].kill.get((id - CMD_KILL) as usize) {
+                kill(b, pid);
             }
         }
         id if id >= CMD_SWITCH => {

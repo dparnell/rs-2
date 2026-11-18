@@ -19,6 +19,9 @@ SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"
 SET PM_HANGTIME=2000
+REM The WarpCenter: Ctrl and a click on the window list button list the
+REM processes, to end one (as IBM's; SCKILLCONFIRMDISABLED=YES ends it unasked)
+SET SCKILLFEATUREENABLED=YES
 REM During boot, CHKDSK /F runs on every volume that was not shut down cleanly
 REM (HPFS, FAT and JFS: rs2 has no separate drivers, this line is for all of
 REM them). To choose drives list their letters, as /AUTOCHECK:CD; without the
