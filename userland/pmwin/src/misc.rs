@@ -591,15 +591,26 @@ pub extern "C" fn WinCancelShutdown(_hmq: u32, _always: u32) -> u32 {
     1
 }
 
-/// WinEnableWindowUpdate(hwnd, fEnable): drawing is not held back, so
-/// turning updates on again only repaints the window.
+/// WinEnableWindowUpdate(hwnd, fEnable): as IBM's, WS_VISIBLE becomes
+/// fEnable. Off, the window's image stays on the screen (nothing below
+/// repaints) and drawing into it is not seen; on, it shows again and
+/// repaints. WM_SHOW tells the window when the bit changes. A window
+/// created without WS_VISIBLE and enabled so becomes visible (UltiMail's
+/// In-basket container).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinEnableWindowUpdate(h: u32, on: u32) -> u32 {
-    if !st().desk.exists(h) {
-        return 0;
-    }
-    if on != 0 {
+    let Some(was) = st().desk.get(h).map(|w| w.visible_style()) else { return 0 };
+    let on = on != 0;
+    if on {
+        if !was {
+            st().desk.set_visible(h, true);
+        }
         st().desk.invalidate(h, None, true);
+    } else if was {
+        st().desk.set_visible_bit(h, false);
+    }
+    if was != on {
+        crate::msg::notify(h, win::WM_SHOW, on as u32, 0);
     }
     1
 }
