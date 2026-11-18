@@ -759,6 +759,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("arp", "OS2\\ARP.EXE"),
         ("hostname", "OS2\\HOSTNAME.EXE"),
         ("powercfg", "OS2\\POWERCFG.EXE"),
+        // Plays a mail program to the WarpCenter's mail indicator.
+        ("newmail", "RS2\\NEWMAIL.EXE"),
         ("host", "OS2\\HOST.EXE"),
         ("ftp", "OS2\\FTP.EXE"),
         ("ftpd", "OS2\\FTPD.EXE"),

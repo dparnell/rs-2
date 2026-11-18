@@ -6,8 +6,10 @@
 //! Shut down; the monitor (the battery, the processors' activity or a
 //! fixed disk's free space; a click goes on to the next one); the tray
 //! button (a menu of the trays) and the current tray's objects. At the
-//! right end the Assistance button (a menu of the Assistance Center) and
-//! the clock (a click goes on from the time to the date, then to the
+//! right end the mail indicator (only while there is an In-basket,
+//! `<CCINBOX>`: an envelope, with a stamp on it once a mail program
+//! reports new mail; a click opens the In-basket), the Assistance button
+//! (a menu of the Assistance Center) and the clock (a click goes on from the time to the date, then to the
 //! timer, a stopwatch started, stopped and reset from the Timer options
 //! button beside it). A resting pointer shows what an item is (bubble
 //! help). With SCKILLFEATUREENABLED (or KILLFEATUREENABLED) set, Ctrl
@@ -25,7 +27,8 @@
 //! (an object handle, to the current tray), ADDTRAY=name[,objects],
 //! ADDTOTRAY=n[,objects] (n from 0), SAVENOW. Its settings pages: Display
 //! (on top of maximized windows, auto-hide, top or bottom, small or large
-//! icons, bubble help, confirm shutdown), Monitors and Trays. IBM's
+//! icons, bubble help, confirm lockup and shutdown, the clock green on
+//! black), Monitors and Trays. IBM's
 //! SmartCenter derives from WPLaunchPad, as this one does.
 //!
 //! rs2's own: the settings are kept with the object (IBM's go to
@@ -33,7 +36,10 @@
 //! grows by 4); the battery monitor shows the charge as text too and
 //! is offered only when there is a battery (IBM's whenever APM$ opens);
 //! the setup strings WCPOSITION=TOP|BOTTOM, WCMONITOR=BATTERY|CPU|d:,
-//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO and WCLARGEICONS=YES|NO; the Desktop
+//! WCAUTOHIDE=YES|NO, WCONTOP=YES|NO, WCLARGEICONS=YES|NO and
+//! WCPRETTYCLOCK=YES|NO, WCDRIVES=ALL|C,D,... (the disks the monitor
+//! offers, chosen on the Monitors page as on IBM's); Lockup asks first (IBM's only asks before shut
+//! down, though its setting is "confirm lockup and shutdown"); the Desktop
 //! and Assistance menus go one folder deep (deeper folders open).
 
 use alloc::boxed::Box;
@@ -60,6 +66,9 @@ const F_AUTOHIDE: u32 = 8;
 const F_NOBUBBLE: u32 = 16;
 /// Shut down without asking.
 const F_NOCONFIRM: u32 = 32;
+/// IBM's "pretty clock": green on black in a sunken frame (also with
+/// SCUSEPRETTYCLOCK set, IBM's only switch for it).
+const F_PRETTY: u32 = 64;
 
 /// The monitors offered (bits of `mask`; IBM's resource mask has one for
 /// each drive, rs2's one for the fixed disks).
@@ -90,6 +99,9 @@ pub struct WcData {
     current: u32,
     /// What the clock shows: CLOCK_TIME, CLOCK_DATE or CLOCK_TIMER.
     date: u32,
+    /// The disks the monitor offers (bit n: drive n, 3 = C:); 0 all of
+    /// them (IBM's resource mask has a bit for each drive).
+    drives: u32,
 }
 
 #[derive(Clone)]
@@ -193,6 +205,7 @@ extern "C" fn wc_setup(o: usize, setup: *const u8) -> u32 {
             b"WCAUTOHIDE" => set_flag(o, F_AUTOHIDE, yes(&v)),
             b"WCONTOP" => set_flag(o, F_NOTONTOP, !yes(&v)),
             b"WCLARGEICONS" => set_flag(o, F_LARGE, yes(&v)),
+            b"WCPRETTYCLOCK" => set_flag(o, F_PRETTY, yes(&v)),
             b"WCMONITOR" => {
                 let u = v.to_ascii_uppercase();
                 wd(o).mode = match u.as_slice() {
@@ -200,6 +213,18 @@ extern "C" fn wc_setup(o: usize, setup: *const u8) -> u32 {
                     b"CPU" => MODE_CPU,
                     [d @ b'C'..=b'Z', b':'] | [d @ b'C'..=b'Z'] => MODE_DRIVE_C + (d - b'C') as u32,
                     _ => wd(o).mode,
+                };
+            }
+            // rs2's: the disks the monitor offers, ALL or C,D,...
+            b"WCDRIVES" => {
+                let u = v.to_ascii_uppercase();
+                wd(o).drives = if u.as_slice() == b"ALL" {
+                    0
+                } else {
+                    u.split(|&c| c == b',' || c == b' ').filter_map(|d| match d {
+                        [d @ b'C'..=b'Z', b':'] | [d @ b'C'..=b'Z'] => Some(1u32 << (d - b'@')),
+                        _ => None,
+                    }).fold(0, |a, b| a | b)
                 };
             }
             _ => {}
@@ -240,6 +265,7 @@ extern "C" fn wc_save_state(o: usize) -> u32 {
     obj::wpSaveLong(o, key, 1, d.flags);
     obj::wpSaveLong(o, key, 2, d.off | d.date << 8 | d.current << 16);
     obj::wpSaveLong(o, key, 3, d.mode);
+    obj::wpSaveLong(o, key, 5, d.drives);
     let s = z(&trays_text(o));
     obj::wpSaveString(o, key, 4, s.as_ptr());
     1
@@ -257,6 +283,9 @@ extern "C" fn wc_restore_state(o: usize, r: u32) -> u32 {
     }
     if let Some(v) = obj::restored_long(o, b"SmartCenter", 3) {
         wd(o).mode = v;
+    }
+    if let Some(v) = obj::restored_long(o, b"SmartCenter", 5) {
+        wd(o).drives = v;
     }
     if let Some(s) = obj::restored_string(o, b"SmartCenter", 4) {
         let s = s.strip_suffix(&[0]).unwrap_or(&s);
@@ -341,6 +370,8 @@ enum Hit {
     Monitor,
     TrayButton,
     Tray(usize),
+    /// The mail indicator (while there is a `<CCINBOX>`).
+    Mail,
     Help,
     /// The timer's options button, beside the clock in timer mode.
     Timer,
@@ -374,6 +405,12 @@ struct Bar {
     timer_on: bool,
     /// The process list's processes (by command - CMD_KILL).
     kill: Vec<u32>,
+    /// The mail indicator: shown (there is an In-basket), new mail, when
+    /// last looked at, and the mail program's count (INBOX.MEM).
+    inbox: bool,
+    mail_new: bool,
+    mail_at: u32,
+    mail_mem: usize,
 }
 
 #[derive(Default)]
@@ -520,8 +557,16 @@ fn layout(o: usize, sw: i32) -> Vec<(RectL, Hit)> {
         clock.l
     };
     let help = rect(left - sq + 1, 0, left + 1, h);
+    // The mail indicator left of the Assistance button (IBM's order).
+    let help_l = if inbox() != 0 {
+        let r = rect(help.l - sq + 1, 0, help.l + 1, h);
+        items.push((r, Hit::Mail));
+        r.l
+    } else {
+        help.l
+    };
     for i in 0..tray_objects(o).len() {
-        if x + sq > help.l - 2 {
+        if x + sq > help_l - 2 {
             break;
         }
         items.push((rect(x, 0, x + sq, h), Hit::Tray(i)));
@@ -604,6 +649,10 @@ fn open_bar(o: usize) -> u32 {
         timer_at: 0,
         timer_on: false,
         kill: Vec::new(),
+        inbox: false,
+        mail_new: false,
+        mail_at: 0,
+        mail_mem: 0,
     });
     let b = bars().len() - 1;
     // The monitor starts on one there is.
@@ -622,9 +671,12 @@ fn open_bar(o: usize) -> u32 {
 
 fn close_bar(o: usize) {
     let Some(b) = bar_of(o) else { return };
-    let (h, bubble) = (bars()[b].hwnd, bars()[b].bubble);
+    let (h, bubble, mem) = (bars()[b].hwnd, bars()[b].bubble, bars()[b].mail_mem);
     bars().remove(b);
     unsafe {
+        if mem != 0 {
+            os2::DosFreeMem(mem as *mut u8);
+        }
         if bubble != 0 {
             WinDestroyWindow(bubble);
         }
@@ -676,8 +728,14 @@ fn available(b: usize, mode: u32) -> bool {
     match mode {
         MODE_BATTERY => off & M_BATTERY == 0 && os2::power::apm_status(0).is_some_and(|a| a.has_battery()),
         MODE_CPU => off & M_CPU == 0,
-        m => off & M_DISKS == 0 && m >= MODE_DRIVE_C && m < MODE_DRIVE_C + 24 && fixed_disk(m - MODE_DRIVE_C + 3),
+        m => off & M_DISKS == 0 && m >= MODE_DRIVE_C && m < MODE_DRIVE_C + 24 && drive_chosen(o, m - MODE_DRIVE_C + 3) && fixed_disk(m - MODE_DRIVE_C + 3),
     }
+}
+
+/// Drive `d` (3 = C:) is one the monitor offers.
+fn drive_chosen(o: usize, d: u32) -> bool {
+    let s = wd(o).drives;
+    s == 0 || s & 1 << d != 0
 }
 
 /// The next mode there is after `mode` (the processors when no other).
@@ -865,7 +923,13 @@ fn paint(h: u32) {
                 Hit::Clock => {
                     bevel(hps, r, true);
                     let t = bars()[b].mon.clock.clone();
-                    text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0, DT_CENTER);
+                    if pretty(o) {
+                        // IBM's pretty clock: green on black.
+                        fill(hps, rect(r.l + 1, r.b + 1, r.r - 1, r.t - 1), 0);
+                        text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0x00ff00, DT_CENTER);
+                    } else {
+                        text(hps, &t, rect(r.l + 2, r.b + 1, r.r - 2, r.t - 1), 0, DT_CENTER);
+                    }
                 }
                 Hit::Timer => {
                     bevel(hps, r, pressed);
@@ -896,6 +960,8 @@ fn paint(h: u32) {
                         Hit::Find => crate::icons::FIND,
                         Hit::Shutdown => crate::icons::SHUTDOWN,
                         Hit::TrayButton => crate::icons::TRAY,
+                        Hit::Mail if bars()[b].mail_new => crate::icons::MAIL_NEW,
+                        Hit::Mail => crate::icons::MAIL,
                         _ => crate::icons::ASSISTANCE,
                     };
                     icon_at(hps, r, ic(id), px);
@@ -994,6 +1060,8 @@ fn bubble_text(b: usize, it: Hit) -> Vec<u8> {
         Hit::Shutdown => "Shut down".into(),
         Hit::TrayButton => alloc::format!("Trays (now {})", core::str::from_utf8(&trays(o)[current(o)].name).unwrap_or("?")),
         Hit::Help => "Assistance".into(),
+        // IBM's hints.
+        Hit::Mail => if bars()[b].mail_new { "New mail delivered".into() } else { "New mail indicator".into() },
         // IBM's hints: Time, Date, Timer, Timer options.
         Hit::Clock => match wd(o).date {
             CLOCK_DATE => "Date (click for the timer)".into(),
@@ -1107,6 +1175,7 @@ fn tick(b: usize) {
         invalidate_item(b, Hit::Clock);
     }
     poll(b, false);
+    poll_mail(b, false);
     let p = pointer_pos();
     let s = window_pos(h);
     let over = p.x >= s.x && p.x < s.x + s.cx && p.y >= s.y && p.y < s.y + s.cy;
@@ -1162,6 +1231,69 @@ fn tick(b: usize) {
             }
         }
     }
+}
+
+// ---- The mail indicator ----
+
+/// The In-basket a mail program made (`<CCINBOX>`), or 0.
+fn inbox() -> usize {
+    wps::handle_of_id(b"<CCINBOX>").map(wps::object_from_handle).unwrap_or(0)
+}
+
+/// IBM's protocol: the mail program keeps the number of new messages in
+/// the first ULONG of the named shared memory \SHAREMEM\INBOX.MEM
+/// (999999999: not known). Looked at every 2 s; the indicator comes and
+/// goes with the In-basket.
+fn poll_mail(b: usize, force: bool) {
+    let t = now();
+    if !force && t.wrapping_sub(bars()[b].mail_at) < 2000 {
+        return;
+    }
+    bars()[b].mail_at = t;
+    let o = bars()[b].obj;
+    let shown = inbox() != 0;
+    if shown != bars()[b].inbox {
+        bars()[b].inbox = shown;
+        let (sw, _) = screen();
+        bars()[b].items = layout(o, sw);
+        unsafe { WinInvalidateRect(bars()[b].hwnd, core::ptr::null(), 0) };
+    }
+    if !shown && bars()[b].mail_mem != 0 {
+        unsafe { os2::DosFreeMem(core::mem::replace(&mut bars()[b].mail_mem, 0) as *mut u8) };
+    }
+    let mut new = false;
+    if shown {
+        if bars()[b].mail_mem == 0 {
+            let mut p: *mut u8 = core::ptr::null_mut();
+            // PAG_READ | PAG_WRITE
+            if unsafe { os2::DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\INBOX.MEM\0".as_ptr(), 3) } == 0 {
+                bars()[b].mail_mem = p as usize;
+            }
+        }
+        let m = bars()[b].mail_mem;
+        if m != 0 {
+            let n = unsafe { (m as *const u32).read_volatile() };
+            new = n != 0 && n != 999_999_999;
+        }
+    }
+    if new != bars()[b].mail_new {
+        bars()[b].mail_new = new;
+        invalidate_item(b, Hit::Mail);
+        if bars()[b].bubble != 0 && bars()[b].rest == Some(Hit::Mail) {
+            show_bubble(b, Hit::Mail);
+        }
+    }
+}
+
+/// The clock is drawn green on black (the setting, or IBM's
+/// SCUSEPRETTYCLOCK).
+fn pretty(o: usize) -> bool {
+    wd(o).flags & F_PRETTY != 0 || env_set(b"SCUSEPRETTYCLOCK\0")
+}
+
+/// IBM's confirmations (its Confirm: Yes and No, system modal, movable).
+fn confirm(b: usize, text: &[u8]) -> bool {
+    message(bars()[b].hwnd, text, b"WarpCenter", MB_YESNO | 0x1000 | 0x4000) == MBID_YES
 }
 
 /// What bar `b`'s clock shows now.
@@ -1428,7 +1560,7 @@ fn process_menu(b: usize) {
 /// End process `pid` from the process list, once confirmed.
 fn kill(b: usize, pid: u32) {
     if !(env_set(b"KILLCONFIRMDISABLED\0") || env_set(b"SCKILLCONFIRMDISABLED\0"))
-        && message(bars()[b].hwnd, b"Are you sure that you want to kill this process?", b"WarpCenter", MB_YESNO | MB_WARNING) != MBID_YES
+        && !confirm(b, b"Are you sure that you want to kill this process?")
     {
         return;
     }
@@ -1512,8 +1644,18 @@ fn act(b: usize, it: Hit) {
             }
         }
         Hit::Timer => timer_menu(b),
+        Hit::Mail => {
+            let x = inbox();
+            if x != 0 {
+                obj::call(m::WPObject::wpViewObject, &[x, 0, OPEN_DEFAULT as usize, 0]);
+            }
+        }
         Hit::Lockup => {
-            crate::desktop::WinLockupSystem(0);
+            // IBM's question, under its "confirm lockup and shutdown"
+            // setting (IBM's own bar asks only before shutting down).
+            if wd(o).flags & F_NOCONFIRM != 0 || confirm(b, b"Are you sure that you want to lock the system?") {
+                crate::desktop::WinLockupSystem(0);
+            }
         }
         Hit::Find => {
             let d = crate::fs::desktop();
@@ -1796,6 +1938,12 @@ const ID_BOTTOM: u16 = 1411;
 const ID_SMALL: u16 = 1412;
 const ID_LARGE: u16 = 1413;
 const ID_MON: u16 = 1420; // .. 1422
+const ID_ALLDISKS: u16 = 1423;
+const ID_SOMEDISKS: u16 = 1424;
+const ID_DISKLIST: u16 = 1425;
+const LM_QUERYITEMHANDLE: u32 = 0x016a;
+const LM_SETITEMHANDLE: u32 = 0x0169;
+const LIT_FIRST: u32 = 0xffff_ffff;
 const ID_TRAYS: u16 = 1430;
 const ID_TADD: u16 = 1431;
 const ID_TRENAME: u16 = 1432;
@@ -1804,13 +1952,14 @@ const ID_UNDO: u16 = 1440;
 const ID_DEFAULT: u16 = 1441;
 
 /// The Display page's check boxes: (text, flag, flag set means checked).
-const OPTS: [(&[u8], u32, bool); 4] = [
+const OPTS: [(&[u8], u32, bool); 5] = [
     (b"Show on top of ~maximized windows", F_NOTONTOP, false),
     (b"~Hide until the pointer reaches its edge", F_AUTOHIDE, true),
     (b"Show ~bubble help", F_NOBUBBLE, false),
-    (b"~Confirm shutdown", F_NOCONFIRM, false),
+    (b"~Confirm lockup and shutdown", F_NOCONFIRM, false),
+    (b"Clock in ~green on black", F_PRETTY, true),
 ];
-const MONS: [(&[u8], u32); 3] = [(b"~Battery", M_BATTERY), (b"~Processor activity", M_CPU), (b"~Fixed disks", M_DISKS)];
+const MONS: [(&[u8], u32); 3] = [(b"~Battery (when there is one)", M_BATTERY), (b"~Processor activity", M_CPU), (b"~Fixed disks' free space", M_DISKS)];
 
 fn page_obj(h: u32) -> usize {
     unsafe { WinQueryWindowULong(h, QWL_USER) as usize }
@@ -1821,6 +1970,14 @@ fn display_init(h: u32, o: usize) {
     for (i, &(_, bit, set)) in OPTS.iter().enumerate() {
         let on = (f & bit != 0) == set;
         unsafe { WinSendDlgItemMsg(h, (ID_DISPLAY + i as u16) as u32, BM_SETCHECK, on as u32, 0) };
+    }
+    // IBM's SCUSEPRETTYCLOCK decides it: checked, and not to be changed.
+    if env_set(b"SCUSEPRETTYCLOCK\0") {
+        let id = ID_DISPLAY + OPTS.iter().position(|&(_, bit, _)| bit == F_PRETTY).unwrap_or(0) as u16;
+        unsafe {
+            WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, 1, 0);
+            WinEnableWindow(WinWindowFromID(h, id as u32), 0);
+        }
     }
     let r = |id: u16, on: bool| unsafe { WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, on as u32, 0) };
     r(ID_TOP, f & F_BOTTOM == 0);
@@ -1870,7 +2027,7 @@ extern "C" fn display_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                     changed(o);
                 }
                 ID_DEFAULT if o != 0 => {
-                    wd(o).flags &= !(F_BOTTOM | F_LARGE | F_NOTONTOP | F_AUTOHIDE | F_NOBUBBLE | F_NOCONFIRM);
+                    wd(o).flags &= !(F_BOTTOM | F_LARGE | F_NOTONTOP | F_AUTOHIDE | F_NOBUBBLE | F_NOCONFIRM | F_PRETTY);
                     display_init(h, o);
                     changed(o);
                 }
@@ -1893,7 +2050,7 @@ extern "C" fn wc_add_display_page(o: usize, nb: u32) -> u32 {
     let mut v = alloc::vec![book::label(b"The bar:", (6, 110, 200))];
     for (i, &(t, _, _)) in OPTS.iter().enumerate() {
         // BS_AUTOCHECKBOX
-        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 98 - i as i16 * 11, 220, 10), ID_DISPLAY + i as u16));
+        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 99 - i as i16 * 10, 220, 10), ID_DISPLAY + i as u16));
     }
     // BS_AUTORADIOBUTTON
     let radio = |t: &[u8], x: i16, y: i16, id: u16, first: bool| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (x, y, 100, 10), id);
@@ -1912,36 +2069,104 @@ extern "C" fn wc_add_display_page(o: usize, nb: u32) -> u32 {
     book::insert(o, nb, page, b"~Display\0")
 }
 
-extern "C" fn monitors_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
-    let init = |h: u32, o: usize| {
-        for (i, &(_, bit)) in MONS.iter().enumerate() {
-            unsafe { WinSendDlgItemMsg(h, (ID_MON + i as u16) as u32, BM_SETCHECK, (wd(o).off & bit == 0) as u32, 0) };
+/// Set while the Monitors page fills itself in (its selections are not
+/// the user's).
+static mut MON_FILLING: bool = false;
+
+/// Fill the Monitors page from object `o`.
+fn monitors_init(h: u32, o: usize) {
+    unsafe { MON_FILLING = true };
+    for (i, &(_, bit)) in MONS.iter().enumerate() {
+        unsafe { WinSendDlgItemMsg(h, (ID_MON + i as u16) as u32, BM_SETCHECK, (wd(o).off & bit == 0) as u32, 0) };
+    }
+    let disks = wd(o).off & M_DISKS == 0;
+    let some = wd(o).drives != 0;
+    unsafe {
+        WinSendDlgItemMsg(h, ID_ALLDISKS as u32, BM_SETCHECK, !some as u32, 0);
+        WinSendDlgItemMsg(h, ID_SOMEDISKS as u32, BM_SETCHECK, some as u32, 0);
+        let lb = WinWindowFromID(h, ID_DISKLIST as u32);
+        WinSendMsg(lb, LM_DELETEALL, 0, 0);
+        for d in 3..=26u32 {
+            if !fixed_disk(d) {
+                continue;
+            }
+            let t = [b'@' + d as u8, b':', 0];
+            let i = WinSendMsg(lb, LM_INSERTITEM, LIT_END, t.as_ptr() as u32);
+            WinSendMsg(lb, LM_SETITEMHANDLE, i, d);
+            WinSendMsg(lb, LM_SELECTITEM, i, (!some || wd(o).drives & 1 << d != 0) as u32);
         }
-    };
+        // As IBM's: the choice only with the disk monitor, the list only
+        // for selected drives.
+        WinEnableWindow(WinWindowFromID(h, ID_ALLDISKS as u32), disks as u32);
+        WinEnableWindow(WinWindowFromID(h, ID_SOMEDISKS as u32), disks as u32);
+        WinEnableWindow(lb, (disks && some) as u32);
+        MON_FILLING = false;
+    }
+}
+
+/// The drives selected in the page's list.
+fn selected_drives(h: u32) -> u32 {
+    let lb = unsafe { WinWindowFromID(h, ID_DISKLIST as u32) };
+    let mut set = 0;
+    let mut i = unsafe { WinSendMsg(lb, LM_QUERYSELECTION, LIT_FIRST, 0) } & 0xffff;
+    let mut n = 0;
+    while i != LIT_NONE && n < 32 {
+        let d = unsafe { WinSendMsg(lb, LM_QUERYITEMHANDLE, i, 0) };
+        if d < 32 {
+            set |= 1 << d;
+        }
+        i = unsafe { WinSendMsg(lb, LM_QUERYSELECTION, i, 0) } & 0xffff;
+        n += 1;
+    }
+    set
+}
+
+extern "C" fn monitors_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
         WM_INITDLG => {
             unsafe {
                 WinSetWindowULong(h, QWL_USER, b);
                 WinSetWindowULong(h, 4, wd(b as usize).off);
+                WinSetWindowULong(h, 8, wd(b as usize).drives);
             }
-            init(h, b as usize);
+            monitors_init(h, b as usize);
             0
         }
-        WM_CONTROL if (a >> 16) == 1 => {
+        WM_CONTROL => {
             let o = page_obj(h);
             let id = (a & 0xffff) as u16;
-            if o != 0 && (ID_MON..ID_MON + MONS.len() as u16).contains(&id) {
+            let code = a >> 16;
+            if o == 0 || unsafe { MON_FILLING } {
+                return 0;
+            }
+            let d = wd(o);
+            if code == 1 && (ID_MON..ID_MON + MONS.len() as u16).contains(&id) {
                 let bit = MONS[(id - ID_MON) as usize].1;
                 let on = unsafe { WinSendDlgItemMsg(h, id as u32, BM_QUERYCHECK, 0, 0) } != 0;
-                let d = wd(o);
                 d.off = if on { d.off & !bit } else { d.off | bit };
                 // The processors' monitor stays when all are off.
                 if d.off & M_ALL == M_ALL {
                     d.off &= !M_CPU;
-                    init(h, o);
                 }
+            } else if code == 1 && id == ID_ALLDISKS {
+                d.drives = 0;
+            } else if code == 1 && id == ID_SOMEDISKS {
+                // From all of them; the list then narrows it.
+                if d.drives == 0 {
+                    d.drives = selected_drives(h);
+                }
+            } else if code == LN_SELECT && id == ID_DISKLIST {
+                let set = selected_drives(h);
+                // None chosen is none (bit 0 is no drive).
+                d.drives = if set == 0 { 1 } else { set };
+                // The list stays as the user left it.
                 changed(o);
+                return 0;
+            } else {
+                return 0;
             }
+            monitors_init(h, o);
+            changed(o);
             0
         }
         WM_COMMAND => {
@@ -1949,12 +2174,14 @@ extern "C" fn monitors_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             match (a & 0xffff) as u16 {
                 ID_UNDO if o != 0 => {
                     wd(o).off = unsafe { WinQueryWindowULong(h, 4) };
-                    init(h, o);
+                    wd(o).drives = unsafe { WinQueryWindowULong(h, 8) };
+                    monitors_init(h, o);
                     changed(o);
                 }
                 ID_DEFAULT if o != 0 => {
                     wd(o).off = 0;
-                    init(h, o);
+                    wd(o).drives = 0;
+                    monitors_init(h, o);
                     changed(o);
                 }
                 _ => {}
@@ -1968,9 +2195,13 @@ extern "C" fn monitors_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 extern "C" fn wc_add_monitors_page(o: usize, nb: u32) -> u32 {
     let mut v = alloc::vec![book::label(b"The monitor shows, a click going on to the next:", (6, 110, 226))];
     for (i, &(t, _)) in MONS.iter().enumerate() {
-        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 96 - i as i16 * 12, 200, 10), ID_MON + i as u16));
+        v.push(item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (10, 98 - i as i16 * 11, 200, 10), ID_MON + i as u16));
     }
-    v.push(book::label(b"(the battery when there is one)", (22, 56, 200)));
+    // BS_AUTORADIOBUTTON
+    v.push(item(WC_BUTTON, b"~All fixed disks", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004, (22, 64, 90, 10), ID_ALLDISKS));
+    v.push(item(WC_BUTTON, b"~Selected disks:", WS_VISIBLE | 0x0004, (22, 53, 90, 10), ID_SOMEDISKS));
+    // LS_MULTIPLESEL
+    v.push(item(WC_LISTBOX, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (118, 24, 60, 50), ID_DISKLIST));
     v.extend(page_buttons());
     let tpl = template(book::page_frame(), v);
     let page = book::make_page(nb, monitors_proc, &tpl, o);
