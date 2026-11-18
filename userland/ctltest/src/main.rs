@@ -264,6 +264,13 @@ fn mle_checks(hab: u32, client: u32) {
     check("MLM_SEARCH case-insensitive, selecting the match", found == 1 && at == 8 && send(m, MLM_QUERYSEL, 0, 0) == mp(8, 13));
     let found = send(m, MLM_SEARCH, 1 | 2, sd.as_mut_ptr() as u32);
     check("MLM_SEARCH case-sensitive misses", found == 0);
+    // cchFind 0: the string is NUL-terminated (SMART's installer).
+    sd[4..8].copy_from_slice(&(b"two\0".as_ptr() as u32).to_le_bytes());
+    sd[12..14].copy_from_slice(&0u16.to_le_bytes());
+    sd[16..20].copy_from_slice(&0u32.to_le_bytes());
+    let found = send(m, MLM_SEARCH, 2, sd.as_mut_ptr() as u32);
+    let at = u32::from_le_bytes([sd[16], sd[17], sd[18], sd[19]]);
+    check("MLM_SEARCH with cchFind 0: a NUL-terminated string", found == 1 && at == 4 && send(m, MLM_QUERYSEL, 0, 0) == mp(4, 7));
     // Word wrap: a long line in a narrow MLE.
     let w = create(client, 10, b"aaaa bbbb cccc dddd eeee ffff", 0x0001, (0, 0, 60, 100), 101, null());
     let lines = send(w, MLM_QUERYLINECOUNT, 0, 0);

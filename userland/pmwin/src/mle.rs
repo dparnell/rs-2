@@ -633,7 +633,11 @@ fn search(h: u32, fl: u32, p: u32) -> u32 {
         if ptr == 0 {
             return Vec::new();
         }
-        if n < 0 { ctl::cstr(ptr as *const u8) } else { unsafe { core::slice::from_raw_parts(ptr as *const u8, n as usize) }.to_vec() }
+        // 0 (or less): NUL-terminated, as IBM's MLE takes it (SMART's
+        // installer searches CONFIG.SYS for LIBPATH so; an empty pattern
+        // found nothing and it added a second LIBPATH, which left PM
+        // without its DLLs at the next boot).
+        if n <= 0 { ctl::cstr(ptr as *const u8) } else { unsafe { core::slice::from_raw_parts(ptr as *const u8, n as usize) }.to_vec() }
     };
     let find = internal(h, &take(pf, cf));
     let repl = internal(h, &take(pr, cr));
