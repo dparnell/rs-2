@@ -207,8 +207,14 @@ pub fn create_minmax(frame: u32, fcf: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinLoadMenu(parent: u32, hmod: u32, id: u32) -> u32 {
     let Some(items) = res::load(hmod, res::RT_MENU, id).and_then(res::parse_menu) else { return 0 };
+    // As IBM's (WinCreateWindow of WC_MENU with MS_ACTIONBAR, whatever
+    // the parent): an action bar, as WinCreateMenu's; one that becomes a
+    // submenu or pops up turns vertical then. UltiMail's tool bar
+    // (UCMenus, UCMENUS.DLL) loads its menu for HWND_OBJECT and sizes it
+    // from MM_QUERYITEMRECT: laid out as a vertical menu of no width its
+    // items came out of negative width and the bar stayed empty.
     let bar = frame::is_frame(parent);
-    let style = if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 };
+    let style = if bar { ws::VISIBLE | MS_ACTIONBAR } else { MS_ACTIONBAR };
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
     // The menu's ID is FID_MENU, whatever the resource's (as IBM's
     // PMWIN): a frame finds it so on WM_UPDATEFRAME.
