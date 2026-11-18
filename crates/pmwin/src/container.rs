@@ -278,23 +278,34 @@ pub fn layout(view: View, items: &[Item], m: &Metrics, cols: &[Column]) -> (Vec<
     (out, b)
 }
 
-/// Widths of the detail view columns (a column of width 0 is as wide as
-/// its title or widest cell).
+/// Widths of the detail view columns. As IBM's container
+/// (CnrQueryColumnPosInDV), a column is its data width (the FIELDINFO's
+/// cxWidth, or when that is 0 its title or widest cell) plus three
+/// average character widths of margin, half on each side
+/// ([`column_margin`]).
 pub fn column_widths(items: &[Item], m: &Metrics, cols: &[Column]) -> Vec<i32> {
     cols.iter()
         .enumerate()
         .map(|(c, col)| {
-            if col.width > 0 {
-                return col.width;
-            }
-            let content = if col.icon {
-                m.icon.max(16)
+            let data = if col.width > 0 {
+                col.width
             } else {
-                items.iter().map(|it| it.cells.get(c).map_or(0, |t| m.text_width(t))).max().unwrap_or(0)
+                let content = if col.icon {
+                    m.icon.max(16)
+                } else {
+                    items.iter().map(|it| it.cells.get(c).map_or(0, |t| m.text_width(t))).max().unwrap_or(0)
+                };
+                content.max(m.text_width(&col.title))
             };
-            content.max(m.text_width(&col.title)) + 12
+            data + 3 * m.cw
         })
         .collect()
+}
+
+/// The margin left of a detail view column's data (one and a half
+/// average character widths, as IBM's container).
+pub fn column_margin(m: &Metrics) -> i32 {
+    3 * m.cw / 2
 }
 
 pub fn union(a: &Rect, b: &Rect) -> Rect {
@@ -527,10 +538,12 @@ mod tests {
         b2.cells = vec![b"a".to_vec(), b"1".to_vec()];
         let cols = vec![Column { width: 0, icon: false, title: b"Name".to_vec() }, Column { width: 100, icon: false, title: b"Size".to_vec() }];
         let w = column_widths(&[a.clone(), b2.clone()], &m(), &cols);
-        assert_eq!(w, vec![8 * 8 + 12, 100]);
+        // Data width plus three average character widths.
+        assert_eq!(w, vec![8 * 8 + 24, 100 + 24]);
+        assert_eq!(column_margin(&m()), 12);
         let (p, b) = layout(View::Detail, &[a, b2], &m(), &cols);
-        assert_eq!(p[0].rect.right, 176);
-        assert_eq!(b.right, 176);
+        assert_eq!(p[0].rect.right, 212);
+        assert_eq!(b.right, 212);
         assert_eq!(p[1].rect.top, p[0].rect.bottom);
     }
 

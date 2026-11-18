@@ -720,6 +720,7 @@ fn paint(h: u32) {
     let split_after = l.cols.iter().position(|&f| f == field_last);
     let scroll_x = c.scroll.0;
     let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::mini_size());
+    let inset = layout::column_margin(&l.m);
     let f = draw::font_of(h);
     // Presentation parameter colours (a desktop's background).
     let bg = crate::pp::color_set(h, crate::pp::PP_BACKGROUNDCOLOR);
@@ -753,7 +754,7 @@ fn paint(h: u32) {
                 let w = widths.get(k).copied().unwrap_or(0);
                 let r = Rect::new(x, parts.heads.bottom, x + w, parts.heads.top);
                 let al = if fl & CFA_RIGHT != 0 { draw::DT_RIGHT } else if fl & CFA_CENTER != 0 { draw::DT_CENTER } else { 0 };
-                cv.text_in(Rect::new(r.left + 4, r.bottom, r.right - 4, r.top).intersect(&parts.heads), t, draw::text(), al | draw::DT_VCENTER);
+                cv.text_in(Rect::new(r.left + inset, r.bottom, r.right - inset, r.top).intersect(&parts.heads), t, draw::text(), al | draw::DT_VCENTER);
                 cv.vline(r.right - 1, r.bottom, r.top, draw::shadow());
                 x += w;
             }
@@ -789,7 +790,7 @@ fn paint(h: u32) {
                         }
                     } else {
                         let al = if fl & CFA_RIGHT != 0 { draw::DT_RIGHT } else if fl & CFA_CENTER != 0 { draw::DT_CENTER } else { 0 };
-                        cv.text_in(Rect::new(r.left + 4, r.bottom, r.right - 4, r.top), t, fg, al | draw::DT_VCENTER);
+                        cv.text_in(Rect::new(r.left + inset, r.bottom, r.right - inset, r.top), t, fg, al | draw::DT_VCENTER);
                     }
                     if fl & CFA_SEPARATOR != 0 {
                         cv.vline(r.right - 1, r.bottom, r.top, draw::shadow());
