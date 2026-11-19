@@ -54,7 +54,7 @@ pub const GROUPS: &[Group] = &[
             Part {
                 id: b"BPHAL",
                 name: b"HyperACCESS Lite",
-                description: b"A terminal program for modems and bulletin boards, with settings for many online services. Its object goes in Utilities. On rs2 it installs, but HALITE.EXE stops with an access violation as it starts.",
+                description: b"A terminal program for modems and bulletin boards, with settings for many online services. Its object goes in Utilities. On rs2 it installs and starts, with its Phonebook.",
             },
             Part {
                 id: b"BPCIM",

@@ -202,6 +202,26 @@ pub fn init() {
     }
 }
 
+/// The "System VIO" font with a cell `h` pels high and `w` wide (a
+/// logical font's lMaxBaselineExt and lAveCharWidth; 0 = any): IBM's
+/// image font of that cell where installed (DSPRES.DLL), the built-in
+/// 8x16 cells for 16 (or no size), else the monospaced face at that
+/// height, as by_name makes the other "System VIO" sizes.
+pub fn vio_cell(h: i32, w: i32) -> Option<&'static Font> {
+    // FOCAMETRICS from usRegistryId: lAveCharWidth 10, lMaxBaselineExt 13.
+    if h > 0
+        && let Some(&(_, _, f)) = st().fonts.public.iter().find(|(_, i, _)| {
+            i.face.eq_ignore_ascii_case(b"System VIO") && i.fields[13] as i32 == h && (w <= 0 || i.fields[10] as i32 == w)
+        })
+    {
+        return Some(f);
+    }
+    if h <= 0 || h == 16 {
+        return Some(gpi::font::vio());
+    }
+    face_index(b"System Monospaced").and_then(|i| face(i, h))
+}
+
 /// A font by its presentation parameter name, "points.face[.Bold]
 /// [.Italic]" ("10.Helv", "12.Times New Roman.Bold"): IBM's bitmap at
 /// that size for the screen's font resolution (96 dpi; more at a UI
@@ -233,9 +253,8 @@ pub fn by_name(name: &[u8]) -> Option<&'static Font> {
     if fname.eq_ignore_ascii_case(b"System VIO") {
         const CELL_H: [i32; 17] = [12, 16, 10, 14, 15, 25, 8, 10, 12, 14, 16, 18, 18, 16, 20, 22, 30];
         let ch = CELL_H[(pt.clamp(2, 18) - 2) as usize];
-        let v = gpi::font::vio();
         if pt == 12 {
-            return Some(v);
+            return Some(gpi::font::vio());
         }
         return face_index(b"System Monospaced").and_then(|i| face(i, ch));
     }
