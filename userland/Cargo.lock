@@ -27,6 +27,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bonuspak"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "os2-pack",
+]
+
+[[package]]
 name = "clipos2"
 version = "0.1.0"
 dependencies = [

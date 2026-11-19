@@ -22,7 +22,7 @@ pub const APP_WINDOWS: &[u8] = b"RS2_Windows\0";
 pub const APP_ASSOC: &[u8] = b"RS2_Associations\0";
 
 /// Current layout of the default objects.
-pub const VERSION: &[u8] = b"5";
+pub const VERSION: &[u8] = b"6";
 
 pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let k = z(key);
@@ -339,12 +339,15 @@ fn add_editor(programs: u32) {
     }
 }
 
-/// The object of the installer of OS/2's applications (APPINST.EXE).
+/// The objects of the installers of OS/2's applications (APPINST.EXE)
+/// and of the Warp 4 BonusPak (BONUSPAK.EXE, version 6).
 fn add_app_installer(programs: u32) {
-    let exe = sys_path(b"OS2\\APPINST.EXE");
-    if exists(&exe) && !titles(programs).iter().any(|t| t.3 == b"Install OS/2 Applications") {
-        let p = Program { progc: PROG_PM, title: b"Install OS/2 Applications".to_vec(), exe, ..Program::default() };
-        add_program(programs, &p);
+    for (file, title) in [(&b"OS2\\APPINST.EXE"[..], &b"Install OS/2 Applications"[..]), (b"OS2\\BONUSPAK.EXE", b"Install BonusPak")] {
+        let exe = sys_path(file);
+        if exists(&exe) && !titles(programs).iter().any(|t| t.3 == title) {
+            let p = Program { progc: PROG_PM, title: title.to_vec(), exe, ..Program::default() };
+            add_program(programs, &p);
+        }
     }
 }
 
