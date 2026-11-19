@@ -1886,7 +1886,8 @@ dpi) display drivers did, further. Display (`DISPLAY.EXE`, its UI
 scale list; `DISPLAY SCALE=150` from a script) and the System object's
 Screen page save it; PM reads it once (`scale.rs`, the first PM
 process puts it in the shared state), so it takes effect at the next
-start. What follows it (`scale::px` turns 96-dpi pels into scaled ones):
+start: both say so (choosing another scale shows "A restart is required
+to apply it", and Apply puts up a message box saying the same). What follows it (`scale::px` turns 96-dpi pels into scaled ones):
 
 - the system metrics: SV_CYTITLEBAR, SV_CYMENU, the scroll bar sizes,
   the border widths (SV_CXBORDER, SV_CXDLGFRAME, SV_CXSIZEBORDER),

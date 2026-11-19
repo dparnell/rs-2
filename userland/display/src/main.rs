@@ -88,6 +88,15 @@ unsafe extern "C" {
     fn GpiQueryDevice(hps: u32) -> u32;
     #[link_name = "PMGPI.606"]
     fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMWIN.789"]
+    fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
+}
+
+/// The UI scale changes only when PM starts again: say so.
+fn restart_note(pct: u32) {
+    let t = z(&alloc::format!("The UI scale of {pct}% is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again)."));
+    // MB_OK | MB_INFORMATION | MB_MOVEABLE
+    unsafe { WinMessageBox(HWND_DESKTOP, app().frame, t.as_ptr(), b"UI scale\0".as_ptr(), 0, 0x0000 | 0x0030 | 0x4000) };
 }
 
 struct App {
@@ -446,7 +455,7 @@ fn colors_note() -> String {
     if a.scale_now == a.scale_saved {
         t += &alloc::format!(" UI scale {}%.", a.scale_now);
     } else {
-        t += &alloc::format!(" UI scale {}% now, {}% after the next start.", a.scale_now, a.scale_saved);
+        t += &alloc::format!(" UI scale {}% now: a restart is required to apply {}%.", a.scale_now, a.scale_saved);
     }
     t
 }
@@ -487,6 +496,9 @@ fn apply() {
         }
         app().scale_saved = n;
         fill_list();
+        if n != app().scale_now {
+            restart_note(n);
+        }
     }
     if (w, h) == old {
         return;
@@ -544,6 +556,13 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_CONTROL => {
             let (id, code) = (mp1 & 0xffff, mp1 >> 16);
+            // CBN_LBSELECT: a new scale is only taken at the next start.
+            if id == ID_SCALE && code == 4 && app().asking.is_none() {
+                let n = chosen_scale();
+                if n != app().scale_now {
+                    set_text(ID_STATUS, &alloc::format!("UI scale {n}%: Apply saves it. A restart is required to apply it."));
+                }
+            }
             if id == ID_MODES && code == LN_ENTER {
                 apply();
             } else if id == ID_MODES && code == LN_SELECT && app().asking.is_none() {

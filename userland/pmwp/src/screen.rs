@@ -44,6 +44,15 @@ unsafe extern "C" {
     fn Rs2SetDisplayMode(cx: u32, cy: u32) -> u32;
     #[link_name = "PMWIN.800"]
     fn WinQueryAnchorBlock(h: u32) -> u32;
+    #[link_name = "PMWIN.789"]
+    fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
+}
+
+/// The UI scale changes only when PM starts again: say so.
+fn restart_note(owner: u32, pct: u32) {
+    let t = z(alloc::format!("The UI scale of {pct}% is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again).").as_bytes());
+    // MB_OK | MB_INFORMATION | MB_MOVEABLE
+    unsafe { WinMessageBox(HWND_DESKTOP, owner, t.as_ptr(), b"UI scale\0".as_ptr(), 0, 0x0000 | 0x0030 | 0x4000) };
 }
 
 fn hab() -> u32 {
@@ -220,7 +229,7 @@ fn colors_note() -> alloc::string::String {
     let now = display_info().is_some_and(|d| d.3);
     let (sn, ss) = (scale_now(), scale_saved());
     if sn != ss {
-        return alloc::format!("UI scale {sn}% now, {ss}% after the next start.");
+        return alloc::format!("UI scale {sn}% now: restart to apply {ss}%.");
     }
     match (now, saved256()) {
         (true, true) => "256 colors.",
@@ -284,10 +293,14 @@ fn apply(h: u32) {
     let i = unsafe { WinSendDlgItemMsg(h, ID_SCALE as u32, LM_QUERYSELECTION, LIT_NONE, 0) } as usize;
     if let Some(&n) = SCALES.get(i)
         && n != scale_saved()
-        && !save_scale(n)
     {
-        status(h, "The UI scale could not be saved", "in CONFIG.SYS.");
-        return;
+        if !save_scale(n) {
+            status(h, "The UI scale could not be saved", "in CONFIG.SYS.");
+            return;
+        }
+        if n != scale_now() {
+            restart_note(h, n);
+        }
     }
     if (w, hh) == old {
         screen_fill(h);
@@ -342,6 +355,18 @@ extern "C" fn screen_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 None => unsafe {
                     WinStopTimer(hab(), h, TID_KEEP);
                 },
+            }
+            0
+        }
+        // CBN_LBSELECT: a new scale is only taken at the next start.
+        WM_CONTROL if (a & 0xffff) as u16 == ID_SCALE && a >> 16 == 4 => {
+            let i = unsafe { WinSendDlgItemMsg(h, ID_SCALE as u32, LM_QUERYSELECTION, LIT_NONE, 0) } as usize;
+            if let Some(&n) = SCALES.get(i) {
+                if n == scale_now() {
+                    status(h, &alloc::format!("UI scale {n}%."), "");
+                } else {
+                    status(h, &alloc::format!("UI scale {n}%: Apply saves it."), "A restart is required to apply it.");
+                }
             }
             0
         }

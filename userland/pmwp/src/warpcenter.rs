@@ -598,10 +598,15 @@ fn place(o: usize) -> (i32, i32) {
 }
 
 /// The work area: the screen without the bar, while it is shown on top
-/// of maximized windows and does not hide.
+/// of maximized windows and does not hide. The desktop's icons keep out
+/// of it while it does not hide.
 fn set_work_area(o: usize, open: bool) {
     let (sw, sh) = screen();
     let f = wd(o).flags;
+    // The desktop's icons keep out of the bar while it stays shown (on
+    // top or not).
+    let keep = if open && f & F_AUTOHIDE == 0 { bar_h(o) } else { 0 };
+    if f & F_BOTTOM != 0 { crate::view::reserve_desktop(keep, 0) } else { crate::view::reserve_desktop(0, keep) }
     if !open || f & (F_NOTONTOP | F_AUTOHIDE) != 0 {
         unsafe { WinSetDesktopWorkArea(HWND_DESKTOP, core::ptr::null()) };
         return;

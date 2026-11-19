@@ -171,12 +171,30 @@ fn cnr_height(w: usize) -> i32 {
     (r.t - 2).max(100)
 }
 
+/// The pels at the bottom and top of the screen the desktop's icons
+/// keep clear of (the WarpCenter's strip).
+static mut DESK_RESERVE: (i32, i32) = (0, 0);
+
+/// A bar (the WarpCenter) takes `bottom` or `top` pels of the screen:
+/// the desktop's icons stay out of them (0, 0: the whole screen again).
+pub fn reserve_desktop(bottom: i32, top: i32) {
+    if unsafe { DESK_RESERVE } == (bottom, top) {
+        return;
+    }
+    unsafe { DESK_RESERVE = (bottom, top) };
+    if let Some(w) = wins().iter().position(|w| w.desktop) {
+        size_child(w);
+    }
+}
+
 fn size_child(w: usize) {
     let (client, child) = (wins()[w].client, wins()[w].child);
+    let (b, t) = if wins()[w].desktop { unsafe { DESK_RESERVE } } else { (0, 0) };
     let mut r = RectL::default();
     unsafe {
         WinQueryWindowRect(client, &mut r);
-        WinSetWindowPos(child, 0, 0, 0, r.r, r.t, SWP_SIZE | SWP_MOVE);
+        let (b, t) = if r.t - b - t < 100 { (0, 0) } else { (b, t) };
+        WinSetWindowPos(child, 0, 0, b, r.r, r.t - b - t, SWP_SIZE | SWP_MOVE);
     }
     // A taller or shorter window: the icons keep their distance from the
     // top (positions are from the bottom).
@@ -188,7 +206,47 @@ fn size_child(w: usize) {
             wr(r.rec, R_Y, (rd(r.rec, R_Y) as i32 + dy) as u32);
         }
         send(child, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
+        if wins()[w].desktop {
+            bring_in(w);
+        }
     }
+}
+
+/// Icons a smaller desktop left outside it (under the WarpCenter) go to
+/// free grid places.
+fn bring_in(w: usize) {
+    let mut r = RectL::default();
+    unsafe { WinQueryWindowRect(wins()[w].child, &mut r) };
+    let c = cell(w);
+    let out = |f: (i32, i32, i32, i32)| f.1 < 0 || f.3 > r.t || f.2 > r.r + c.0 / 2;
+    let all: Vec<(u32, (i32, i32, i32, i32))> = wins()[w].recs.iter().map(|x| (x.rec, footprint((rd(x.rec, R_X) as i32, rd(x.rec, R_Y) as i32), extent(w, x.rec)))).collect();
+    let mut used: Vec<(i32, i32, i32, i32)> = all.iter().filter(|a| !out(a.1)).map(|a| a.1).collect();
+    let moving: Vec<u32> = all.iter().filter(|a| out(a.1)).map(|a| a.0).collect();
+    if moving.is_empty() {
+        return;
+    }
+    for rec in moving {
+        let e = extent(w, rec);
+        let p = free_slot(w, e, c, &used);
+        wr(rec, R_X, p.0 as u32);
+        wr(rec, R_Y, p.1 as u32);
+        used.push(footprint(p, e));
+    }
+    send(wins()[w].child, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
+    save_positions(w);
+}
+
+/// The first grid place where an icon of extent `e` and its title meet
+/// none of `used`.
+fn free_slot(w: usize, e: (i32, i32), c: (i32, i32), used: &[(i32, i32, i32, i32)]) -> (i32, i32) {
+    for i in 0..2000 {
+        let s = slot(w, i, c);
+        let f = footprint(s, e);
+        if !used.iter().any(|u| f.0 < u.2 && u.0 < f.2 && f.1 < u.3 && u.1 < f.3) {
+            return s;
+        }
+    }
+    slot(w, 0, c)
 }
 
 // ---- Colours ----
@@ -781,15 +839,7 @@ fn place_icons(w: usize, recs: &[u32]) {
         // The first grid place where the icon and its title meet nothing
         // (an icon kept from a narrower grid can be next to it).
         let e = ext(r);
-        let mut p = slot(w, 0, (cw, ch));
-        for i in 0..2000 {
-            let s = slot(w, i, (cw, ch));
-            let f = footprint(s, e);
-            if !used.iter().any(|u| f.0 < u.2 && u.0 < f.2 && f.1 < u.3 && u.1 < f.3) {
-                p = s;
-                break;
-            }
-        }
+        let p = free_slot(w, e, (cw, ch), &used);
         wr(r, R_X, p.0 as u32);
         wr(r, R_Y, p.1 as u32);
         used.push(footprint(p, e));
