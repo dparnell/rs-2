@@ -251,6 +251,17 @@ fn draw(name: &str, size: i32) -> Option<Image> {
             let c = if name == "APPINST" { GREEN } else { BLUE };
             p.polygon(&[(12.0, 31.0), (20.0, 31.0), (20.0, 23.0), (25.0, 23.0), (16.0, 14.0), (7.0, 23.0), (12.0, 23.0)], c, DARK);
         }
+        // Install BonusPak: a wrapped present, its ribbon and bow.
+        "BONUSPAK" => {
+            p.rect(4.0, 2.0, 28.0, 19.0, RED);
+            p.frame(4.0, 2.0, 28.0, 19.0, DARK);
+            p.rect(3.0, 17.0, 29.0, 22.0, rgb(0xd84040));
+            p.frame(3.0, 17.0, 29.0, 22.0, DARK);
+            p.rect(14.0, 2.5, 18.0, 21.5, GOLD);
+            p.polygon(&[(16.0, 22.0), (7.0, 29.0), (6.0, 24.0)], GOLD, DARK);
+            p.polygon(&[(16.0, 22.0), (25.0, 29.0), (26.0, 24.0)], GOLD, DARK);
+            p.disc(16.0, 22.5, 2.2, GOLD, DARK);
+        }
         // Display: a monitor with a desktop on it.
         "DISPLAY" => {
             monitor(&mut p, rgb(0x308080));
@@ -279,7 +290,7 @@ fn draw(name: &str, size: i32) -> Option<Image> {
 /// The names of the programs with an icon here.
 pub const PROGRAMS: &[&str] = &[
     "CLIPOS2", "MPCPUMON", "PMCHKDSK", "PMFORMAT", "PICVIEW", "PMSEEK", "PKGMGR", "ICONEDIT", "GLOCALE", "KLONDIKE", "MAHJONGG", "OS2CHESS", "MPPM", "WEPM",
-    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY", "WEB", "WEBTEXT", "WIFIPM",
+    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "BONUSPAK", "DISPLAY", "WEB", "WEBTEXT", "WIFIPM",
 ];
 
 /// Program `name`'s icon as an OS/2 icon file (32 x 32 and 16 x 16).

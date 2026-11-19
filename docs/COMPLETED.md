@@ -486,6 +486,9 @@ What is already done, by milestone. What is still to do is in
 - done: APPINST.EXE installs the OS/2 applications rs2 runs from the
   OS/2 Warp CD (a tree of categories and applications with check boxes,
   unpacking with `crates/os2-pack`, desktop folders and objects)
+- done: BONUSPAK.EXE installs the Warp 4 BonusPak's parts from the Warp 4
+  CD by its Feature Installer packages (files with EAs, CONFIG.SYS and
+  INI edits, classes, objects, the packages' programs; docs/PM.md)
 - done (help): IBM's help window menu bar (copying a panel, viewed
   pages, expanding and collapsing the contents), the library list
   (marked libraries searched), bookmarks for books (kept in `NAME.cp`)
