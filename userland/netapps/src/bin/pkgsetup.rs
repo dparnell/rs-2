@@ -772,7 +772,19 @@ fn setup(drive: u8) -> Result<(), String> {
     let root = format!("{}:", (b'A' + drive) as char);
     let fs = fs_name(drive).unwrap_or_default();
     if fs != "HPFS" && fs != "JFS" {
-        return Err(format!("{root} is {fs}: RPM and yum need the long names of HPFS or JFS."));
+        // The installer belongs to the live medium only (an installed
+        // system gets no copy): with it on C:, this is the live system,
+        // whose C: is the FAT RAM disk, not an installation.
+        if exists(&format!("{root}\\OS2\\PMINSTAL.EXE")) {
+            return Err(format!(
+                "{root} is the live system's RAM disk ({fs}): the computer was started from the installation medium, not from the installed rs2. \
+                 Remove the medium (or choose the internal disk in the firmware's boot menu), start the installed system and run PKGSETUP there."
+            ));
+        }
+        return Err(format!(
+            "{root} is {fs}: RPM and yum need the long names of HPFS or JFS. This rs2 was installed on one FAT32 partition; \
+             install it again with the HPFS or JFS layout."
+        ));
     }
     if exists(&format!("{root}\\USR\\BIN\\YUM")) && exists(&format!("{root}\\VAR\\LIB\\RPM\\Packages")) {
         outln("RPM and yum are installed already.");
