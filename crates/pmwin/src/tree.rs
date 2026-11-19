@@ -224,6 +224,11 @@ impl Desktop {
             shape: None,
         });
         self.windows.get_mut(&parent)?.children.push(hwnd);
+        // Only a window that shows needs painting (Desktop::invalidate):
+        // one created hidden, or inside a hidden window, paints when shown.
+        if !self.is_showing(hwnd) {
+            self.windows.get_mut(&hwnd)?.update = Region::new();
+        }
         self.generation = self.generation.wrapping_add(1);
         self.wake.insert(queue);
         Some(hwnd)
@@ -360,8 +365,16 @@ impl Desktop {
     }
 
     /// Mark a window rectangle (window coordinates; None = all) for
-    /// repainting.
+    /// repainting. A window that does not show (hidden, or in a hidden
+    /// window) gets nothing, as in IBM's CalcUpdate (IntersectWithParents
+    /// fails on a parent without WS_VISIBLE): showing it repaints it all
+    /// anyway. So WinUpdateWindow on it sends no WM_PAINT: HyperACCESS
+    /// Lite updates its terminal window in its WM_CREATE, inside a frame
+    /// not shown yet, before it has stored its instance data.
     pub fn invalidate(&mut self, h: Hwnd, r: Option<Rect>, children: bool) {
+        if !self.is_showing(h) {
+            return;
+        }
         let Some(w) = self.windows.get_mut(&h) else { return };
         let r = r.unwrap_or(w.rect()).intersect(&w.rect());
         w.update.add(r);
@@ -883,6 +896,23 @@ mod tests {
         let destroyed = d.destroy(f);
         assert_eq!(destroyed, alloc::vec![c, f]);
         assert!(!d.exists(c));
+    }
+
+    #[test]
+    fn hidden_windows_get_no_update_region() {
+        let mut d = desk();
+        // A frame not shown yet with a visible child (HyperACCESS Lite's
+        // terminal window during its WM_CREATE).
+        let f = d.create(HWND_DESKTOP, 0, 1, 0, Rect::new(0, 0, 200, 200), 1, 1, 0, 0).unwrap();
+        let c = d.create(f, f, 2, ws::VISIBLE, Rect::new(10, 10, 100, 100), 2, 1, 0, 0).unwrap();
+        assert!(d.get(c).unwrap().update.is_empty());
+        d.invalidate(c, None, true);
+        d.invalidate(f, None, true);
+        assert!(d.get(c).unwrap().update.is_empty());
+        assert!(d.get(f).unwrap().update.is_empty());
+        // Shown, it paints.
+        d.set_visible(f, true);
+        assert!(!d.get(c).unwrap().update.is_empty());
     }
 
     #[test]

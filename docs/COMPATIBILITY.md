@@ -343,6 +343,36 @@ word processor can stop in a DosEnterCritSec while another thread holds
 the C runtime's semaphore (IBM's kernel freezes the same way: the
 trace's slowness makes the window wide).
 
+### HyperACCESS Lite (the Warp 4 BonusPak)
+
+Hilgraeve's terminal program, `OS2IMAGE\FI\BONUSPAK\HALITE` on the Warp 4
+CD (plain files, `C:\BONUSPAK\HALITE`, object in Utilities; installed by
+*Install BonusPak* or copied by hand). **Starts**: the main window with
+its menus, tool bar and status line, and the Phonebook with the CD's
+online services.
+
+It used to stop at once with SYS3175 at `HALITE object 1 + 34942`
+(CR2 0xE4). Its terminal window (cbWindowData 8) allocates its data in
+WM_CREATE and stores it in window word 0 when WM_CREATE returns; before
+that, still inside WM_CREATE, it calls `WinInvalidateRect(hwnd, NULL,
+TRUE)` and `WinUpdateWindow(hwnd)`. The window is in a frame that is not
+shown yet (WinCreateStdWindow without WS_VISIBLE). rs2 gave the window an
+update region all the same (every new window started with one, and
+WinInvalidateRect did not look at visibility), so WinUpdateWindow sent
+WM_PAINT, whose handler read the still-NULL word 0. In IBM's PMMERGE,
+WinInvalidateRect goes through WinUpdateRect → CalcUpdate →
+IntersectWithParents, which gives up when the window or any parent lacks
+WS_VISIBLE: a window that does not show gets no update region, and
+XUpdateWindow sends WM_PAINT only to windows that have one. rs2's
+`Desktop::invalidate` (crates/pmwin/src/tree.rs) now does nothing for a
+window that does not show, and a window created hidden or inside a hidden
+window starts without an update region; showing a window still repaints
+all of it.
+
+Also seen, not looked into: in the first screenshot part of the terminal
+area beside the Phonebook shows the desktop colour. Dialling (no modem in
+QEMU) was not tried.
+
 ### IBM VisualAge Smalltalk Enterprise 6.0 (development tools)
 
 The user's media (`va600_co.zip` client, `va600_mo.zip` manager,

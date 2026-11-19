@@ -3262,15 +3262,14 @@ Checked in QEMU (dist system disk, Warp 4 CD on D:): IBM Works and
 HyperACCESS Lite installed; after a restart the IBM Works folder in
 Programs has all its objects and templates with FPWWPS.DLL's icons and the
 Appointments object starts the PIM; HyperACCESS Lite's object is in
-Utilities. Ask PSP, FaxWorks (its FxFile class, the FxPrint printer, its
+Utilities and HALITE.EXE starts (see [COMPATIBILITY.md](COMPATIBILITY.md#hyperaccess-lite-the-warp-4-bonuspak)). Ask PSP, FaxWorks (its FxFile class, the FxPrint printer, its
 INI entries), MarkVision (bringing the Lexmark common files) and Remote
 Support installed without errors; `ASSOC.OS2` and CONFIG.SYS came out as
 IBM's installer writes them, and rs2 still starts with Remote Support's
 lines in CONFIG.SYS (it notes the DEVICE= lines and goes on).
 
-Not working or not looked at: HyperACCESS Lite's HALITE.EXE stops at
-start (SYS3175, HALITE object 1 + 34942); the other parts' programs have
-not been run; JetAdmin and VideoIn were not installed in QEMU; nothing is
+Not working or not looked at: the other parts' programs (besides IBM
+Works and HyperACCESS Lite) have not been run; JetAdmin and VideoIn were not installed in QEMU; nothing is
 uninstalled (IBM's Feature Installer could remove a part); the target is
 always the boot drive.
 
