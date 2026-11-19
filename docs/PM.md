@@ -1086,7 +1086,11 @@ The GPI covers:
   OS/2's format) for the process; `GpiQueryFonts` offers them with
   `QF_PRIVATE`, `GpiCreateLogFont` picks one by lMatch or by face and
   size, and they draw with their own proportional glyphs (Klondike's
-  CARDSYM.FON). Font metrics, text boxes, character positions,
+  CARDSYM.FON). A logical font of the face "System VIO" is the VIO
+  font at the asked cell (lMaxBaselineExt x lAveCharWidth: IBM's image
+  font of that cell where installed, the built-in 8x16 cells, else the
+  monospaced face at that height; HyperACCESS Lite's terminal).
+  Font metrics, text boxes, character positions,
   `GpiCharStringPos` with increments, opaque and clipped rectangles.
 - `hdc | 1` used as a presentation space draws on that DC itself (as in
   IBM's GPI, which hands such handles to the engine; DC handles are

@@ -369,9 +369,20 @@ window that does not show, and a window created hidden or inside a hidden
 window starts without an update region; showing a window still repaints
 all of it.
 
-Also seen, not looked into: in the first screenshot part of the terminal
-area beside the Phonebook shows the desktop colour. Dialling (no modem in
-QEMU) was not tried.
+Most of the terminal area then stayed unpainted (the desktop showed
+through). The terminal asks GpiCreateLogFont for the image face "System
+VIO" with lMaxBaselineExt 15 and lAveCharWidth 7 (10 x 6 on screens up to
+480 pels high), takes its character cell from a GpiQueryTextBox of
+"WWWW", sizes its window to 80 of those and paints by drawing lines of
+blanks. rs2 knew the face name but drew it in the proportional system
+font: "W" is about 13 pels wide and a blank 4, so the blanks covered a
+third of the window. A "System VIO" logical font is now the VIO face at
+that cell (`fonts::vio_cell`: IBM's DSPRES.DLL image font of that size
+where installed, the built-in 8 x 16 cells for 16, else the monospaced
+face at the cell height), so text box, metrics and drawing agree and the
+main window fits the screen.
+
+Not tried: dialling (no modem in QEMU).
 
 ### IBM VisualAge Smalltalk Enterprise 6.0 (development tools)
 

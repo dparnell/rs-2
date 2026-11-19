@@ -414,6 +414,16 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *c
         if crate::fonts::face(j, px).is_some() {
             n = FACE_FONT | (j as u32) << 16 | px as u32;
         }
+    } else if !outline && trim(&face).eq_ignore_ascii_case(b"System VIO") {
+        // The VIO face: its cell (lMaxBaselineExt x lAveCharWidth), not
+        // the proportional system font. HyperACCESS Lite asks for 15 x 7,
+        // sizes its terminal window from a "WWWW" text box and draws its
+        // lines of blanks: in the system font most of the window stayed
+        // unpainted.
+        let (h, w) = (maxbe.clamp(0, 0xffff), avew.clamp(0, 0x3fff));
+        if crate::fonts::vio_cell(h, w).is_some() {
+            n = VIO_FONT | (w as u32) << 16 | h as u32;
+        }
     }
     e.gpi.lcids.retain(|(l, _)| *l != lcid);
     e.gpi.lcids.push((lcid, Lcid::Font(lf, face, n)));
@@ -603,7 +613,7 @@ pub extern "C" fn GpiQueryFontMetrics(hps: u32, len: i32, out: *mut u8) -> u32 {
     let ps = &e.ps;
     let set = ps.attrs.char_set;
     let loaded = e.gpi.lcids.iter().find_map(|(l, x)| match x {
-        Lcid::Font(_, _, n) if *l == set && *n != 0 && *n & FACE_FONT == 0 => Some(*n as usize - 1),
+        Lcid::Font(_, _, n) if *l == set && *n != 0 && *n & (FACE_FONT | VIO_FONT) == 0 => Some(*n as usize - 1),
         _ => None,
     });
     if let Some(m) = loaded.and_then(|i| loaded_metrics(i, &|x, y| ps.device_to_world_len(x, y))) {
@@ -680,12 +690,18 @@ fn loaded_font(n: u32) -> Option<&'static gpi::font::Font> {
     if n & FACE_FONT != 0 {
         return crate::fonts::face(((n >> 16) & 0x7fff) as usize, (n & 0xffff) as i32);
     }
+    if n & VIO_FONT != 0 {
+        return crate::fonts::vio_cell((n & 0xffff) as i32, ((n >> 16) & 0x3fff) as i32);
+    }
     loaded().get((n as usize).checked_sub(1)?)?.as_ref().map(|l| l.font)
 }
 
 /// A logical font's font number for a face of fonts.rs: this bit, the
 /// face index (bits 16-30) and the em in pels.
 const FACE_FONT: u32 = 0x8000_0000;
+/// A "System VIO" logical font (fonts::vio_cell): this bit, the cell
+/// width (bits 16-29) and height.
+const VIO_FONT: u32 = 0x4000_0000;
 /// The em outline faces are made at before the character box scales
 /// them (text then uses the face made at the box's size).
 fn outline_em() -> i32 {
