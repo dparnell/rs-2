@@ -18,6 +18,7 @@
 //!   for high-dpi screens (100% to 300%: PM's controls, title bars,
 //!   menus, icons, pointers and fonts bigger at the same resolution) is
 //!   saved as `SET RS2SCALE=n`; PM takes it at the next start.
+//!   Automatic (no such line) lets the resolution choose it.
 //! - **Screen, page 2 (display type)** shows what the display is: its
 //!   resolution, colours, line length and whether its driver can change
 //!   the resolution.
@@ -50,7 +51,7 @@ unsafe extern "C" {
 
 /// The UI scale changes only when PM starts again: say so.
 fn restart_note(owner: u32, pct: u32) {
-    let t = z(alloc::format!("The UI scale of {pct}% is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again).").as_bytes());
+    let t = z(alloc::format!("The UI scale {} is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again).", scale_name(pct)).as_bytes());
     // MB_OK | MB_INFORMATION | MB_MOVEABLE
     unsafe { WinMessageBox(HWND_DESKTOP, owner, t.as_ptr(), b"UI scale\0".as_ptr(), 0, 0x0000 | 0x0030 | 0x4000) };
 }
@@ -154,8 +155,9 @@ fn save(w: u32, h: u32, c256: bool) -> bool {
     write_file(&path, &with_video(&old, w, h, c256))
 }
 
-/// The UI scales offered (percent).
-const SCALES: [u32; 7] = [100, 125, 150, 175, 200, 250, 300];
+/// The UI scales offered (percent; 0 is Automatic: the resolution
+/// chooses, as no `SET RS2SCALE=` does).
+const SCALES: [u32; 8] = [0, 100, 125, 150, 175, 200, 250, 300];
 
 /// PM's UI scale now (percent): SV_CXICON is 32 at 100%.
 fn scale_now() -> u32 {
@@ -163,20 +165,45 @@ fn scale_now() -> u32 {
     if icon <= 0 { 100 } else { ((icon * 100 / 32 + 12) / 25 * 25) as u32 }
 }
 
+/// What 0 (Automatic: no `SET RS2SCALE=`) gives on this screen, as
+/// PMWIN's `scale::auto` chooses it from the resolution.
+fn effective(pct: u32) -> u32 {
+    if pct != 0 {
+        return pct;
+    }
+    let (w, h) = unsafe { (WinQuerySysValue(HWND_DESKTOP, 20), WinQuerySysValue(HWND_DESKTOP, 21)) };
+    let short = w.min(h);
+    let p = match short {
+        ..1400 => 100,
+        ..1800 => 125,
+        ..2100 => 150,
+        ..2800 => 200,
+        _ => 250,
+    };
+    let fit = (w.max(h) * 100 / 1024).min(short * 100 / 768);
+    (p.min(fit) / 25 * 25).max(100) as u32
+}
+
+/// A scale's name in the list and in notes.
+fn scale_name(pct: u32) -> alloc::string::String {
+    if pct == 0 { alloc::format!("Auto ({}%)", effective(0)) } else { alloc::format!("{pct}%") }
+}
+
 /// The value of a `SET RS2SCALE=n` line.
 fn rs2scale_value(line: &[u8]) -> Option<u32> {
     let t: Vec<u8> = line.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
     let v = t.strip_prefix(b"SETRS2SCALE=")?;
     let v = v.strip_suffix(b"%").unwrap_or(v);
-    core::str::from_utf8(v).ok()?.parse().ok()
+    // AUTO (or anything that is not a number): the resolution chooses.
+    Some(core::str::from_utf8(v).ok().and_then(|s| s.parse().ok()).unwrap_or(0))
 }
 
-/// The UI scale CONFIG.SYS asks for (100 without SET RS2SCALE=).
+/// The UI scale CONFIG.SYS asks for (0, Automatic, without SET RS2SCALE=).
 fn scale_saved() -> u32 {
-    read_file(&config_path()).unwrap_or_default().split(|&b| b == b'\n').filter_map(rs2scale_value).last().unwrap_or(100)
+    read_file(&config_path()).unwrap_or_default().split(|&b| b == b'\n').filter_map(rs2scale_value).last().unwrap_or(0)
 }
 
-/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none at 100).
+/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none for Automatic, 0).
 pub fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
     let text = match text.iter().position(|&b| b == 0x1a) {
         Some(i) => &text[..i],
@@ -191,7 +218,7 @@ pub fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
     if !out.is_empty() && !out.ends_with(b"\n") {
         out.extend_from_slice(b"\r\n");
     }
-    if pct != 100 {
+    if pct != 0 {
         out.extend_from_slice(alloc::format!("SET RS2SCALE={pct}\r\n").as_bytes());
     }
     out
@@ -228,8 +255,8 @@ fn status(h: u32, a: &str, b: &str) {
 fn colors_note() -> alloc::string::String {
     let now = display_info().is_some_and(|d| d.3);
     let (sn, ss) = (scale_now(), scale_saved());
-    if sn != ss {
-        return alloc::format!("UI scale {sn}% now: restart to apply {ss}%.");
+    if sn != effective(ss) {
+        return alloc::format!("UI scale {sn}% now: restart to apply {}.", scale_name(ss));
     }
     match (now, saved256()) {
         (true, true) => "256 colors.",
@@ -268,7 +295,7 @@ fn screen_fill(h: u32) {
     let sc = unsafe { WinWindowFromID(h, ID_SCALE as u32) };
     if unsafe { WinSendMsg(sc, LM_QUERYITEMCOUNT, 0, 0) } == 0 {
         for n in SCALES {
-            let t = z(alloc::format!("{n}%").as_bytes());
+            let t = z(scale_name(n).as_bytes());
             unsafe { WinSendMsg(sc, LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
         }
     }
@@ -298,7 +325,7 @@ fn apply(h: u32) {
             status(h, "The UI scale could not be saved", "in CONFIG.SYS.");
             return;
         }
-        if n != scale_now() {
+        if effective(n) != scale_now() {
             restart_note(h, n);
         }
     }
@@ -362,10 +389,10 @@ extern "C" fn screen_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
         WM_CONTROL if (a & 0xffff) as u16 == ID_SCALE && a >> 16 == 4 => {
             let i = unsafe { WinSendDlgItemMsg(h, ID_SCALE as u32, LM_QUERYSELECTION, LIT_NONE, 0) } as usize;
             if let Some(&n) = SCALES.get(i) {
-                if n == scale_now() {
-                    status(h, &alloc::format!("UI scale {n}%."), "");
+                if effective(n) == scale_now() {
+                    status(h, &alloc::format!("UI scale {}.", scale_name(n)), "");
                 } else {
-                    status(h, &alloc::format!("UI scale {n}%: Apply saves it."), "A restart is required to apply it.");
+                    status(h, &alloc::format!("UI scale {}: Apply saves it.", scale_name(n)), "A restart is required to apply it.");
                 }
             }
             0

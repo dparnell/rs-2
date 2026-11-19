@@ -15,11 +15,13 @@
 //! The UI scale for high-dpi screens (100% to 300%) makes PM's
 //! controls, title bars, menus, icons, pointers and fonts bigger while
 //! the resolution stays: it is saved as `SET RS2SCALE=150` in
-//! CONFIG.SYS and PM takes it at the next start.
+//! CONFIG.SYS and PM takes it at the next start. Automatic (no
+//! `SET RS2SCALE=`) lets the resolution PM starts at choose it.
 //!
 //! Usage: `DISPLAY` (the window), `DISPLAY WxH` or `DISPLAY WxHxCOLORS`
 //! (switch and save without asking, e.g. from a script; COLORS 256 or
-//! 16M), `DISPLAY SCALE=150` (save the UI scale for the next start).
+//! 16M), `DISPLAY SCALE=150` (save the UI scale for the next start;
+//! `SCALE=AUTO` for Automatic).
 
 #![no_std]
 #![no_main]
@@ -57,8 +59,9 @@ const ID_SCALELABEL: u32 = 18;
 const ID_SCALE: u32 = 19;
 const WC_COMBOBOX: &[u8] = b"#2\0";
 const CBS_DROPDOWNLIST: u32 = 0x0004;
-/// The UI scales offered (percent).
-const SCALES: [u32; 7] = [100, 125, 150, 175, 200, 250, 300];
+/// The UI scales offered (percent; 0 is Automatic: the resolution
+/// chooses, as no `SET RS2SCALE=` does).
+const SCALES: [u32; 8] = [0, 100, 125, 150, 175, 200, 250, 300];
 const TID_COUNT: u32 = 1;
 const BS_AUTORADIOBUTTON: u32 = 4;
 const BM_QUERYCHECK: u32 = 0x0124;
@@ -94,7 +97,7 @@ unsafe extern "C" {
 
 /// The UI scale changes only when PM starts again: say so.
 fn restart_note(pct: u32) {
-    let t = z(&alloc::format!("The UI scale of {pct}% is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again)."));
+    let t = z(&alloc::format!("The UI scale {} is saved in CONFIG.SYS.\n\nA restart is required to apply it: restart the computer (Shut down, then start it again).", scale_name(pct)));
     // MB_OK | MB_INFORMATION | MB_MOVEABLE
     unsafe { WinMessageBox(HWND_DESKTOP, app().frame, t.as_ptr(), b"UI scale\0".as_ptr(), 0, 0x0000 | 0x0030 | 0x4000) };
 }
@@ -200,10 +203,10 @@ fn k(n: i32) -> i32 {
     n * scale_now() as i32 / 100
 }
 
-/// The UI scale CONFIG.SYS asks for (SET RS2SCALE=, 100 without one).
+/// The UI scale CONFIG.SYS asks for (SET RS2SCALE=; 0, Automatic, without one).
 fn scale_saved() -> u32 {
     let text = read_file(&config_path()).unwrap_or_default();
-    let mut v = 100;
+    let mut v = 0;
     for l in text.split(|&b| b == b'\n') {
         if let Some(n) = rs2scale_value(l) {
             v = n;
@@ -212,15 +215,40 @@ fn scale_saved() -> u32 {
     v
 }
 
+/// What 0 (Automatic: no `SET RS2SCALE=`) gives on this screen, as
+/// PMWIN's `scale::auto` chooses it from the resolution.
+fn effective(pct: u32) -> u32 {
+    if pct != 0 {
+        return pct;
+    }
+    let (w, h) = unsafe { (WinQuerySysValue(HWND_DESKTOP, 20), WinQuerySysValue(HWND_DESKTOP, 21)) };
+    let short = w.min(h);
+    let p = match short {
+        ..1400 => 100,
+        ..1800 => 125,
+        ..2100 => 150,
+        ..2800 => 200,
+        _ => 250,
+    };
+    let fit = (w.max(h) * 100 / 1024).min(short * 100 / 768);
+    (p.min(fit) / 25 * 25).max(100) as u32
+}
+
+/// A scale's name in the list and in notes.
+fn scale_name(pct: u32) -> alloc::string::String {
+    if pct == 0 { alloc::format!("Auto ({}%)", effective(0)) } else { alloc::format!("{pct}%") }
+}
+
 /// The value of a `SET RS2SCALE=n` line.
 fn rs2scale_value(line: &[u8]) -> Option<u32> {
     let t: Vec<u8> = line.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
     let v = t.strip_prefix(b"SETRS2SCALE=")?;
     let v = v.strip_suffix(b"%").unwrap_or(v);
-    core::str::from_utf8(v).ok()?.parse().ok()
+    // AUTO (or anything that is not a number): the resolution chooses.
+    Some(core::str::from_utf8(v).ok().and_then(|s| s.parse().ok()).unwrap_or(0))
 }
 
-/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none at 100).
+/// CONFIG.SYS with its SET RS2SCALE= statement for `pct` (none for Automatic, 0).
 fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
     let text = match text.iter().position(|&b| b == 0x1a) {
         Some(i) => &text[..i],
@@ -236,7 +264,7 @@ fn with_scale(text: &[u8], pct: u32) -> Vec<u8> {
     if !out.is_empty() && !out.ends_with(b"\n") {
         out.extend_from_slice(b"\r\n");
     }
-    if pct != 100 {
+    if pct != 0 {
         out.extend_from_slice(alloc::format!("SET RS2SCALE={pct}\r\n").as_bytes());
     }
     out
@@ -249,10 +277,10 @@ fn save_scale(pct: u32) -> bool {
     write_file(&path, &with_scale(&old, pct))
 }
 
-/// "SCALE=150" (also "SCALE 150", "SCALE=150%").
+/// "SCALE=150" (also "SCALE 150", "SCALE=150%"; "SCALE=AUTO" is 0).
 fn parse_scale(s: &str) -> Option<u32> {
     let v = s.strip_prefix("SCALE")?.trim_start_matches(['=', ' ', ':']).trim().trim_end_matches('%');
-    let n: u32 = v.parse().ok()?;
+    let n: u32 = if v == "AUTO" { 0 } else { v.parse().ok()? };
     SCALES.contains(&n).then_some(n)
 }
 
@@ -411,7 +439,7 @@ fn build(h: u32) {
     // A combo box's rectangle includes its list, below the field.
     control(h, WC_COMBOBOX, "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_GROUP, ID_SCALE, 84, 24, 120, 120);
     for &n in SCALES.iter() {
-        let t = z(&alloc::format!("{n}%"));
+        let t = z(&scale_name(n));
         unsafe { WinSendMsg(item(ID_SCALE), LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
     }
     let i = SCALES.iter().position(|&n| n == app().scale_saved).unwrap_or(0);
@@ -452,10 +480,10 @@ fn colors_note() -> String {
     } else {
         alloc::format!(" {} colors now, {} after the next start.", name(a.now256), name(a.saved256))
     };
-    if a.scale_now == a.scale_saved {
-        t += &alloc::format!(" UI scale {}%.", a.scale_now);
+    if a.scale_now == effective(a.scale_saved) {
+        t += &alloc::format!(" UI scale {}.", scale_name(a.scale_saved));
     } else {
-        t += &alloc::format!(" UI scale {}% now: a restart is required to apply {}%.", a.scale_now, a.scale_saved);
+        t += &alloc::format!(" UI scale {}% now: a restart is required to apply {}.", a.scale_now, scale_name(a.scale_saved));
     }
     t
 }
@@ -496,7 +524,7 @@ fn apply() {
         }
         app().scale_saved = n;
         fill_list();
-        if n != app().scale_now {
+        if effective(n) != app().scale_now {
             restart_note(n);
         }
     }
@@ -559,8 +587,8 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             // CBN_LBSELECT: a new scale is only taken at the next start.
             if id == ID_SCALE && code == 4 && app().asking.is_none() {
                 let n = chosen_scale();
-                if n != app().scale_now {
-                    set_text(ID_STATUS, &alloc::format!("UI scale {n}%: Apply saves it. A restart is required to apply it."));
+                if effective(n) != app().scale_now {
+                    set_text(ID_STATUS, &alloc::format!("UI scale {}: Apply saves it. A restart is required to apply it.", scale_name(n)));
                 }
             }
             if id == ID_MODES && code == LN_ENTER {

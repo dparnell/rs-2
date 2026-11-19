@@ -1886,7 +1886,12 @@ there), and the labels show `~` mnemonics.
 **UI scale for high-dpi screens.** `SET RS2SCALE=150` in CONFIG.SYS
 (100 to 300, in steps of 25) makes PM's user interface that much bigger
 while the screen keeps its resolution, as OS/2's "large fonts" (120
-dpi) display drivers did, further. Display (`DISPLAY.EXE`, its UI
+dpi) display drivers did, further. Without it (or with
+`SET RS2SCALE=AUTO`, Display's "Auto" choice) the resolution PM starts
+at chooses (`scale::auto`; rs2 does not know the screen's size in
+inches): a smaller side under 1400 pels 100%, under 1800 125%, under
+2100 150% (a Surface Pro's 1824), under 2800 200% (4K), else 250%,
+never leaving less than 1024 x 768 scaled pels. Display (`DISPLAY.EXE`, its UI
 scale list; `DISPLAY SCALE=150` from a script) and the System object's
 Screen page save it; PM reads it once (`scale.rs`, the first PM
 process puts it in the shared state), so it takes effect at the next

@@ -6,8 +6,10 @@
 //! font resolution, so programs that size their fonts in points get
 //! them bigger too.
 //!
-//! The first PM process reads it into the shared state; it changes at
-//! the next start (programs keep the metrics they asked for).
+//! Without RS2SCALE (or with `SET RS2SCALE=AUTO`) the resolution PM
+//! starts at chooses it (`auto`). The first PM process reads it into the
+//! shared state; it changes at the next start (programs keep the metrics
+//! they asked for).
 
 use crate::state::st;
 
@@ -16,16 +18,39 @@ pub fn pct() -> i32 {
     st().scale
 }
 
-/// RS2SCALE from this process's environment (the first PM process).
-pub fn from_env() -> i32 {
+/// RS2SCALE from this process's environment (the first PM process), for
+/// a screen of `w` x `h`: without it (or with `AUTO`) the scale the
+/// resolution suggests.
+pub fn from_env(w: i32, h: i32) -> i32 {
     let mut v: *const u8 = core::ptr::null();
     if unsafe { os2::DosScanEnv(b"RS2SCALE\0".as_ptr(), &mut v) } != 0 || v.is_null() {
-        return 100;
+        return auto(w, h);
     }
     let t = unsafe { core::ffi::CStr::from_ptr(v as *const core::ffi::c_char) }.to_bytes().trim_ascii();
     let t = t.strip_suffix(b"%").unwrap_or(t);
-    let n: i32 = core::str::from_utf8(t).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(100);
-    ((n.clamp(100, 300) + 12) / 25) * 25
+    match core::str::from_utf8(t).ok().and_then(|s| s.trim().parse::<i32>().ok()) {
+        Some(n) => ((n.clamp(100, 300) + 12) / 25) * 25,
+        None => auto(w, h),
+    }
+}
+
+/// The scale for a screen of `w` x `h` when none is set. rs2 does not
+/// know the screen's size in inches, so the resolution decides, as a
+/// laptop's or monitor's pels per inch grow with it: 1080 or 1200 lines
+/// 100%, 1440 to 1600 125%, 1800 to 2000 (a Surface's 1824) 150%, 4K's
+/// 2160 200%, 5K and more 250%. The smaller side counts (a screen on
+/// its side), and at least 1024 x 768 scaled pels stay.
+pub fn auto(w: i32, h: i32) -> i32 {
+    let short = w.min(h);
+    let p = match short {
+        ..1400 => 100,
+        ..1800 => 125,
+        ..2100 => 150,
+        ..2800 => 200,
+        _ => 250,
+    };
+    let fit = (w.max(h) * 100 / 1024).min(short * 100 / 768);
+    (p.min(fit) / 25 * 25).max(100)
 }
 
 /// `n` pels at 96 dpi, scaled (rounded to the nearest pel).

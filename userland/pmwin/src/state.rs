@@ -348,7 +348,7 @@ pub fn init(surface: Surface, colors256: bool) {
         pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
-        scale: crate::scale::from_env(),
+        scale: crate::scale::from_env(surface.width, surface.height),
         fonts: Default::default(),
         ptr_hidden: 0,
         ptr_hardware: false,
