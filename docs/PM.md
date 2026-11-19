@@ -3210,6 +3210,70 @@ The live image's FAT partition is only as large as its files, so
 applications are installed on an installed system (or a larger USB
 stick); a full disk shows as files that "cannot be written".
 
+## Installing the Warp 4 BonusPak (BONUSPAK.EXE)
+
+`C:\OS2\BONUSPAK.EXE` (userland/bonuspak; "Install BonusPak" in the
+Programs folder) installs the parts of the OS/2 Warp 4 BonusPak from the
+Warp 4 CD (`OS2WARP4-EN.iso`). On Warp 4 the Feature Installer does it;
+rs2 has none, so BONUSPAK reads the Feature Installer's own packages and
+does what they say. `BONUSPAK X:` (or a directory holding a copy of the
+CD's `OS2IMAGE\FI`) gives the source; without it the first drive with
+`\OS2IMAGE\FI\FEATURE_\OS2BONUS\INSTDATA.INI` is used.
+
+- **The window**: the source and Refresh, the parts in groups with check
+  boxes (APPINST's tree: Productivity, Communications, Printing,
+  Multimedia, Service), a description of the part with the cursor (rs2's
+  wording and what is known of it on rs2, its size, file count and
+  directory, what it brings), the status line (parts and size chosen,
+  free space on the boot drive), a progress bar, Install and Close. A part
+  is shown as installed when its files are all there; one without files of
+  its own (JetAdmin's client, MarkVision) when its objects are
+  (`WinQueryObject`).
+- **The packages** (`userland/bonuspak/src/fi.rs`): each
+  `FEATURE_\OS2BONUS\BPxxx\INSTDATA.INI` is one block (`BPIBMWORKS=(` ...
+  `)`) of fields and nested blocks; `{Name}` in a value is a Variable (the
+  package's, the BonusPak root's, and BootDrive/TargetDrive, the boot
+  drive), `^;` and `^^` are `;` and `^`. A File names its place on the CD
+  (`OS2IMAGE\FI\` + MediaPath + MediaFileName), its target, size, date and
+  attributes; the ones with an EAMediaIndex have their EAs in the media
+  directory's `0000000n.EAS` (a 16-bit FEALIST, made a FEA2LIST), numbered
+  in order through all the packages sharing the directory, in the
+  BonusPak's feature order (`catalog::LOAD_ORDER`: JetAdmin's common files
+  take HPJET's 0-2, its server 3-6). Checked on the host against every
+  package: all 435 files are on the CD, all 98 EA files map.
+- **Installing** (a second thread): the files (with dates, attributes and
+  EAs), the UserExits programs before CallTime 9, the text file edits
+  (AsciiFile, `edit.rs`: an entry added to a list line such as `LIBPATH=`
+  or `SET HELP=` unless one containing the search text is there; a line
+  found by a pattern replaced, removed or added at the end or after
+  AddAfterLine; lines found by EditLine's pattern rewritten, `^` standing
+  for the old line), OS2.INI/OS2SYS.INI (Os2PrfIni), the classes
+  (ClassRegistration: `WinRegisterObjectClass`), the objects
+  (ObjectCreation: `WinCreateObject` where the package says, else Programs
+  or the desktop; under RS2SHELL WPProgram objects become programs in a
+  "BonusPak" group), then the CallTime 9 programs (IBM Works' FPWINI).
+  Dependencies (Condition 3) check the parts a part needs. CONFIG.SYS lines
+  that load drivers or start programs (Remote Support's DEVICE= and CALL=)
+  are shown before anything is written, to confirm. The field meanings were
+  worked out from the BonusPak's own packages (IBM's Feature Installer
+  engine is not on the CD in a form rs2's tools read).
+
+Checked in QEMU (dist system disk, Warp 4 CD on D:): IBM Works and
+HyperACCESS Lite installed; after a restart the IBM Works folder in
+Programs has all its objects and templates with FPWWPS.DLL's icons and the
+Appointments object starts the PIM; HyperACCESS Lite's object is in
+Utilities. Ask PSP, FaxWorks (its FxFile class, the FxPrint printer, its
+INI entries), MarkVision (bringing the Lexmark common files) and Remote
+Support installed without errors; `ASSOC.OS2` and CONFIG.SYS came out as
+IBM's installer writes them, and rs2 still starts with Remote Support's
+lines in CONFIG.SYS (it notes the DEVICE= lines and goes on).
+
+Not working or not looked at: HyperACCESS Lite's HALITE.EXE stops at
+start (SYS3175, HALITE object 1 + 34942); the other parts' programs have
+not been run; JetAdmin and VideoIn were not installed in QEMU; nothing is
+uninstalled (IBM's Feature Installer could remove a part); the target is
+always the boot drive.
+
 ## The help manager (HELPMGR.DLL) and VIEW.EXE
 
 HELPMGR.DLL (userland/helpmgr) is rs2's help manager, VIEW.EXE

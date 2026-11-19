@@ -61,6 +61,8 @@ const HINI_SYSTEMPROFILE: u32 = 0xffff_fffe;
 const CO_UPDATEIFEXISTS: u32 = 2;
 
 unsafe extern "C" {
+    #[link_name = "PMWP.252"]
+    fn WinQueryObject(id: *const u8) -> u32;
     #[link_name = "PMWP.200"]
     fn WinRegisterObjectClass(class: *const u8, module: *const u8) -> u32;
     #[link_name = "PMSHAPI.102"]
@@ -265,9 +267,19 @@ fn load(source: &[u8], target: u8) -> Vec<Option<Package>> {
         .collect()
 }
 
-/// Whether a package's files are all on the target drive.
+/// Whether a package's files are all on the target drive; for one
+/// without files of its own (JetAdmin's client, MarkVision: their files
+/// are the common parts'), whether its objects are there.
 fn installed(p: &Package) -> bool {
-    !p.files.is_empty() && p.files.iter().all(|f| media::exists(&f.target))
+    if !p.files.is_empty() {
+        return p.files.iter().all(|f| media::exists(&f.target));
+    }
+    let ids: Vec<&[u8]> = p.objects.iter().map(|o| setup_value(&o.setup, b"OBJECTID")).filter(|id| !id.is_empty()).collect();
+    !ids.is_empty()
+        && ids.iter().all(|id| {
+            let i = z(id);
+            unsafe { WinQueryObject(i.as_ptr()) != 0 }
+        })
 }
 
 /// Look for the CD and at what is installed already.
@@ -407,6 +419,16 @@ fn update(a: &mut App) {
             let part = &a.cats[c].apps[i];
             let mut s = part.description.to_vec();
             match a.pkgs.get(part.pkg).and_then(|p| p.as_ref()) {
+                Some(p) if p.files.is_empty() => {
+                    s.extend_from_slice(b"\nNo files of its own: its objects and settings.");
+                    for n in needs(a, part.pkg) {
+                        if let Some((nc, ni)) = find_part(a, n) {
+                            s.extend_from_slice(b" Installed with ");
+                            s.extend_from_slice(a.cats[nc].apps[ni].name);
+                            s.push(b'.');
+                        }
+                    }
+                }
                 Some(p) => {
                     s.extend_from_slice(b"\n");
                     s.extend_from_slice(&size_text(p.size()));
@@ -542,7 +564,7 @@ fn start(a: &mut App) {
             m.extend_from_slice(l);
             m.push(b'\n');
         }
-        m.extend_from_slice(b"\nIBM's device drivers do not load on rs2. Install anyway?");
+        m.extend_from_slice(b"\nrs2 does not load IBM's device drivers (it starts without them). Install anyway?");
         if confirm(&m) != MBID_OK {
             return;
         }

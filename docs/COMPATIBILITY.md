@@ -251,7 +251,13 @@ system disk with only rs2's files.
 
 **Installing it.** On Warp 4 the Feature Installer installs it from
 `OS2IMAGE\FI\FEATURE_\OS2BONUS\BPWORKS\INSTDATA.INI`; rs2 has no Feature
-Installer. `tools/scripts/fi_stage.py` copies the package's files where
+Installer. On rs2, *Install BonusPak* in the Programs folder
+(`C:\OS2\BONUSPAK.EXE`, see [PM.md](PM.md#installing-the-warp-4-bonuspak-bonuspakexe))
+reads that package and installs IBM Works from the CD: the files with their
+EAs, the CONFIG.SYS lines, the classes, the IBM Works folder (in Programs:
+rs2's desktop has no `<WP_APPSFOLDER>`) and FPWINI; a restart, and the
+Appointments object starts the PIM (checked in QEMU with the Warp 4 CD on
+D:). Earlier, by hand: `tools/scripts/fi_stage.py` copies the package's files where
 its INSTDATA.INI puts them (`C:\BONUSPAK\IBMWORKS` with `GRAPHICS` and
 `SAMPLES`; FPWWPS.DLL, FPWREC.DLL, IEN30PDE.DLL and IEN30PWR.DLL in
 `C:\OS2\DLL`) with the CD's extended attributes as EAUTIL hold files,

@@ -54,7 +54,7 @@ pub const GROUPS: &[Group] = &[
             Part {
                 id: b"BPHAL",
                 name: b"HyperACCESS Lite",
-                description: b"A terminal program for modems and bulletin boards, with settings for many online services. Its object goes in Utilities. Not yet tried on rs2.",
+                description: b"A terminal program for modems and bulletin boards, with settings for many online services. Its object goes in Utilities. On rs2 it installs, but HALITE.EXE stops with an access violation as it starts.",
             },
             Part {
                 id: b"BPCIM",
@@ -116,7 +116,7 @@ pub const GROUPS: &[Group] = &[
         parts: &[Part {
             id: b"BPRS2",
             name: b"Remote Support",
-            description: b"Lets a support person see and work this computer from another one. It adds two device drivers and a CALL= line to CONFIG.SYS, which rs2 cannot load: install it only to look at its files.",
+            description: b"Lets a support person see and work this computer from another one. It adds two IBM device drivers and a CALL= line to CONFIG.SYS: rs2 does not load IBM's device drivers (it starts without them), so it cannot work here.",
         }],
     },
 ];
