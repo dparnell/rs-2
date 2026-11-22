@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <signal.h>
 
-int main(int argc, char **argv, char **envp);
 
 /* For programs that want them: the module, the raw blocks. */
 HMODULE _rs2_hmod;
@@ -58,15 +57,18 @@ static int split(const char *s, char ***out) {
     return n;
 }
 
+/* What a program's _start (crt1.c) hands over: its main and its own
+ * constructor and destructor lists. The library may be in a DLL. */
+static void (**fini_start)(void), (**fini_end)(void);
+
 static void run_fini(void) {
-    extern void (*__fini_array_start[])(void), (*__fini_array_end[])(void);
-    for (void (**f)(void) = __fini_array_end; f > __fini_array_start;)
+    for (void (**f)(void) = fini_end; f > fini_start;)
         (*--f)();
 }
 
-unsigned long _start(ULONG hmod, ULONG reserved, PCSZ env, PCSZ cmdline) {
-    (void)reserved;
-    _rs2_hmod = hmod;
+void __rs2_start(const struct _rs2_startup *st) {
+    PCSZ env = st->env, cmdline = st->cmdline;
+    _rs2_hmod = st->hmod;
     _rs2_environment = env;
     _rs2_cmdline = cmdline;
     DosQuerySysInfo(QSV_MS_COUNT, QSV_MS_COUNT, &_rs2_start_ms, sizeof _rs2_start_ms);
@@ -99,10 +101,10 @@ unsigned long _start(ULONG hmod, ULONG reserved, PCSZ env, PCSZ cmdline) {
     reg.handler = (void *)_rs2_xcpt_handler;
     DosSetExceptionHandler((PEXCEPTIONREGISTRATIONRECORD)&reg);
     /* Constructors now, destructors at exit. */
-    extern void (*__init_array_start[])(void), (*__init_array_end[])(void);
-    for (void (**f)(void) = __init_array_start; f < __init_array_end; f++)
+    for (void (**f)(void) = st->init_start; f < st->init_end; f++)
         (*f)();
+    fini_start = st->fini_start;
+    fini_end = st->fini_end;
     atexit(run_fini);
-    exit(main(argc + 1, argv, environ));
+    exit(st->main(argc + 1, argv, environ));
 }
-

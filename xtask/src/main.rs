@@ -1132,6 +1132,9 @@ const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
     (&["c/samples/hello.c"], &[], "RS2\\CHELLO64.EXE"),
     (&["c/samples/pmhello.c"], &["--pm", "--rc", "userland64/c/samples/pmhello.rc"], "RS2\\CPMHELLO.EXE"),
     (&["c/samples/clibtest.c"], &[], "RS2\\CLIBTEST.EXE"),
+    // The same, with the C library linked in (cc64.sh --static).
+    (&["c/samples/clibtest.c"], &["--static"], "RS2\\CLIBTSTS.EXE"),
+    (&["c/samples/clibtdll.c"], &["--dll"], "RS2\\DLL64\\CLIBTDLL.DLL"),
 ];
 
 /// Build the userland64 workspace (x86-64 ELF shared objects).
@@ -1156,6 +1159,15 @@ fn build_userland64() -> Option<image::FileList> {
         std::fs::copy(&so, &out).ok()?;
         files.push((out, dest.to_string()));
     }
+    // The C library (docs/LIBC64.md): cc64.sh builds it, LIBC64.DLL goes
+    // with the 64-bit DLLs.
+    if !Command::new(dir.join("c/cc64.sh")).current_dir(root()).arg("--libc").status().ok()?.success() {
+        eprintln!("cc64.sh failed to build the C library");
+        return None;
+    }
+    let libc_dll = out_dir.join("LIBC64.DLL");
+    std::fs::copy(root().join("target/libc64/LIBC64.DLL"), &libc_dll).ok()?;
+    files.push((libc_dll, "RS2\\DLL64\\LIBC64.DLL".to_string()));
     // The C samples (userland64/c/cc64.sh: clang and rust-lld).
     for (srcs, flags, dest) in C_PROGRAMS64 {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());

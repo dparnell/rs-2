@@ -65,7 +65,15 @@ HIDDEN int _rs2_fdflag(int fd);
 HIDDEN long _rs2_rawread(int fd, void *buf, size_t n);
 HIDDEN long _rs2_rawwrite(int fd, const void *buf, size_t n);
 
-/* Start-up state (start.c). */
+/* Start-up (start.c, crt1.c). */
+struct _rs2_startup {
+    ULONG hmod;
+    PCSZ env, cmdline;
+    int (*main)(int, char **, char **);
+    void (**init_start)(void), (**init_end)(void);
+    void (**fini_start)(void), (**fini_end)(void);
+};
+__attribute__((noreturn)) void __rs2_start(const struct _rs2_startup *);
 HIDDEN extern ULONG _rs2_start_ms;
 HIDDEN extern char **_rs2_argv;
 HIDDEN extern int _rs2_environ_owned;

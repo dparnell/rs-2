@@ -3,16 +3,55 @@
 64-bit rs2 programs written in C get a C library ([API64.md](API64.md),
 "Building 64-bit programs"): userland64/libc, written for rs2 on top of
 the OS/2 API, with the standard headers in userland64/include next to the
-OS/2 ones. `userland64/c/cc64.sh` builds it into `target/libc64/libc.a`
-(again whenever a source or header is newer than the archive) and links
-every program and DLL against it.
+OS/2 ones. It comes as a DLL, `C:\RS2\DLL64\LIBC64.DLL`, which programs
+and DLLs use by default, and as a static library for `--static`.
 
 ```text
-userland64/c/cc64.sh -o PROG.EXE prog.c util.c       a program
+userland64/c/cc64.sh -o PROG.EXE prog.c util.c       a program (LIBC64.DLL)
+userland64/c/cc64.sh -o PROG.EXE --static prog.c     the library linked in
+userland64/c/cc64.sh -o MY.DLL --dll my.c            a DLL (LIBC64.DLL)
 userland64/c/cc64.sh -c prog.c -o prog.o              compile only
 userland64/c/cc64.sh -o PROG.EXE prog.o libfoo.a      link objects
 userland64/c/cc64.sh --libc                           just the library
 ```
+
+`cc64.sh` builds these into `target/libc64` (again whenever a source,
+a header or the script is newer than them):
+
+| File | What |
+| --- | --- |
+| `LIBC64.DLL` | the library as a DLL (xtask installs it in `C:\RS2\DLL64`); it exports the library's 410 functions and its data by name |
+| `libc64.a` | its import library: one member per function, a stub `name: jmp *LIBC64.name@GOTPCREL(%rip)`, so a program imports only what it calls |
+| `crt1.o` | a program's own start-up code (`_start`), linked into each program that uses the DLL |
+| `libc.a` | the library to link in (`--static`), crt1.o included |
+
+## The DLL
+
+- **One library per process.** A program and the C DLLs it loads share
+  LIBC64.DLL, and so they share its state: one heap (memory malloc'd in a
+  DLL may be freed by the program), one set of streams and buffers
+  (`stdout` is one buffer), one environment, one `atexit` list, and one
+  `errno` per thread. With `--static`, each module has its own copy of
+  all of these.
+- **Per process.** As with any 64-bit DLL, LIBC64.DLL's code is shared
+  and its writable data is each process's own copy (the loader keeps the
+  relocated data and copies it into each process that loads the DLL).
+  It is linked at 0x18100000, which the loader uses if that range is
+  free.
+- **Start-up.** `crt1.o`'s `_start` passes the program's module handle,
+  environment, command line, `main` and its own constructor and
+  destructor lists (`__init_array_start` and the rest) to `__rs2_start`
+  in the library. That function does everything else, as it does when
+  linked statically. A DLL has no start-up code of its own; LIBC64.DLL's
+  state starts as its data was initialised.
+- **Functions** are imported through the stubs. A stub is a single jump,
+  so even `setjmp` works through one. **Data** is imported directly: with
+  `-D_RS2_LIBC_DLL`, which `cc64.sh` passes unless given `--static`, the
+  headers give the library's variables asm labels (`stdin`, `stdout`,
+  `stderr`, `environ`, `optarg`, `optind`, `opterr`, `optopt`,
+  `timezone`, `daylight`, `tzname`, `signgam`). The program then refers to
+  `LIBC64.stdout`, and the loader resolves that to the DLL's variable. So
+  an object compiled for one way must not be linked the other way.
 
 Code is compiled as hosted C (`-std=gnu11`) with `-nostdinc`, so only
 rs2's headers are seen, never the host's. The library itself is built
@@ -134,25 +173,34 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
 - wide characters beyond `mbtowc`/`wctomb` in the "C" locale (wchar.h,
   wctype.h); other locales.
 - threads.h and C11 atomics headers (clang's `__atomic` builtins work).
-- a shared C library DLL: each program and DLL links its own copy. A DLL
-  has no start-up, so it has no `environ` (getenv asks DosScanEnv) and no
-  constructors, and it has its own heap.
+- constructors in DLLs (a C DLL has no start-up code; its
+  `__attribute__((constructor))` functions do not run). With `--static`,
+  a DLL also has no `environ` (getenv asks DosScanEnv).
+- versioning of LIBC64.DLL's exports: programs import by name, so adding
+  functions is safe, but changing a structure's layout (`FILE` is opaque;
+  `struct stat`, `struct tm` and `jmp_buf` are not) means rebuilding
+  programs.
 - `fork`, `exec*`, `select`, sockets, `mmap`, `uid`/`gid` (there are
   none on OS/2).
 - `long double` functions in full precision.
 
 ## Tests
 
-`C:\RS2\CLIBTEST.EXE` (userland64/c/samples/clibtest.c) makes 152 checks:
+`C:\RS2\CLIBTEST.EXE` (userland64/c/samples/clibtest.c, with LIBC64.DLL)
+and `C:\RS2\CLIBTSTS.EXE` (the same program, `--static`) make 152 checks:
 strings, conversions, printf (including exact float output), scanf,
 strtod round trips, the heap under a random load and in large blocks,
 sorting, math against known values, setjmp, SIGSEGV, SIGFPE and SIGINT
 handlers that longjmp or return, time zones and strftime, text and
 binary streams, handles, directories, the environment, threads with their
 own errno, `spawnv` with quoted arguments and an inherited variable,
-and `popen`. It prints one line per check and
-`clibtest: N checks, M failures`, and exits with M:
+and `popen`. With the DLL there are four more: CLIBTEST loads
+`C:\RS2\DLL64\CLIBTDLL.DLL` (clibtdll.c, a C DLL), frees a string the
+DLL malloc'd, has the DLL print into the same `stdout` buffer, and sees
+the `errno` the DLL set. It prints one line per check and
+`clibtest: N checks, M failures` (156 and 152), and exits with M:
 
 ```text
 cargo xtask run --headless --timeout 120 --init "RS2\CLIBTEST.EXE"
+cargo xtask run --headless --timeout 120 --init "RS2\CLIBTSTS.EXE"
 ```

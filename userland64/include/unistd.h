@@ -34,8 +34,11 @@ int usleep(unsigned long);
 pid_t getpid(void);
 pid_t getppid(void);
 _RS2_NORETURN void _exit(int);
-extern char *optarg;
-extern int optind, opterr, optopt;
+extern char *optarg _RS2_DATA(optarg);
+extern int optind _RS2_DATA(optind);
+extern int opterr _RS2_DATA(opterr);
+extern int optopt _RS2_DATA(optopt);
+extern char **environ _RS2_DATA(environ);
 int getopt(int, char *const[], const char *);
 _RS2_END
 #endif
