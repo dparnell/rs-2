@@ -31,9 +31,9 @@
 //!
 //! Handlers are `ULONG handler(PEXCEPTIONREPORTRECORD,
 //! PEXCEPTIONREGISTRATIONRECORD, PCONTEXTRECORD, PVOID)` (System V). The end
-//! of the chain is -1 (all 64 bits). Phase 1 of the 64-bit API: the
-//! records and the stacks are below 4 GB, so the dispatch state keeps
-//! 32-bit addresses (exceptions::Dispatch).
+//! of the chain is -1 (all 64 bits). Registration records and reports may
+//! be anywhere in the 64-bit address space (above 4 GB too); the records
+//! the kernel builds go on the faulting stack.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -71,23 +71,23 @@ mod ctx {
 /// point state yet).
 const CONTEXT_FULL: u32 = 7;
 
-fn rd64(sp: &mut AddressSpace, a: u32) -> Option<u64> {
+fn rd64(sp: &mut AddressSpace, a: u64) -> Option<u64> {
     let mut b = [0u8; 8];
-    sp.read_bytes(a, &mut b).then(|| u64::from_le_bytes(b))
+    sp.read_bytes64(a, &mut b).then(|| u64::from_le_bytes(b))
 }
 
-fn wr64(sp: &mut AddressSpace, a: u32, v: u64) -> bool {
-    sp.poke_bytes(a, &v.to_le_bytes())
+fn wr64(sp: &mut AddressSpace, a: u64, v: u64) -> bool {
+    sp.write_bytes64(a, &v.to_le_bytes())
 }
 
 /// The 64-bit TIB's `pexchain` slot of a thread.
-fn head_slot(t: &Thread) -> u32 {
-    info64_base() + TIB64_0 + t.tid * info::TIB_STRIDE
+fn head_slot(t: &Thread) -> u64 {
+    (info64_base() + TIB64_0 + t.tid * info::TIB_STRIDE) as u64
 }
 
 /// A record address from the chain: None at its end (-1, or 0).
-fn link(v: u64) -> Option<u32> {
-    if v == END || v == 0 || v == 0xffff_ffff || v > u32::MAX as u64 { None } else { Some(v as u32) }
+fn link(v: u64) -> Option<u64> {
+    if v == END || v == 0 || v == 0xffff_ffff { None } else { Some(v) }
 }
 
 /// Is the trapping code 64-bit?
@@ -117,7 +117,7 @@ fn regs(f: &TrapFrame) -> [u64; 16] {
 }
 
 /// Fill a context record from a trap frame.
-pub fn save_context(sp: &mut AddressSpace, at: u32, f: &TrapFrame) {
+pub fn save_context(sp: &mut AddressSpace, at: u64, f: &TrapFrame) {
     let mut b = alloc::vec![0u8; CONTEXT_SIZE as usize];
     let put32 = |b: &mut Vec<u8>, o: u32, v: u32| b[o as usize..o as usize + 4].copy_from_slice(&v.to_le_bytes());
     let put64 = |b: &mut Vec<u8>, o: u32, v: u64| b[o as usize..o as usize + 8].copy_from_slice(&v.to_le_bytes());
@@ -130,13 +130,13 @@ pub fn save_context(sp: &mut AddressSpace, at: u32, f: &TrapFrame) {
     for (o, v) in [(ctx::CS, f.cs), (ctx::SS, f.ss), (ctx::DS, f.ds), (ctx::ES, f.es), (ctx::FS, f.fs), (ctx::GS, f.gs)] {
         put32(&mut b, o, v as u32);
     }
-    sp.poke_bytes(at, &b);
+    sp.write_bytes64(at, &b);
 }
 
 /// Load a (possibly handler-modified) context record into a trap frame.
-fn load_context(sp: &mut AddressSpace, at: u32, f: &mut TrapFrame) {
+fn load_context(sp: &mut AddressSpace, at: u64, f: &mut TrapFrame) {
     let mut b = alloc::vec![0u8; ctx::GS as usize + 4];
-    if !sp.read_bytes(at, &mut b) {
+    if !sp.read_bytes64(at, &mut b) {
         return;
     }
     let g64 = |o: u32| u64::from_le_bytes(b[o as usize..o as usize + 8].try_into().unwrap());
@@ -158,10 +158,10 @@ fn load_context(sp: &mut AddressSpace, at: u32, f: &mut TrapFrame) {
 
 /// Build the report and context records below `stack` (past the red
 /// zone); returns their addresses.
-fn build_records(sp: &mut AddressSpace, f: &TrapFrame, stack: u32, code: u32, flags: u32, info: &[u64], address: u64) -> Option<(u32, u32)> {
+fn build_records(sp: &mut AddressSpace, f: &TrapFrame, stack: u64, code: u32, flags: u32, info: &[u64], address: u64) -> Option<(u64, u64)> {
     let base = stack.wrapping_sub(256) & !15;
-    let context = base.wrapping_sub(CONTEXT_SIZE) & !15;
-    let report = context.wrapping_sub(REPORT_SIZE) & !15;
+    let context = base.wrapping_sub(CONTEXT_SIZE as u64) & !15;
+    let report = context.wrapping_sub(REPORT_SIZE as u64) & !15;
     let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
     r[0..4].copy_from_slice(&code.to_le_bytes());
     r[4..8].copy_from_slice(&flags.to_le_bytes());
@@ -170,7 +170,7 @@ fn build_records(sp: &mut AddressSpace, f: &TrapFrame, stack: u32, code: u32, fl
     for (i, v) in info.iter().take(4).enumerate() {
         r[32 + i * 8..40 + i * 8].copy_from_slice(&v.to_le_bytes());
     }
-    if !sp.poke_bytes(report, &r) {
+    if !sp.write_bytes64(report, &r) {
         return None;
     }
     save_context(sp, context, f);
@@ -186,10 +186,10 @@ fn call_handler(sp: &mut AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
     wr64(sp, rsp, ret);
     *f = TrapFrame {
         rip: handler,
-        rsp: rsp as u64,
-        rdi: d.report as u64,
-        rsi: d.reg as u64,
-        rdx: d.context as u64,
+        rsp,
+        rdi: d.report,
+        rsi: d.reg,
+        rdx: d.context,
         rcx: 0,
         cs: USER_CS64 as u64,
         ss: USER_DS as u64,
@@ -218,7 +218,7 @@ pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, flags: u32, info: &[u64], address: u64) -> bool {
     let mut sp = p.space.lock();
     let Some(head) = rd64(&mut sp, head_slot(t)).and_then(link) else { return false };
-    let stack = f.rsp as u32;
+    let stack = f.rsp;
     // Dispatches whose records are above the stack pointer now were left
     // by a handler that jumped out instead of returning.
     t.xcpt.lock().retain(|d| d.stack > stack);
@@ -282,11 +282,11 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
     let Some(head) = rd64(&mut sp, head_slot(t)).and_then(link) else { return false };
     let code = if t.sync_exit.load(Ordering::Relaxed) { xcpt::PROCESS_TERMINATE } else { xcpt::ASYNC_PROCESS_TERMINATE };
     let Some((report, context)) =
-        build_records(&mut sp, f, (f.rsp as u32).wrapping_sub(256), code, xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND, &[], f.rip)
+        build_records(&mut sp, f, f.rsp.wrapping_sub(256), code, xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND, &[], f.rip)
     else {
         return false;
     };
-    let u = Unwind { target: xcpt::END_OF_CHAIN, target_ip: 0, resume: *f, exit: true };
+    let u = Unwind { target: END, target_ip: 0, resume: *f, exit: true };
     let d = Dispatch { report, context, reg: head, unwind: Some(u), code, stack: report.wrapping_sub(16), is64: true };
     call_handler(&mut sp, f, &d);
     drop(sp);
@@ -297,27 +297,27 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
 
 /// DosSetExceptionHandler(pERegRec)
 pub fn dos_set_exception_handler(c: &mut Ctx) -> u32 {
-    let rec = c.ptr(0);
+    let rec = c.uptr(0);
     let slot = head_slot(&c.thread);
     let mut sp = c.space();
     let Some(prev) = rd64(&mut sp, slot) else { return err::INVALID_ADDRESS };
     if rec == 0 || !wr64(&mut sp, rec, if prev == 0 { END } else { prev }) {
         return err::INVALID_ADDRESS;
     }
-    wr64(&mut sp, slot, rec as u64);
+    wr64(&mut sp, slot, rec);
     0
 }
 
 /// DosUnsetExceptionHandler(pERegRec): takes it off the chain wherever it is.
 pub fn dos_unset_exception_handler(c: &mut Ctx) -> u32 {
-    let rec = c.ptr(0);
+    let rec = c.uptr(0);
     let slot = head_slot(&c.thread);
     let mut sp = c.space();
     let Some(next) = rd64(&mut sp, rec) else { return err::INVALID_ADDRESS };
     let mut at = slot;
     for _ in 0..4096 {
         let Some(v) = rd64(&mut sp, at) else { break };
-        if v == rec as u64 {
+        if v == rec {
             wr64(&mut sp, at, next);
             return 0;
         }
@@ -331,9 +331,9 @@ pub fn dos_unset_exception_handler(c: &mut Ctx) -> u32 {
 
 /// DosRaiseException(pReport)
 pub fn dos_raise_exception(c: &mut Ctx) -> u32 {
-    let p = c.ptr(0);
+    let p = c.uptr(0);
     let mut raw = [0u8; REPORT_SIZE as usize];
-    if !c.read(p, &mut raw) {
+    if !c.uread(p, &mut raw) {
         return err::INVALID_ADDRESS;
     }
     let g32 = |o: usize| u32::from_le_bytes(raw[o..o + 4].try_into().unwrap());
@@ -343,7 +343,7 @@ pub fn dos_raise_exception(c: &mut Ctx) -> u32 {
     let info: Vec<u64> = (0..g32(24).min(4) as usize).map(|i| g64(32 + i * 8)).collect();
     // As if DosRaiseException returned 0.
     let mut b = [0u8; 8];
-    c.read(c.f.rsp as u32, &mut b);
+    c.uread(c.f.rsp, &mut b);
     let ret = u64::from_le_bytes(b);
     c.f.rip = ret;
     c.f.rsp += 8;
@@ -360,40 +360,40 @@ pub fn dos_raise_exception(c: &mut Ctx) -> u32 {
 /// handlers above `target` with EH_UNWINDING, then goes on at pTargetIP
 /// (or returns, when it is 0) with the caller's stack.
 pub fn dos_unwind_exception(c: &mut Ctx) -> u32 {
-    let (target, target_ip, preport) = (c.arg64(0), c.arg64(1), c.ptr(2));
-    let target = link(target).unwrap_or(xcpt::END_OF_CHAIN);
+    let (target, target_ip, preport) = (c.arg64(0), c.arg64(1), c.uptr(2));
+    let target = link(target).unwrap_or(END);
     let t = c.thread.clone();
     let mut resume = *c.f;
     {
         let mut b = [0u8; 8];
-        c.read(c.f.rsp as u32, &mut b);
+        c.uread(c.f.rsp, &mut b);
         resume.rip = u64::from_le_bytes(b);
         resume.rsp = c.f.rsp + 8;
     }
     let proc = c.process.clone();
     let mut sp = proc.space.lock();
-    let u = Unwind { target, target_ip: target_ip as u32, resume, exit: false };
+    let u = Unwind { target, target_ip, resume, exit: false };
     let head = rd64(&mut sp, head_slot(&t)).and_then(link);
     let Some(head) = head.filter(|&h| h != target) else {
         finish_unwind(c.f, &u, &t);
         c.no_return = true;
         return 0;
     };
-    let below = (c.f.rsp as u32).wrapping_sub(512) & !15;
-    let own = below.wrapping_sub(REPORT_SIZE) & !15;
+    let below = c.f.rsp.wrapping_sub(512) & !15;
+    let own = below.wrapping_sub(REPORT_SIZE as u64) & !15;
     let report = if preport != 0 {
         preport
     } else {
         let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
         r[0..4].copy_from_slice(&xcpt::UNWIND.to_le_bytes());
-        sp.poke_bytes(own, &r);
+        sp.write_bytes64(own, &r);
         own
     };
     let mut fl = [0u8; 4];
-    sp.read_bytes(report + 4, &mut fl);
-    let unwinding = if target == xcpt::END_OF_CHAIN { xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND } else { xcpt::EH_UNWINDING };
-    sp.poke_bytes(report + 4, &(u32::from_le_bytes(fl) | unwinding).to_le_bytes());
-    let context = own.wrapping_sub(CONTEXT_SIZE) & !15;
+    sp.read_bytes64(report + 4, &mut fl);
+    let unwinding = if target == END { xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND } else { xcpt::EH_UNWINDING };
+    sp.write_bytes64(report + 4, &(u32::from_le_bytes(fl) | unwinding).to_le_bytes());
+    let context = own.wrapping_sub(CONTEXT_SIZE as u64) & !15;
     save_context(&mut sp, context, c.f);
     let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16), is64: true };
     call_handler(&mut sp, c.f, &d);

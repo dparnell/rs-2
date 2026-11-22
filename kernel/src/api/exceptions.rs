@@ -86,10 +86,12 @@ mod ctx {
 /// What the kernel is doing for a thread's exception.
 #[derive(Clone, Copy, Debug)]
 pub struct Dispatch {
-    pub report: u32,
-    pub context: u32,
+    // Addresses are 64 bits for 64-bit code's records (exceptions64.rs);
+    // 32-bit code's fit in the low half.
+    pub report: u64,
+    pub context: u64,
     /// Registration record whose handler is running.
-    pub reg: u32,
+    pub reg: u64,
     pub unwind: Option<Unwind>,
     /// Exception code (for the default action).
     pub code: u32,
@@ -99,18 +101,19 @@ pub struct Dispatch {
     /// the caller's frame: Open Watcom's C++ throw passes its own, and
     /// the records and handler frames once went right below it, over
     /// the throwing function's live stack).
-    pub stack: u32,
+    pub stack: u64,
     /// 64-bit records and handler (exceptions64.rs).
     pub is64: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Unwind {
-    /// Stop when reaching this record (END_OF_CHAIN = unwind everything).
-    pub target: u32,
-    /// Where to continue after the unwind; None = return to the caller of
+    /// Stop when reaching this record (END_OF_CHAIN = unwind everything;
+    /// u64::MAX for 64-bit code).
+    pub target: u64,
+    /// Where to continue after the unwind; 0 = return to the caller of
     /// DosUnwindException as if it returned.
-    pub target_ip: u32,
+    pub target_ip: u64,
     /// Saved caller state for the final transfer.
     pub resume: TrapFrame,
     /// Termination unwind: the thread ends when it is done.
@@ -257,11 +260,11 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     // left its dispatch: one whose records are below the stack pointer
     // now is over.
     let esp = stack;
-    t.xcpt.lock().retain(|d| d.stack > esp);
+    t.xcpt.lock().retain(|d| d.stack > esp as u64);
     let nested = !t.xcpt.lock().is_empty();
     let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
     let Some((report, context)) = build_records(&mut sp, f, stack, code, flags, info, address) else { return false };
-    let d = Dispatch { report, context, reg: head, unwind: None, code, stack: report.wrapping_sub(16), is64: false };
+    let d = Dispatch { report: report as u64, context: context as u64, reg: head as u64, unwind: None, code, stack: report.wrapping_sub(16) as u64, is64: false };
     call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -302,11 +305,12 @@ pub fn records(p: &Arc<Process>, t: &Arc<Thread>, f: &TrapFrame, code: u32, info
 
 /// Set up the frame to call the handler of `d.reg`.
 fn call_handler(sp: &mut vm::AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
-    let handler = rd(sp, d.reg + 4).unwrap_or(0);
+    let (report, reg, context) = (d.report as u32, d.reg as u32, d.context as u32);
+    let handler = rd(sp, reg + 4).unwrap_or(0);
     let ret = gate::slot_address(0, HANDLER_RETURN_ORDINAL);
-    let esp = d.stack.wrapping_sub(20) & !3;
+    let esp = (d.stack as u32).wrapping_sub(20) & !3;
     // [esp] = return, then (pReport, pRegistration, pContext, pDispatcherContext).
-    let args = [ret, d.report, d.reg, d.context, 0];
+    let args = [ret, report, reg, context, 0];
     let mut b = Vec::new();
     for a in args {
         b.extend_from_slice(&a.to_le_bytes());
@@ -339,33 +343,33 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let mut sp = p.space.lock();
     if let Some(u) = d.unwind {
         // Unwinding: move to the previous record regardless of the result.
-        let prev = rd(&mut sp, d.reg).unwrap_or(xcpt::END_OF_CHAIN);
+        let prev = rd(&mut sp, d.reg as u32).unwrap_or(xcpt::END_OF_CHAIN);
         wr(&mut sp, t.tib(), prev);
-        if prev == u.target || prev == xcpt::END_OF_CHAIN || prev == 0 {
+        if prev as u64 == u.target || prev == xcpt::END_OF_CHAIN || prev == 0 {
             finish_unwind(f, &u, t);
             return;
         }
-        d.reg = prev;
+        d.reg = prev as u64;
         call_handler(&mut sp, f, &d);
         drop(sp);
         t.xcpt.lock().push(d);
         return;
     }
     if result == xcpt::CONTINUE_EXECUTION {
-        let flags = rd(&mut sp, d.report + 4).unwrap_or(0);
+        let flags = rd(&mut sp, d.report as u32 + 4).unwrap_or(0);
         if flags & xcpt::EH_NONCONTINUABLE == 0 {
-            load_context(&mut sp, d.context, f);
+            load_context(&mut sp, d.context as u32, f);
             return;
         }
     }
     // Continue the search.
-    let prev = rd(&mut sp, d.reg).unwrap_or(xcpt::END_OF_CHAIN);
+    let prev = rd(&mut sp, d.reg as u32).unwrap_or(xcpt::END_OF_CHAIN);
     if prev == xcpt::END_OF_CHAIN || prev == 0 {
         // Unhandled: restore the faulting state for the report.
-        load_context(&mut sp, d.context, f);
+        load_context(&mut sp, d.context as u32, f);
         // A guard page nobody took: the default (the stack grows) and on.
         if d.code == xcpt::GUARD_PAGE_VIOLATION {
-            let (addr, write) = (rd(&mut sp, d.report + 24).unwrap_or(0), rd(&mut sp, d.report + 20).unwrap_or(0) == 2);
+            let (addr, write) = (rd(&mut sp, d.report as u32 + 24).unwrap_or(0), rd(&mut sp, d.report as u32 + 20).unwrap_or(0) == 2);
             drop(sp);
             if crate::task::guard_default(p, addr, write) {
                 return;
@@ -377,7 +381,7 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         default_action(f, p, t, d.code);
         return;
     }
-    d.reg = prev;
+    d.reg = prev as u64;
     call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -389,11 +393,11 @@ pub(super) fn finish_unwind(f: &mut TrapFrame, u: &Unwind, t: &Arc<Thread>) {
     }
     // Dispatches of exceptions raised further down the stack than where
     // execution resumes are over (their handlers will never return).
-    let resume_sp = u.resume.rsp as u32;
+    let resume_sp = u.resume.rsp;
     t.xcpt.lock().retain(|d| d.stack > resume_sp);
     *f = u.resume;
     if u.target_ip != 0 {
-        f.rip = u.target_ip as u64;
+        f.rip = u.target_ip;
     }
     f.rax = 0;
 }
@@ -433,7 +437,7 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
         }
         crate::trace!("    unwind to {target:x} at {target_ip:x}, chain {chain:x?}, callers {callers:x?}");
     }
-    let u = Unwind { target, target_ip, resume, exit: false };
+    let u = Unwind { target: target as u64, target_ip: target_ip as u64, resume, exit: false };
     if head == target || head == xcpt::END_OF_CHAIN || head == 0 {
         finish_unwind(c.f, &u, &t);
         c.no_return = true;
@@ -457,7 +461,7 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     wr(&mut sp, report + 4, flags | unwind_flag);
     let context = own.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, c.f);
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16), is64: false };
+    let d = Dispatch { report: report as u64, context: context as u64, reg: head as u64, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16) as u64, is64: false };
     call_handler(&mut sp, c.f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -530,8 +534,8 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
     }
     let context = report.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, f);
-    let u = Unwind { target: xcpt::END_OF_CHAIN, target_ip: 0, resume: *f, exit: true };
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code, stack: context.wrapping_sub(16), is64: false };
+    let u = Unwind { target: xcpt::END_OF_CHAIN as u64, target_ip: 0, resume: *f, exit: true };
+    let d = Dispatch { report: report as u64, context: context as u64, reg: head as u64, unwind: Some(u), code, stack: context.wrapping_sub(16) as u64, is64: false };
     call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);

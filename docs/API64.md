@@ -78,15 +78,16 @@ programs may call:
 
 - calls run unchanged (files, directories, named pipes, memory,
   semaphores, threads, processes, modules, time, NLS, queues);
-- calls that return a pointer through an argument (DosAllocMem,
-  DosAllocSharedMem, DosGetNamedSharedMem, DosScanEnv, DosQueryProcAddr,
-  DosGetResource, DosSubAllocMem, DosAllocThreadLocalMemory,
-  DosReadQueue, DosPeekQueue): the 32-bit code writes the low half, the
-  dispatcher clears the high half;
+- calls that return a pointer through an argument (DosAllocSharedMem,
+  DosGetNamedSharedMem, DosScanEnv, DosQueryProcAddr, DosGetResource,
+  DosSubAllocMem, DosAllocThreadLocalMemory, DosReadQueue, DosPeekQueue):
+  the 32-bit code writes the low half, the dispatcher clears the high
+  half (what they return is below 4 GB);
 - calls with their own 64-bit versions: DosCreateThread (a 64-bit
   parameter, a long-mode thread function returning into the thread exit
   stub), DosGetInfoBlocks (64-bit TIB and PIB), DosLoadModule (64-bit
-  DLLs first) and the exception calls (see "Exceptions");
+  DLLs first), DosAllocMem, DosFreeMem, DosSetMem and DosQueryMem
+  (memory above 4 GB, below) and the exception calls (see "Exceptions");
 - refused arguments: extended attribute lists (EAOP2 holds pointers), so
   DosOpen and DosCreateDir need a null `peaop2` and the EA levels of
   DosQueryPathInfo, DosQueryFileInfo, DosFindFirst, DosSetPathInfo and
@@ -158,23 +159,59 @@ the process ends (TC_TRAP). Signals (XCPT_SIGNAL), DosKillThread and the
 termination of a thread or process (XCPT_PROCESS_TERMINATE,
 XCPT_ASYNC_PROCESS_TERMINATE, unwinding the whole chain) reach 64-bit
 handlers the same way. An access violation's ExceptionInfo[1] is the full
-fault address. Not yet: the floating point state in the context, guard
+fault address. Registration records and the reports passed to
+DosRaiseException and DosUnwindException may be above 4 GB (the kernel
+reaches them with `read_bytes64`/`write_bytes64`). Not yet: the floating point state in the context, guard
 page exceptions (the stack grows without asking the handlers), DosDebug
 of 64-bit code. 32-bit code running in a 64-bit process (the PM thunks)
 keeps the 32-bit chain in its 32-bit TIB.
 
 ## Memory
 
-Phase 1 (now): a 64-bit process uses the OS/2 address space below 4 GB
-(the arenas of ARCHITECTURE.md "Memory layout": the program in the
-private arena at its link address, 64-bit DLLs in the shared arena, high
-memory with OBJ_ANY up to VIRTUALADDRESSLIMIT). Pointers are 64 bits in
-the API, so programs need no change for phase 2; the kernel treats a
-pointer argument above 4 GB as invalid.
+A 64-bit process has the OS/2 address space below 4 GB (the arenas of
+ARCHITECTURE.md "Memory layout": the program in the private arena at its
+link address, 64-bit DLLs in the shared arena, thread stacks in the
+private arena) and, above it, the **64-bit arena**:
 
-Phase 2: arenas above 4 GB for 64-bit processes (the kernel's address
-space code works with 32-bit addresses today), which self-hosting needs
-(rustc and LLVM want gigabytes).
+```text
+0x00_0000_0000  the OS/2 arenas (as for 32-bit processes)
+0x01_0000_0000  64-bit arena: private objects, bottom up, 64 KB aligned
+0x80_0000_0000  end (512 GB, the first page-map entry's range)
+```
+
+- **DosAllocMem with OBJ_ANY** from 64-bit code allocates there (an
+  object is at most 4 GB - 4 KB, as `cb` is a ULONG). Without OBJ_ANY it
+  allocates in the private arena below 512 MB, as for 32-bit code. (So
+  OBJ_ANY means "above 4 GB" to 64-bit callers instead of 32-bit "high
+  memory": memory anywhere, which only 64-bit code can reach.)
+- Pages are reserved, committed or guard pages as below 4 GB, and come
+  in on first touch (demand paging, zeroed frames). DosSetMem commits,
+  decommits (the frames go back at once), makes guard pages and changes
+  the protection; DosQueryMem reports runs of pages and free space
+  (PAG_FREE) up to the next object; DosFreeMem releases an object. A
+  guard page's first touch commits it and makes the page below the guard
+  page (the default action: 64-bit code has no exception handlers yet);
+  an access to a reserved page or outside any object ends the process
+  (SYS3175). Everything there goes when the process ends.
+- 32-bit processes and 32-bit code never get addresses above 4 GB;
+  nothing below 4 GB changed.
+- The `os2` crate's heap takes memory below 4 GB while there is room and
+  then grows into the 64-bit arena (so a large `Vec` lands above 4 GB).
+
+**Kernel calls with buffers above 4 GB.** The kernel reaches user memory
+at any address through `Ctx::uptr` (a pointer argument, all 64 bits) and
+`uread`/`uwrite` (`AddressSpace::read_bytes64`/`write_bytes64`). Calls
+written for it take pointers above 4 GB in every pointer argument:
+DosRead, DosWrite (buffer and count), DosGetInfoBlocks, DosAllocMem,
+DosFreeMem, DosSetMem, DosQueryMem (`HIGH_OK` in api64.rs). Any other
+call given a pointer above 4 GB (api64.rs's `PTR_ARGS` lists which
+arguments of each call are pointers) fails with ERROR_INVALID_ADDRESS
+before it runs, logged once ("does not take memory above 4 GB yet"), so
+32-bit code never sees a truncated pointer; `Ctx::ptr` gives such a
+pointer as the invalid 0xFFFFFFFF. A 64-bit thread's stack may be above
+4 GB too (arguments beyond the sixth and the return address are read
+with 64-bit addresses), and code above 4 GB executing `int 0x99` is not
+taken for the gate. More calls move to `uptr` as programs need them.
 
 ## Building 64-bit programs
 
@@ -190,14 +227,18 @@ heap on DosAllocMem, and the routines the compiler expects (memcpy...).
 
 `C:\RS2\HELLO64.EXE` is the smoke test: TIB/PIB, DosQuerySysInfo, the
 heap, DosAllocMem, DosScanEnv, threads with a 64-bit parameter, an event
-semaphore, a file, DosQueryProcAddr and a call through its result, and
+semaphore, a file, DosQueryProcAddr and a call through its result,
 exception handlers (sparse memory committed on access violations, a
 division by zero continued with a changed context, DosRaiseException,
-DosUnwindException, a termination handler). `HELLO64 CRASH` shows the
-report of an unhandled exception.
+DosUnwindException, a termination handler), then memory above 4 GB: a 2 GB object with OBJ_ANY, 1 GB of it committed and
+every page touched, DosQueryMem, a guard page, DosWrite to the screen and
+1 MB DosWrite/DosRead to a file with buffers there, a call refusing such
+a buffer, decommit, DosFreeMem, and a 600 MB heap block above 4 GB. It
+needs 4 GB of memory (`HELLO64 CRASH` shows the report of an unhandled
+exception instead):
 
 ```text
-cargo xtask run --headless --timeout 35 --init "OS2\CMD.EXE /K RS2\HELLO64.EXE"
+cargo xtask run --mem 4G --headless --timeout 45 --init "OS2\CMD.EXE /K RS2\HELLO64.EXE"
 ```
 
 ## PM for 64-bit programs
@@ -211,15 +252,26 @@ other way round:
 
 - **64 → 32.** Each export (all of the 32-bit PMWIN's, Win* and Gpi*, by
   name) calls the 32-bit function of the same name: `rs2_call32` copies
-  the arguments, truncated to 32 bits, below the 64-bit frame, enters the
+  the arguments, as 32-bit values, below the 64-bit frame, enters the
   function in compatibility mode with RETFQ (CS 0x5B), and is back in long
   mode by a far jump through [EBX] once the function returns to a 32-bit
   stub (EBX and EBP survive: the callee keeps them). The 32-bit DLL is
   loaded with rs2's private `Dos64LoadModule32` (DOSCALLS 2040), its
   procedures found by DosQueryProcAddr on first use. The generic exports
   are generated from the 32-bit PMWIN's trampoline list (name, argument
-  count): `python3 -I tools/scripts/gen_pm64.py` writes
+  count) and the 32-bit functions' signatures (which arguments are
+  pointers, which MPARAMs): `python3 -I tools/scripts/gen_pm64.py` writes
   `userland64/pmwin/src/thunks.rs`.
+- **Memory above 4 GB** is out of the 32-bit PMWIN's reach, and there are
+  no bounce buffers (a buffer's size is not known in general): a pointer
+  argument above 4 GB, or an MPARAM that is not a 32-bit value (zero- or
+  sign-extended, so MPFROMLONG(-1) passes), makes the call fail with 0
+  (FALSE, NULLHANDLE, MRESULT 0) and PMERR_INVALID_PARAMETERS (0x1208)
+  for WinGetLastError, instead of being truncated. The same holds for the
+  converted calls (QMSG parameters, window procedures' MPARAMs, window
+  words set with WinSetWindowPtr, dialog parameters, DEVOPENSTRUC). Keep
+  what PM gets (strings, structures, window data) below 4 GB: DosAllocMem
+  without OBJ_ANY, the stack, or the heap while it is below 4 GB.
 - **32 → 64.** A 64-bit window procedure given to PMWIN (WinRegisterClass,
   WinSubclassWindow, WinSetWindowPtr(QWP_PFNWP), WinDlgBox, WinLoadDlg,
   WinCreateDlg) is replaced by a 32-bit stub (`mov eax, slot; jmp far` to
@@ -245,7 +297,8 @@ template; Exit), drawing its string table's greeting and shapes with GPI
 and counting timer ticks. `PMDEMO64 /SELFTEST` checks the layer (window
 and dialog procedures both ways, CREATESTRUCT, QMSG, CLASSINFO,
 QWP_PFNWP, subclassing the frame, WinSendMsg results, the menu, string
-and dialog resources, the message loop, painting) and prints PASS/FAIL and
+and dialog resources, refusing pointers above 4 GB, the message loop,
+painting) and prints PASS/FAIL and
 `pmdemo64 selftest done: N failure(s)`:
 
 ```text

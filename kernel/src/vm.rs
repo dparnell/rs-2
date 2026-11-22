@@ -365,6 +365,8 @@ pub struct AddressSpace {
     pub cpus: Arc<core::sync::atomic::AtomicU64>,
     pub ldt: Box<[u64; LDT_ENTRIES]>,
     pub regions: BTreeMap<u32, Region>,
+    /// Objects above 4 GB (64-bit processes only, vm64.rs).
+    pub high64: BTreeMap<u64, crate::vm64::Region64>,
 }
 
 /// Load an address space on this CPU: page tables, LDT, and the CPU mask
@@ -413,7 +415,7 @@ impl AddressSpace {
     pub fn new() -> Option<Self> {
         let root = paging::new_root()?;
         let ldt: Box<[u64; LDT_ENTRIES]> = unsafe { Box::new_zeroed().assume_init() };
-        let mut s = AddressSpace { root, cpus: Arc::new(core::sync::atomic::AtomicU64::new(0)), ldt, regions: BTreeMap::new() };
+        let mut s = AddressSpace { root, cpus: Arc::new(core::sync::atomic::AtomicU64::new(0)), ldt, regions: BTreeMap::new(), high64: BTreeMap::new() };
         s.map_gate();
         crate::infoseg::attach(&mut s);
         // The running thread's local information segment (mm::tlm), for
@@ -824,7 +826,7 @@ impl AddressSpace {
     }
 
     /// Flush the TLBs of the other CPUs that have this space loaded.
-    fn shootdown(&self) {
+    pub(crate) fn shootdown(&self) {
         // The page-table stores before must be visible before the mask is
         // read (a CPU joining sets its bit, then loads CR3 and walks the
         // tables): a full fence, which a SeqCst load alone is not on x86.
@@ -1239,6 +1241,7 @@ impl Drop for AddressSpace {
         for b in bases {
             let _ = self.free(b);
         }
+        self.free_all64();
         high_private_ends().lock().remove(&self.root);
         paging::free_user_tables(self.root);
         phys::free(self.root);

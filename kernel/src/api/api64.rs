@@ -7,11 +7,19 @@
 //! In the 64-bit API ULONG stays 32 bits and pointers are 64 bits, so a
 //! call whose arguments and buffers hold no pointers runs the 32-bit
 //! implementation unchanged (`Ctx` reads the argument registers). Calls
-//! that return a pointer through an argument (`DosAllocMem`'s PPVOID) run
-//! it too and get the pointer's upper half written as 0 (phase 1: all of a
-//! 64-bit program's memory is below 4 GB). Calls with pointers inside their
-//! structures have their own versions here, or are not available yet:
-//! they return ERROR_CALL_NOT_IMPLEMENTED.
+//! that return a pointer through an argument (`DosQueryProcAddr`'s PPFN)
+//! run it too and get the pointer's upper half written as 0 (what they
+//! return is below 4 GB). Calls with pointers inside their structures have
+//! their own versions here, or are not available yet: they return
+//! ERROR_CALL_NOT_IMPLEMENTED.
+//!
+//! Memory above 4 GB (the 64-bit arena, vm64.rs): DosAllocMem with
+//! OBJ_ANY allocates there, and DosFreeMem, DosSetMem and DosQueryMem work
+//! there. Calls listed in `HIGH_OK` take pointers above 4 GB in all their
+//! pointer arguments (their code uses `Ctx::uptr`); any other call given
+//! one (`PTR_ARGS` says which arguments are pointers) fails with
+//! ERROR_INVALID_ADDRESS before it runs, so a 32-bit implementation never
+//! sees a truncated pointer.
 
 use super::{err, Ctx, Handler};
 use crate::arch::gdt::{TIB_SEL, USER_CS64, USER_DS};
@@ -46,7 +54,6 @@ const PLAIN: &[u16] = &[
 /// implementation writes its low half, the high half is set to 0.
 const PTR_OUT: &[(u16, usize)] = &[
     (227, 1), // DosScanEnv(psz, ppszValue)
-    (299, 0), // DosAllocMem(ppb, cb, fl)
     (300, 0), // DosAllocSharedMem(ppb, psz, cb, fl)
     (301, 0), // DosGetNamedSharedMem(ppb, psz, fl)
     (321, 3), // DosQueryProcAddr(hmod, ord, psz, ppfn)
@@ -64,6 +71,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         return None;
     }
     match ordinal {
+        299 => return Some(dos_alloc_mem64),
+        304 => return Some(dos_free_mem64),
+        305 => return Some(dos_set_mem64),
+        306 => return Some(dos_query_mem64),
         311 => return Some(dos_create_thread64),
         318 => return Some(dos_load_module64),
         354 => return Some(super::exceptions64::dos_set_exception_handler),
@@ -80,11 +91,149 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
     None
 }
 
+/// The pointer arguments of each DOSCALLS entry 64-bit code may call
+/// (bit n: argument n, left to right, is a pointer).
+const PTR_ARGS: &[(u16, u16)] = &[
+    (110, 0b1),        // DosForceDelete(psz)
+    (218, 0b100),      // DosSetFileInfo(hf, level, pInfo, cb)
+    (219, 0b101),      // DosSetPathInfo(psz, level, pInfo, cb, fl)
+    (223, 0b101),      // DosQueryPathInfo(psz, level, pInfo, cb)
+    (224, 0b110),      // DosQueryHType(hf, pType, pAttr)
+    (225, 0b1),        // DosQueryVerify(pf)
+    (226, 0b1),        // DosDeleteDir(psz)
+    (228, 0b1110),     // DosSearchPath(fl, pszPath, pszFile, pBuf, cb)
+    (239, 0b11),       // DosCreatePipe(phfRead, phfWrite, cb)
+    (255, 0b1),        // DosSetCurrentDir(psz)
+    (256, 0b1000),     // DosSetFilePtr(hf, ib, method, pibActual)
+    (258, 0b11),       // DosCopy(pszOld, pszNew, opt)
+    (259, 0b1),        // DosDelete(psz)
+    (260, 0b10),       // DosDupHandle(hf, phf)
+    (261, 0b1110),     // DosEditName(level, pszSource, pszEdit, pszTarget, cb)
+    (264, 0b101011),   // DosFindFirst(psz, phdir, attr, pbuf, cb, pcFound, level)
+    (265, 0b1010),     // DosFindNext(hdir, pbuf, cb, pcFound)
+    (269, 0b111),      // DosFSAttach(pszDevice, pszFS, pData, cb, fl)
+    (270, 0b11),       // DosCreateDir(psz, peaop2)
+    (271, 0b11),       // DosMove(pszOld, pszNew)
+    (273, 0b1000_0111), // DosOpen(psz, phf, pulAction, cb, attr, fl, mode, peaop2)
+    (274, 0b110),      // DosQueryCurrentDir(disk, pBuf, pcb)
+    (275, 0b11),       // DosQueryCurrentDisk(pdisk, plogical)
+    (276, 0b10),       // DosQueryFHState(hf, pmode)
+    (277, 0b11001),    // DosQueryFSAttach(psz, ord, level, pfsqb, pcb)
+    (278, 0b100),      // DosQueryFSInfo(disk, level, pBuf, cb)
+    (279, 0b100),      // DosQueryFileInfo(hf, level, pInfo, cb)
+    (281, 0b1010),     // DosRead(hf, pBuf, cb, pcbActual)
+    (282, 0b1010),     // DosWrite(hf, pBuf, cb, pcbActual)
+    (284, 0b1_0110_1000), // DosDevIOCtl(h, cat, fn, pParm, cbMax, pcbParm, pData, cbMax, pcbData)
+    (285, 0b1010_1101), // DosFSCtl(pData, cb, pcb, pParms, cb, pcb, fn, pszRoute, hf, method)
+    (287, 0b1010),     // DosPhysicalDisk(fn, pBuf, cb, pParms, cb)
+    (372, 0b101010),   // DosEnumAttribute(type, pvFile, entry, pvBuf, cb, pcount, level)
+    (382, 0b11),       // DosSetRelMaxFH(pcbReq, pcbCurMax)
+    (222, 0b100),      // DosSetFSInfo(disk, level, pBuf, cb)
+    (428, 0b110),      // DosSetFileLocks(hf, pflUnlock, pflLock, timeout, fl)
+    (639, 0b110),      // DosProtectSetFileLocks(hf, pflUnlock, pflLock, ...)
+    (981, 0b1000_0111), // DosOpenL(psz, phf, pulAction, cb, attr, fl, mode, peaop2)
+    (986, 0b110),      // DosSetFileLocksL(hf, pflUnlock, pflLock, timeout, fl)
+    (988, 0b1000),     // DosSetFilePtrL(hf, ib, method, pibActual)
+    (240, 0b101011),   // DosCallNPipe(psz, pIn, cbIn, pOut, cbOut, pcbActual, ms)
+    (243, 0b11),       // DosCreateNPipe(psz, phpipe, ...)
+    (244, 0b111010),   // DosPeekNPipe(hp, pBuf, cb, pcbActual, pAvail, pState)
+    (245, 0b10),       // DosQueryNPHState(hp, pState)
+    (248, 0b100),      // DosQueryNPipeInfo(hp, level, pBuf, cb)
+    (249, 0b10),       // DosQueryNPipeSemState(hsem, pnpss, cb)
+    (252, 0b101010),   // DosTransactNPipe(hp, pOut, cbOut, pIn, cbIn, pcbRead)
+    (253, 0b1),        // DosWaitNPipe(psz, ms)
+    (299, 0b1),        // DosAllocMem(ppb, cb, fl)
+    (300, 0b11),       // DosAllocSharedMem(ppb, psz, cb, fl)
+    (301, 0b11),       // DosGetNamedSharedMem(ppb, psz, fl)
+    (302, 0b1),        // DosGetSharedMem(pb, fl)
+    (303, 0b1),        // DosGiveSharedMem(pb, pid, fl)
+    (304, 0b1),        // DosFreeMem(pb)
+    (305, 0b1),        // DosSetMem(pb, cb, fl)
+    (306, 0b111),      // DosQueryMem(pb, pcb, pfl)
+    (344, 0b1),        // DosSubSetMem(pbBase, fl, cb)
+    (345, 0b11),       // DosSubAllocMem(pbBase, ppb, cb)
+    (346, 0b11),       // DosSubFreeMem(pbBase, pb, cb)
+    (347, 0b1),        // DosSubUnsetMem(pbBase)
+    (454, 0b10),       // DosAllocThreadLocalMemory(cb, ppul)
+    (455, 0b1),        // DosFreeThreadLocalMemory(pul)
+    (324, 0b11),       // DosCreateEventSem(psz, phev, fl, state)
+    (325, 0b11),       // DosOpenEventSem(psz, phev)
+    (327, 0b10),       // DosResetEventSem(hev, pulPostCt)
+    (330, 0b10),       // DosQueryEventSem(hev, pulPostCt)
+    (331, 0b11),       // DosCreateMutexSem(psz, phmtx, fl, state)
+    (332, 0b11),       // DosOpenMutexSem(psz, phmtx)
+    (336, 0b1110),     // DosQueryMutexSem(hmtx, ppid, ptid, pulCount)
+    (280, 0b1100),     // DosWaitChild(action, option, pres, ppid, pid)
+    (283, 0b111_1001), // DosExecPgm(pObj, cb, fl, pArg, pEnv, pRes, pName)
+    (311, 0b1),        // DosCreateThread(ptid, pfn, param, fl, cb)
+    (312, 0b11),       // DosGetInfoBlocks(pptib, pppib)
+    (349, 0b1),        // DosWaitThread(ptid, option)
+    (380, 0b1),        // DosEnterMustComplete(pulNesting)
+    (381, 0b1),        // DosExitMustComplete(pulNesting)
+    (318, 0b1101),     // DosLoadModule(pszFail, cb, pszName, phmod)
+    (LOAD_MODULE32, 0b1101),
+    (319, 0b11),       // DosQueryModuleHandle(psz, phmod)
+    (320, 0b100),      // DosQueryModuleName(hmod, cb, pch)
+    (321, 0b1100),     // DosQueryProcAddr(hmod, ord, psz, ppfn)
+    (323, 0b11),       // DosQueryAppType(psz, pfl)
+    (352, 0b1000),     // DosGetResource(hmod, type, name, ppb)
+    (353, 0b1),        // DosFreeResource(pb)
+    (572, 0b1000),     // DosQueryResourceSize(hmod, type, name, pcb)
+    (586, 0b1100),     // DosQueryProcType(hmod, ord, psz, pul)
+    (873, 0b1),        // DosSetExtLIBPATH(psz, fl)
+    (874, 0b1),        // DosQueryExtLIBPATH(psz, fl)
+    (227, 0b11),       // DosScanEnv(psz, ppszValue)
+    (230, 0b1),        // DosGetDateTime(pdt)
+    (291, 0b110),      // DosQueryCp(cb, arCP, pcCP)
+    (292, 0b1),        // DosSetDateTime(pdt)
+    (348, 0b100),      // DosQuerySysInfo(first, last, pBuf, cb)
+    (350, 0b100),      // DosAsyncTimer(ms, hsem, phtimer)
+    (351, 0b100),      // DosStartTimer(ms, hsem, phtimer)
+    (362, 0b1),        // DosTmrQueryFreq(pul)
+    (363, 0b1),        // DosTmrQueryTime(pqw)
+    (395, 0b1110),     // DosQueryCtryInfo(cb, pcc, pci, pcb)
+    (396, 0b110),      // DosQueryDBCSEnv(cb, pcc, pBuf)
+    (397, 0b110),      // DosMapCase(cb, pcc, pch)
+    (398, 0b1110),     // DosQueryCollate(cb, pcc, pch, pcch)
+    (661, 0b100_1110), // DosReadQueue(hq, preq, pcb, ppbuf, elem, wait, pprty, hsem)
+    (664, 0b10),       // DosQueryQueue(hq, pcEntries)
+    (665, 0b101_1110), // DosPeekQueue(hq, preq, pcb, ppbuf, pelem, nowait, pprty, hsem)
+    (666, 0b1000),     // DosWriteQueue(hq, req, cb, pbuf, prty)
+    (667, 0b111),      // DosOpenQueue(ppid, phq, psz)
+    (668, 0b101),      // DosCreateQueue(phq, prty, psz)
+];
+
+/// Calls whose code takes pointers above 4 GB in every pointer argument.
+const HIGH_OK: &[u16] = &[281, 282, 299, 304, 305, 306, 312, 354, 355, 356, 357];
+
+/// The pointer arguments of DOSCALLS `ordinal` (`PTR_ARGS`).
+fn ptr_args(ordinal: u16) -> u16 {
+    PTR_ARGS.iter().find(|p| p.0 == ordinal).map_or(0, |p| p.1)
+}
+
 /// Arguments that would need a 64-bit structure the 32-bit code does not
-/// know (extended attribute lists hold pointers): refused for now.
+/// know (extended attribute lists hold pointers), and pointers above 4 GB
+/// to calls not written for them: refused.
 pub fn refused(c: &Ctx, module: u8, ordinal: u16) -> Option<u32> {
     if module != 0 {
         return None;
+    }
+    if !HIGH_OK.contains(&ordinal) {
+        let mask = ptr_args(ordinal);
+        if let Some(i) = (0..16).find(|&i| mask & (1 << i) != 0 && c.arg64(i) > u32::MAX as u64) {
+            let mut w = HIGH_WARNED.lock();
+            if !w.contains(&ordinal) {
+                w.push(ordinal);
+                crate::println!(
+                    "[API DOSCALLS.{ordinal} {} does not take memory above 4 GB yet (argument {}: {:#x}); called by {}]",
+                    super::names::display(module, ordinal),
+                    i + 1,
+                    c.arg64(i),
+                    c.process.exe.name
+                );
+            }
+            return Some(err::INVALID_ADDRESS);
+        }
     }
     let bad = match ordinal {
         // DosOpen / DosOpenL: peaop2.
@@ -201,14 +350,89 @@ fn dos_create_thread64(c: &mut Ctx) -> u32 {
 
 /// DosGetInfoBlocks(pptib, pppib): the 64-bit TIB and PIB.
 fn dos_get_info_blocks64(c: &mut Ctx) -> u32 {
-    let (ptib, ppib) = (c.ptr(0), c.ptr(1));
+    let (ptib, ppib) = (c.uptr(0), c.uptr(1));
     let base = info64_base();
     if ptib != 0 {
         let tib = (base + TIB64_0 + c.thread.tid * process::info::TIB_STRIDE) as u64;
-        c.write(ptib, &tib.to_le_bytes());
+        c.uwrite(ptib, &tib.to_le_bytes());
     }
     if ppib != 0 {
-        c.write(ppib, &(base as u64).to_le_bytes());
+        c.uwrite(ppib, &(base as u64).to_le_bytes());
     }
     0
+}
+
+static HIGH_WARNED: crate::sync::SpinLock<alloc::vec::Vec<u16>> = crate::sync::SpinLock::new(alloc::vec::Vec::new());
+
+/// DosAllocMem(ppb, cb, fl) from 64-bit code: with OBJ_ANY in the 64-bit
+/// arena above 4 GB (vm64.rs), else in the private arena below 512 MB, as
+/// for 32-bit code without OBJ_ANY. The pointer is written as 64 bits.
+fn dos_alloc_mem64(c: &mut Ctx) -> u32 {
+    let (ppb, cb, flags) = (c.uptr(0), c.arg(1), c.arg(2));
+    if flags & !(pag::READ | pag::WRITE | pag::EXECUTE | pag::GUARD | pag::COMMIT | pag::OBJ_TILE | pag::OBJ_ANY) != 0
+        || flags & (pag::READ | pag::WRITE | pag::EXECUTE) == 0
+        || flags & pag::OBJ_ANY != 0 && flags & pag::OBJ_TILE != 0
+    {
+        return err::INVALID_PARAMETER;
+    }
+    let r = if flags & pag::OBJ_ANY != 0 {
+        c.space().alloc64(cb as u64, flags & !pag::OBJ_ANY)
+    } else {
+        c.space().alloc(cb, flags, SegKind::Data, None).map(|b| b as u64)
+    };
+    if c.trace {
+        crate::trace!("    DosAllocMem64 {cb:#x} flags {flags:#x}: {r:x?}");
+    }
+    match r {
+        Ok(base) => {
+            if !c.uwrite(ppb, &base.to_le_bytes()) {
+                let _ = if base > u32::MAX as u64 { c.space().free64(base) } else { c.space().free(base as u32) };
+                return err::INVALID_ADDRESS;
+            }
+            0
+        }
+        Err(e) => e.code(),
+    }
+}
+
+/// DosFreeMem(pb): above 4 GB, an object of the 64-bit arena.
+fn dos_free_mem64(c: &mut Ctx) -> u32 {
+    let base = c.arg64(0);
+    let r = match u32::try_from(base) {
+        Ok(b) => c.space().free(b),
+        Err(_) => c.space().free64(base),
+    };
+    r.map_or_else(|e| e.code(), |()| 0)
+}
+
+/// DosSetMem(pb, cb, fl), anywhere.
+fn dos_set_mem64(c: &mut Ctx) -> u32 {
+    let (a, n, f) = (c.arg64(0), c.arg(1), c.arg(2));
+    let r = match u32::try_from(a) {
+        Ok(a) => c.space().set_mem(a, n, f),
+        Err(_) => c.space().set_mem64(a, n as u64, f),
+    };
+    r.map_or_else(|e| e.code(), |()| 0)
+}
+
+/// DosQueryMem(pb, pcb, pfl), anywhere.
+fn dos_query_mem64(c: &mut Ctx) -> u32 {
+    let (addr, pcb, pflag) = (c.arg64(0), c.uptr(1), c.uptr(2));
+    let mut b = [0u8; 4];
+    if !c.uread(pcb, &mut b) {
+        return err::INVALID_PARAMETER;
+    }
+    let want = u32::from_le_bytes(b);
+    let res = match u32::try_from(addr) {
+        Ok(a) => c.space().query(a, want),
+        Err(_) => c.space().query64(addr, want as u64).map(|(n, f)| (n as u32, f)),
+    };
+    match res {
+        Some((size, flags)) => {
+            c.uwrite_u32(pcb, size);
+            c.uwrite_u32(pflag, flags);
+            0
+        }
+        None => err::INVALID_ADDRESS,
+    }
 }

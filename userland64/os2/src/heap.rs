@@ -1,5 +1,9 @@
 //! The program heap: an address-ordered free list over memory obtained with
 //! DosAllocMem. Large requests get their own memory object.
+//!
+//! Memory comes from below 4 GB while there is room there (the 32-bit
+//! PMWIN can take pointers to it), then from the 64-bit arena above 4 GB
+//! (DosAllocMem with OBJ_ANY, docs/API64.md).
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{self, null_mut};
@@ -94,8 +98,8 @@ impl Heap {
                     cur = (*cur).next;
                 }
                 // Grow by one chunk.
-                let mut p: *mut u8 = null_mut();
-                if DosAllocMem(&mut p, CHUNK as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) != 0 {
+                let p = alloc_mem(CHUNK);
+                if p.is_null() {
                     return null_mut();
                 }
                 self.insert(p as usize, CHUNK);
@@ -103,6 +107,19 @@ impl Heap {
         }
         null_mut()
     }
+}
+
+/// A committed memory object of `size` bytes: below 4 GB if there is
+/// room, else above (OBJ_ANY). Null if neither has room (or `size` is
+/// beyond a ULONG).
+fn alloc_mem(size: usize) -> *mut u8 {
+    let Ok(cb) = u32::try_from(size) else { return null_mut() };
+    let mut p: *mut u8 = null_mut();
+    let fl = PAG_READ | PAG_WRITE | PAG_COMMIT;
+    if unsafe { DosAllocMem(&mut p, cb, fl) } == 0 {
+        return p;
+    }
+    if unsafe { DosAllocMem(&mut p, cb, fl | OBJ_ANY) } == 0 { p } else { null_mut() }
 }
 
 /// A replacement for the heap (PMWIN keeps all it allocates in the
@@ -128,9 +145,7 @@ pub fn set_allocator(a: &'static Allocator) {
 /// Free it with [`free_private`] and the same size.
 pub unsafe fn alloc_private(size: usize) -> *mut u8 {
     if size >= LARGE {
-        let mut p: *mut u8 = null_mut();
-        let rc = unsafe { DosAllocMem(&mut p, size as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
-        return if rc == 0 { p } else { null_mut() };
+        return alloc_mem(size);
     }
     lock();
     let p = unsafe { (*ptr::addr_of_mut!(HEAP)).alloc(size, 16) };
@@ -159,9 +174,7 @@ unsafe impl GlobalAlloc for Os2Heap {
             return unsafe { ((*r).alloc)(l) };
         }
         if l.size() >= LARGE && l.align() <= 4096 {
-            let mut p: *mut u8 = null_mut();
-            let rc = unsafe { DosAllocMem(&mut p, l.size() as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
-            return if rc == 0 { p } else { null_mut() };
+            return alloc_mem(l.size());
         }
         lock();
         let p = unsafe { (*ptr::addr_of_mut!(HEAP)).alloc(l.size(), l.align()) };

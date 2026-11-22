@@ -2,9 +2,11 @@
 //!
 //! PM's shared state belongs to rs2's 32-bit PMWIN.DLL, so this DLL is a
 //! layer over it in the same process: every export calls the 32-bit
-//! function of the same name in compatibility mode ([`call32`]),
-//! truncating the arguments to 32 bits (phase 1: everything is below
-//! 4 GB). Window procedures go the other way through 32-bit stubs that
+//! function of the same name in compatibility mode ([`call32`]), with the
+//! arguments as 32-bit values. Memory above 4 GB (DosAllocMem with
+//! OBJ_ANY) is out of the 32-bit PMWIN's reach: a pointer argument above
+//! 4 GB, or an MPARAM that is not a 32-bit value, makes the call fail
+//! (0, PMERR_INVALID_PARAMETERS) instead of being truncated ([`fits`]). Window procedures go the other way through 32-bit stubs that
 //! switch to long mode ([`to32`], `rs2_entry64`), and 32-bit procedures
 //! PMWIN hands out (WinSubclassWindow's old procedure) get 64-bit stubs
 //! ([`from32`]). Structures with pointers in them are converted: QMSG,
@@ -27,14 +29,50 @@ use os2::*;
 // special: DevOpenDC WinDefWindowProc WinDefDlgProc
 
 macro_rules! thunks {
-    ($($name:ident ($($a:ident)*);)*) => {$(
+    ($($name:ident [$ptr:literal, $mp:literal] ($($a:ident)*);)*) => {$(
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $name($($a: u64),*) -> u64 {
             static ADDR: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+            if !crate::fits($ptr, $mp, &[$($a),*]) {
+                return crate::refuse();
+            }
             let f = crate::proc32(&ADDR, concat!(stringify!($name), "\0"));
             crate::call32(f, &[$($a as u32),*]) as u64
         }
     )*};
+}
+
+// ---- Arguments above 4 GB ----
+
+/// True if the 32-bit PMWIN can take these arguments: no pointer
+/// argument (bit n of `ptr`) above 4 GB, every MPARAM (bit n of `mp`) a
+/// 32-bit value (zero- or sign-extended: MPFROMLONG(-1) is fine, a
+/// pointer above 4 GB is not). Other arguments are ULONGs, LONGs and
+/// handles, whose upper halves mean nothing.
+pub fn fits(ptr: u32, mp: u32, args: &[u64]) -> bool {
+    args.iter().enumerate().all(|(i, &v)| {
+        (ptr & (1 << i) == 0 || low(v)) && (mp & (1 << i) == 0 || mp32(v).is_some())
+    })
+}
+
+/// A pointer 32-bit code can take (below 4 GB).
+fn low(p: u64) -> bool {
+    p <= u32::MAX as u64
+}
+
+/// An MPARAM as a 32-bit value, if it is one.
+fn mp32(v: u64) -> Option<u32> {
+    (v <= u32::MAX as u64 || v as i32 as i64 as u64 == v).then_some(v as u32)
+}
+
+const PMERR_INVALID_PARAMETERS: u32 = 0x1208;
+
+/// A call refused for memory above 4 GB: PMERR_INVALID_PARAMETERS, and 0
+/// (FALSE, NULLHANDLE, or MRESULT 0).
+pub fn refuse() -> u64 {
+    static ADDR: AtomicU32 = AtomicU32::new(0);
+    call32(proc32(&ADDR, "WinSetErrorInfo\0"), &[PMERR_INVALID_PARAMETERS, 0]);
+    0
 }
 
 mod thunks;
@@ -356,15 +394,21 @@ unsafe fn rd(p: u32, i: usize) -> u32 {
     unsafe { (p as usize as *const u32).add(i).read_unaligned() }
 }
 
-/// mp2 of a message 64-bit code passes on to 32-bit code.
-fn mp2_to32(msg: u32, mp2: u64) -> u32 {
-    if msg == WM_CREATE && mp2 != 0 {
+/// mp2 of a message 64-bit code passes on to 32-bit code (None: not a
+/// 32-bit value, see [`fits`]).
+fn mp2_to32(msg: u32, mp2: u64) -> Option<u32> {
+    if msg == WM_CREATE && mp2 != 0 && low(mp2) {
         let cs = unsafe { &*(mp2 as *const CreateStruct64) };
         if cs.magic == CS_MAGIC {
-            return cs.orig as u32;
+            return Some(cs.orig as u32);
         }
     }
-    mp2 as u32
+    mp32(mp2)
+}
+
+/// A message's parameters for 32-bit code.
+fn mps_to32(msg: u32, mp1: u64, mp2: u64) -> Option<(u32, u32)> {
+    Some((mp32(mp1)?, mp2_to32(msg, mp2)?))
 }
 
 /// A message from PMWIN for a 64-bit window procedure.
@@ -402,13 +446,17 @@ extern "C" fn rs2_wndproc(slot: u32, hwnd: u32, msg: u32, mp1: u32, mp2: u32) ->
 
 /// 64-bit code calling a 32-bit window procedure.
 extern "C" fn rs2_proc4(target: u32, hwnd: u64, msg: u64, mp1: u64, mp2: u64) -> u64 {
-    call32(target, &[hwnd as u32, msg as u32, mp1 as u32, mp2_to32(msg as u32, mp2)]) as u64
+    let Some((mp1, mp2)) = mps_to32(msg as u32, mp1, mp2) else { return refuse() };
+    call32(target, &[hwnd as u32, msg as u32, mp1, mp2]) as u64
 }
 
 // ---- Calls with structures or procedures ----
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinRegisterClass(hab: u64, class: u64, pfn: u64, style: u64, cb: u64) -> u64 {
+    if !low(class) {
+        return refuse();
+    }
     call32(target!("WinRegisterClass"), &[hab as u32, class as u32, to32(pfn), style as u32, cb as u32]) as u64
 }
 
@@ -419,27 +467,38 @@ pub unsafe extern "C" fn WinSubclassWindow(hwnd: u64, pfn: u64) -> u64 {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinDlgBox(parent: u64, owner: u64, pfn: u64, hmod: u64, id: u64, params: u64) -> u64 {
+    if !low(params) {
+        return refuse();
+    }
     call32(target!("WinDlgBox"), &[parent as u32, owner as u32, to32(pfn), hmod as u32, id as u32, params as u32]) as u64
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinLoadDlg(parent: u64, owner: u64, pfn: u64, hmod: u64, id: u64, params: u64) -> u64 {
+    if !low(params) {
+        return refuse();
+    }
     call32(target!("WinLoadDlg"), &[parent as u32, owner as u32, to32(pfn), hmod as u32, id as u32, params as u32]) as u64
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinCreateDlg(parent: u64, owner: u64, pfn: u64, tmpl: u64, params: u64) -> u64 {
+    if !low(tmpl) || !low(params) {
+        return refuse();
+    }
     call32(target!("WinCreateDlg"), &[parent as u32, owner as u32, to32(pfn), tmpl as u32, params as u32]) as u64
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinDefWindowProc(hwnd: u64, msg: u64, mp1: u64, mp2: u64) -> u64 {
-    call32(target!("WinDefWindowProc"), &[hwnd as u32, msg as u32, mp1 as u32, mp2_to32(msg as u32, mp2)]) as u64
+    let Some((mp1, mp2)) = mps_to32(msg as u32, mp1, mp2) else { return refuse() };
+    call32(target!("WinDefWindowProc"), &[hwnd as u32, msg as u32, mp1, mp2]) as u64
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinDefDlgProc(hwnd: u64, msg: u64, mp1: u64, mp2: u64) -> u64 {
-    call32(target!("WinDefDlgProc"), &[hwnd as u32, msg as u32, mp1 as u32, mp2_to32(msg as u32, mp2)]) as u64
+    let Some((mp1, mp2)) = mps_to32(msg as u32, mp1, mp2) else { return refuse() };
+    call32(target!("WinDefDlgProc"), &[hwnd as u32, msg as u32, mp1, mp2]) as u64
 }
 
 /// QMSG: 32 bytes in 32-bit code, 40 in 64-bit (MPARAMs are pointers).
@@ -456,8 +515,10 @@ pub struct Qmsg64 {
     pub reserved: u32,
 }
 
-fn q64_to32(q: &Qmsg64) -> [u32; 8] {
-    [q.hwnd, q.msg, q.mp1 as u32, mp2_to32(q.msg, q.mp2), q.time, q.x as u32, q.y as u32, q.reserved]
+/// None if the message's parameters are not 32-bit values.
+fn q64_to32(q: &Qmsg64) -> Option<[u32; 8]> {
+    let (mp1, mp2) = mps_to32(q.msg, q.mp1, q.mp2)?;
+    Some([q.hwnd, q.msg, mp1, mp2, q.time, q.x as u32, q.y as u32, q.reserved])
 }
 
 fn q32_to64(q: &[u32; 8]) -> Qmsg64 {
@@ -495,13 +556,13 @@ pub unsafe extern "C" fn WinPeekMsg(hab: u64, pq: u64, hwnd: u64, first: u64, la
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinDispatchMsg(hab: u64, pq: u64) -> u64 {
-    let q = q64_to32(unsafe { &*(pq as *const Qmsg64) });
+    let Some(q) = q64_to32(unsafe { &*(pq as *const Qmsg64) }) else { return refuse() };
     call32(target!("WinDispatchMsg"), &[hab as u32, q.as_ptr() as u32]) as u64
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinTranslateAccel(hab: u64, hwnd: u64, haccel: u64, pq: u64) -> u64 {
-    let mut q = q64_to32(unsafe { &*(pq as *const Qmsg64) });
+    let Some(mut q) = q64_to32(unsafe { &*(pq as *const Qmsg64) }) else { return refuse() };
     let r = call32(target!("WinTranslateAccel"), &[hab as u32, hwnd as u32, haccel as u32, q.as_mut_ptr() as u32]);
     unsafe { *(pq as *mut Qmsg64) = q32_to64(&q) };
     r as u64
@@ -509,13 +570,16 @@ pub unsafe extern "C" fn WinTranslateAccel(hab: u64, hwnd: u64, haccel: u64, pq:
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinCallMsgFilter(hab: u64, pq: u64, msgf: u64) -> u64 {
-    let q = q64_to32(unsafe { &*(pq as *const Qmsg64) });
+    let Some(q) = q64_to32(unsafe { &*(pq as *const Qmsg64) }) else { return refuse() };
     call32(target!("WinCallMsgFilter"), &[hab as u32, q.as_ptr() as u32, msgf as u32]) as u64
 }
 
 /// CLASSINFO: { ULONG flClassStyle; PFNWP pfnWindowProc; ULONG cbWindowData }.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinQueryClassInfo(hab: u64, class: u64, pci: u64) -> u64 {
+    if !low(class) {
+        return refuse();
+    }
     let mut ci = [0u32; 3];
     let r = call32(target!("WinQueryClassInfo"), &[hab as u32, class as u32, ci.as_mut_ptr() as u32]);
     if r != 0 && pci != 0 {
@@ -539,7 +603,14 @@ pub unsafe extern "C" fn WinQueryWindowPtr(hwnd: u64, index: u64) -> u64 {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn WinSetWindowPtr(hwnd: u64, index: u64, p: u64) -> u64 {
-    let v = if index as i32 == QWP_PFNWP { to32(p) } else { p as u32 };
+    // Window words are 32 bits: a pointer above 4 GB does not fit.
+    let v = if index as i32 == QWP_PFNWP {
+        to32(p)
+    } else if low(p) {
+        p as u32
+    } else {
+        return refuse();
+    };
     call32(target!("WinSetWindowPtr"), &[hwnd as u32, index as u32, v]) as u64
 }
 
@@ -558,10 +629,17 @@ pub unsafe extern "C" fn WinReleaseHook(_hab: u64, _hmq: u64, _ty: u64, _pfn: u6
 /// DevOpenDC: DEVOPENSTRUC is an array of pointers (`count` of them).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn DevOpenDC(hab: u64, ty: u64, token: u64, count: u64, pdop: u64, hdc: u64) -> u64 {
+    if !low(token) {
+        return refuse();
+    }
     let mut d = [0u32; 9];
     let n = (count as usize).min(9);
     for (i, v) in d.iter_mut().enumerate().take(n) {
-        *v = if pdop != 0 { unsafe { *(pdop as *const u64).add(i) as u32 } } else { 0 };
+        let p = if pdop != 0 { unsafe { *(pdop as *const u64).add(i) } } else { 0 };
+        if !low(p) {
+            return refuse();
+        }
+        *v = p as u32;
     }
     let p = if pdop != 0 { d.as_ptr() as u32 } else { 0 };
     call32(target!("DevOpenDC"), &[hab as u32, ty as u32, token as u32, count as u32, p, hdc as u32]) as u64

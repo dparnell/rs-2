@@ -203,6 +203,20 @@ fn main(s: &Startup) -> u32 {
     let mut title = [0u8; 32];
     let n = unsafe { WinQueryWindowText(frame, 32, title.as_mut_ptr()) };
     check("WinQueryWindowText", &title[..n as usize] == b"64-bit PM");
+    // Memory above 4 GB is out of the 32-bit PMWIN's reach: the call is
+    // refused (the title stays), a pointer is never truncated.
+    let mut high: *mut u8 = core::ptr::null_mut();
+    let refused = unsafe {
+        DosAllocMem(&mut high, 4096, PAG_READ | PAG_WRITE | PAG_COMMIT | OBJ_ANY) == 0 && {
+            core::ptr::copy_nonoverlapping(c"high".as_ptr().cast(), high, 5);
+            let r = WinSetWindowText(frame, high);
+            let n = WinQueryWindowText(frame, 32, title.as_mut_ptr());
+            let mp = WinSendMsg(client, WM_USER, 0x1000, high as usize as MPARAM);
+            DosFreeMem(high);
+            high as usize >= 1 << 32 && r == 0 && &title[..n as usize] == b"64-bit PM" && mp == 0
+        }
+    };
+    check("pointers above 4 GB refused, not truncated", refused);
 
     unsafe {
         WinSetWindowPos(frame, HWND_TOP, 60, 80, 560, 300, SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ACTIVATE | SWP_ZORDER);

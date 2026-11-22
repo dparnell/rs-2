@@ -59,6 +59,7 @@ mod task;
 mod trap;
 mod vdm;
 mod vm;
+mod vm64;
 mod viowin;
 mod vmware;
 
