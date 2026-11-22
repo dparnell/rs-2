@@ -533,10 +533,10 @@ impl Process {
             write_u32s(&mut sp, tib, &[0xffff_ffff, stack_bottom, stack_top, tib2, 20, t.id]);
             write_u32s(&mut sp, tib2, &[tid, t.priority(), 20, 0]);
             if self.is64() {
-                // TIB: exception chain (none), stack base, stack limit,
+                // TIB: exception chain (empty: -1), stack base, stack limit,
                 // TIB2 (the 32-bit TIB's), version, ordinal.
                 let at = info64_base() + TIB64_0 + tid * info::TIB_STRIDE;
-                write_u64s(&mut sp, at, &[0, stack_bottom as u64, stack_top as u64, tib2 as u64]);
+                write_u64s(&mut sp, at, &[u64::MAX, stack_bottom as u64, stack_top as u64, tib2 as u64]);
                 write_u32s(&mut sp, at + 32, &[20, t.id]);
             }
         }

@@ -16,6 +16,7 @@ pub mod audio;
 pub mod debug;
 pub mod doscalls;
 pub mod exceptions;
+pub mod exceptions64;
 pub mod file;
 pub mod filelock;
 pub mod fsctl;

@@ -164,8 +164,9 @@ pub fn user_exception(f: &mut TrapFrame) {
             }
         }
     }
+    // 64-bit code: its own handlers (api/exceptions64.rs).
     if f.cs as u16 == crate::arch::gdt::USER_CS64 {
-        trap64(f, &p);
+        crate::api::exceptions::deliver(f, &p, &t);
         return;
     }
     // Breakpoints and single steps of a program under DosDebug.
@@ -179,36 +180,6 @@ pub fn user_exception(f: &mut TrapFrame) {
         return;
     }
     crate::api::exceptions::deliver(f, &p, &t);
-}
-
-/// An exception in 64-bit code (docs/API64.md): 64-bit programs have no
-/// exception handlers yet, so the process ends (TC_TRAP), with the
-/// registers on the log and a SYS3175-style line on its console.
-fn trap64(f: &TrapFrame, p: &Arc<crate::task::process::Process>) {
-    let name = crate::trap::EXCEPTION_NAMES.get(f.vector as usize).copied().unwrap_or("?");
-    crate::println!(
-        "SYS3175: 64-bit {} (pid {}): {} at {:#x}, cr2 {:#x}, error {:#x}",
-        p.exe.name,
-        p.pid,
-        name,
-        f.rip,
-        crate::arch::read_cr2(),
-        f.error
-    );
-    crate::println!(
-        "  rax {:#x} rbx {:#x} rcx {:#x} rdx {:#x} rsi {:#x} rdi {:#x} rbp {:#x} rsp {:#x}",
-        f.rax, f.rbx, f.rcx, f.rdx, f.rsi, f.rdi, f.rbp, f.rsp
-    );
-    crate::println!(
-        "  r8 {:#x} r9 {:#x} r10 {:#x} r11 {:#x} r12 {:#x} r13 {:#x} r14 {:#x} r15 {:#x}",
-        f.r8, f.r9, f.r10, f.r11, f.r12, f.r13, f.r14, f.r15
-    );
-    let msg = alloc::format!(
-        "\r\nSYS3175: A program generated an exception ({name}).\r\n{} at {:#x}\r\n",
-        p.exe.name, f.rip
-    );
-    crate::console::write(msg.as_bytes());
-    p.exit(2, 0xffff);
 }
 
 /// The default action for a guard page fault at `addr` (already

@@ -9,7 +9,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use os2::*;
 
@@ -24,6 +24,119 @@ unsafe extern "C" fn worker(param: usize) {
     }
 }
 
+// ---- Exception handlers ----
+
+static SPARSE: AtomicU64 = AtomicU64::new(0);
+static SEEN: AtomicU32 = AtomicU32::new(0);
+static UNWOUND: AtomicU32 = AtomicU32::new(0);
+static TERMINATED: AtomicU32 = AtomicU32::new(0);
+
+/// Commits pages of the sparse object on access violations; fixes a
+/// division by zero (divisor in RCX) to 5; continues our own code 0x2A00_0001.
+unsafe extern "C" fn handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, c: *mut ContextRecord, _d: *mut u8) -> u32 {
+    let (r, c) = unsafe { (&*r, &mut *c) };
+    SEEN.fetch_add(1, Ordering::SeqCst);
+    match r.num {
+        XCPT_ACCESS_VIOLATION => {
+            let base = SPARSE.load(Ordering::SeqCst) as usize;
+            let at = r.info[1];
+            if base != 0 && (base..base + 0x10_0000).contains(&at) {
+                unsafe { DosSetMem((at & !0xfff) as *mut u8, 4096, PAG_COMMIT | PAG_READ | PAG_WRITE) };
+                return XCPT_CONTINUE_EXECUTION;
+            }
+            XCPT_CONTINUE_SEARCH
+        }
+        XCPT_INTEGER_DIVIDE_BY_ZERO if c.rcx == 0 => {
+            c.rcx = 5;
+            XCPT_CONTINUE_EXECUTION
+        }
+        0x2A00_0001 if r.cparams == 2 && r.info[0] == 0x1234_5678_9abc && r.info[1] == 7 => XCPT_CONTINUE_EXECUTION,
+        _ => XCPT_CONTINUE_SEARCH,
+    }
+}
+
+unsafe extern "C" fn unwind_handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, _c: *mut ContextRecord, _d: *mut u8) -> u32 {
+    if unsafe { (*r).flags } & EH_UNWINDING != 0 {
+        UNWOUND.fetch_add(1, Ordering::SeqCst);
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+unsafe extern "C" fn term_handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, _c: *mut ContextRecord, _d: *mut u8) -> u32 {
+    if unsafe { (*r).num } == XCPT_PROCESS_TERMINATE {
+        TERMINATED.fetch_add(1, Ordering::SeqCst);
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+unsafe extern "C" fn exiting_thread(_: usize) {
+    let mut rec = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(term_handler) };
+    unsafe {
+        DosSetExceptionHandler(&mut rec);
+        DosExit(EXIT_THREAD, 0);
+    }
+}
+
+fn exceptions(failed: &mut u32) {
+    let mut tib: *mut Tib = core::ptr::null_mut();
+    let mut pib: *mut Pib = core::ptr::null_mut();
+    unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
+    check("empty handler chain is END_OF_CHAIN", unsafe { (*tib).pexchain } as usize == usize::MAX, failed);
+    let mut rec = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(handler) };
+    let rc = unsafe { DosSetExceptionHandler(&mut rec) };
+    check("DosSetExceptionHandler", rc == 0 && unsafe { (*tib).pexchain } as usize == &rec as *const _ as usize, failed);
+
+    // Sparse memory: reserved, committed by the handler on first touch.
+    let mut p: *mut u8 = core::ptr::null_mut();
+    unsafe { DosAllocMem(&mut p, 0x10_0000, PAG_READ | PAG_WRITE) };
+    SPARSE.store(p as u64, Ordering::SeqCst);
+    let before = SEEN.load(Ordering::SeqCst);
+    let ok = unsafe {
+        core::ptr::write_volatile(p.add(0x5_0010), 42u8);
+        core::ptr::write_volatile(p.add(0x9_0020), 43u8);
+        core::ptr::read_volatile(p.add(0x5_0010)) == 42 && core::ptr::read_volatile(p.add(0x9_0020)) == 43
+    };
+    check("access violation handled (pages committed)", ok && SEEN.load(Ordering::SeqCst) - before == 2, failed);
+
+    // Division by zero, the context changed.
+    let q: u64;
+    unsafe { core::arch::asm!("div rcx", inout("rax") 100u64 => q, inout("rdx") 0u64 => _, in("rcx") 0u64) };
+    check("divide by zero continued with a changed context", q == 20, failed);
+
+    // DosRaiseException with 64-bit parameters.
+    let mut r = ExceptionReportRecord {
+        num: 0x2A00_0001,
+        flags: 0,
+        nested: core::ptr::null_mut(),
+        address: core::ptr::null_mut(),
+        cparams: 2,
+        reserved: 0,
+        info: [0x1234_5678_9abc, 7, 0, 0],
+    };
+    check("DosRaiseException, continued", unsafe { DosRaiseException(&mut r) } == 0, failed);
+
+    // DosUnwindException: two more records, unwound back to `rec`.
+    let mut a = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(unwind_handler) };
+    let mut b = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(unwind_handler) };
+    unsafe {
+        DosSetExceptionHandler(&mut a);
+        DosSetExceptionHandler(&mut b);
+        DosUnwindException(&mut rec, core::ptr::null(), core::ptr::null_mut());
+    }
+    let head = unsafe { (*tib).pexchain } as usize;
+    check("DosUnwindException", UNWOUND.load(Ordering::SeqCst) == 2 && head == &rec as *const _ as usize, failed);
+    check("DosUnsetExceptionHandler", unsafe { DosUnsetExceptionHandler(&mut rec) } == 0 && unsafe { (*tib).pexchain } as usize == usize::MAX, failed);
+
+    // A thread ending with DosExit sees XCPT_PROCESS_TERMINATE.
+    let mut tid = 0;
+    unsafe {
+        DosCreateThread(&mut tid, exiting_thread, 0, 0, 65536);
+        DosWaitThread(&mut tid, DCWW_WAIT);
+    }
+    check("termination handler of an ending thread", TERMINATED.load(Ordering::SeqCst) == 1, failed);
+    unsafe { DosFreeMem(p) };
+}
+
 fn check(name: &str, ok: bool, failed: &mut u32) {
     println!("  {name}: {}", if ok { "ok" } else { "FAILED" });
     if !ok {
@@ -33,6 +146,10 @@ fn check(name: &str, ok: bool, failed: &mut u32) {
 
 fn main(s: &Startup) -> u32 {
     let mut failed = 0;
+    // `HELLO64 CRASH`: an unhandled access violation (the SYS3175 report).
+    if s.args().windows(5).any(|w| w.eq_ignore_ascii_case(b"CRASH")) {
+        unsafe { core::ptr::write_volatile(0x1234 as *mut u64, 1) };
+    }
     println!("Hello from 64-bit OS/2!");
     let here = main as *const () as usize;
     let mut tib: *mut Tib = core::ptr::null_mut();
@@ -124,6 +241,8 @@ fn main(s: &Startup) -> u32 {
     // Calling the gate stub DosQueryProcAddr returned: DosSleep(1).
     let sleep: unsafe extern "C" fn(u32) -> u32 = unsafe { core::mem::transmute(pfn) };
     check("call through a procedure address", unsafe { sleep(1) } == 0, &mut failed);
+
+    exceptions(&mut failed);
 
     if failed == 0 {
         println!("HELLO64: all tests passed");
