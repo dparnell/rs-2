@@ -133,8 +133,8 @@ pub fn user_exception(f: &mut TrapFrame) {
             match r {
                 Fault::Resolved => return,
                 Fault::Guard if f.cs as u16 == crate::arch::gdt::USER_CS64 => {
-                    // 64-bit code: no exception handlers yet, the stack
-                    // grows (docs/API64.md).
+                    // 64-bit code: the stack grows without asking its
+                    // exception handlers first (docs/API64.md).
                     if guard_default(&p, addr as u32, write) {
                         return;
                     }
