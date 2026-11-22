@@ -96,12 +96,8 @@ impl Image {
     }
 }
 
-pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
-    let d = &data[..];
-    if !is_elf64(d) || u16le(d, 16) != 3 {
-        return Err(err::BAD_EXE_FORMAT);
-    }
-    let entry = u64le(d, 24);
+/// The loadable segments (by address) and the dynamic section's address.
+fn segments(d: &[u8]) -> (Vec<Seg>, Option<u64>) {
     let phoff = u64le(d, 32) as usize;
     let phentsize = u16le(d, 54) as usize;
     let phnum = u16le(d, 56) as usize;
@@ -123,10 +119,42 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
             _ => {}
         }
     }
+    segs.sort_by_key(|s| s.vaddr);
+    (segs, dynamic)
+}
+
+/// A resource of a 64-bit module: (address, size). The module's resource
+/// table is its exported `RS2_RESOURCES` (os2-rc's `bind::table64`):
+/// "RS2RES" and two NULs, a u32 count, a u32 0, then per resource a u16
+/// type, a u16 id, a u32 offset from the table, a u32 size and a u32 0.
+pub fn resource(m: &Module, ty: u16, id: u16) -> Option<(u32, u32)> {
+    let d = &m.image.as_ref()?[..];
+    let ord = *m.names.get("RS2_RESOURCES")?;
+    let Some(Export::At(t)) = m.exports.get(ord as usize - 1) else { return None };
+    let (segs, _) = segments(d);
+    let delta = (m.objects.first()?.base as u64).wrapping_sub(segs.first()?.vaddr);
+    let vaddr = (t.flat as u64).wrapping_sub(delta);
+    let seg = segs.iter().find(|s| (s.vaddr..s.vaddr + s.filesz).contains(&vaddr))?;
+    let table = d.get((seg.offset + vaddr - seg.vaddr) as usize..)?;
+    if table.get(..8)? != b"RS2RES\0\0" {
+        return None;
+    }
+    let count = u32le(table, 8) as usize;
+    (0..count.min(4096)).map(|i| 16 + i * 16).find_map(|e| {
+        (u16le(table, e) == ty && u16le(table, e + 2) == id).then(|| (t.flat + u32le(table, e + 4), u32le(table, e + 8)))
+    })
+}
+
+pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
+    let d = &data[..];
+    if !is_elf64(d) || u16le(d, 16) != 3 {
+        return Err(err::BAD_EXE_FORMAT);
+    }
+    let entry = u64le(d, 24);
+    let (segs, dynamic) = segments(d);
     if segs.is_empty() {
         return Err(err::BAD_EXE_FORMAT);
     }
-    segs.sort_by_key(|s| s.vaddr);
     // Phase 1 of docs/API64.md: everything below 4 GB.
     let lo = segs[0].vaddr;
     let hi = segs.iter().map(|s| s.vaddr + s.memsz).max().unwrap();

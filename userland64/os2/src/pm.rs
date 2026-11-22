@@ -25,6 +25,7 @@ pub const CS_SIZEREDRAW: u32 = 0x0004;
 
 pub const FCF_TITLEBAR: u32 = 0x0001;
 pub const FCF_SYSMENU: u32 = 0x0002;
+pub const FCF_MENU: u32 = 0x0004;
 pub const FCF_SIZEBORDER: u32 = 0x0008;
 pub const FCF_MINMAX: u32 = 0x0030;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
@@ -40,7 +41,11 @@ pub const WM_CLOSE: u32 = 0x0029;
 pub const WM_QUIT: u32 = 0x002a;
 pub const WM_BUTTON1DOWN: u32 = 0x0071;
 pub const WM_CHAR: u32 = 0x007a;
+pub const WM_INITDLG: u32 = 0x003b;
 pub const WM_USER: u32 = 0x1000;
+
+pub const FID_MENU: u32 = 0x8005;
+pub const DID_OK: u32 = 1;
 
 pub const QWP_PFNWP: i32 = -3;
 pub const QWL_USER: i32 = 0;
@@ -222,6 +227,18 @@ unsafe extern "C" {
     pub fn WinStopTimer(hab: HAB, hwnd: HWND, id: u32) -> BOOL;
     #[link_name = "PMWIN.WinMessageBox"]
     pub fn WinMessageBox(parent: HWND, owner: HWND, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
+    #[link_name = "PMWIN.WinWindowFromID"]
+    pub fn WinWindowFromID(parent: HWND, id: u32) -> HWND;
+    #[link_name = "PMWIN.WinLoadString"]
+    pub fn WinLoadString(hab: HAB, hmod: u32, id: u32, cch: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.WinLoadDlg"]
+    pub fn WinLoadDlg(parent: HWND, owner: HWND, pfn: PFNWP, hmod: u32, id: u32, params: *mut u8) -> HWND;
+    #[link_name = "PMWIN.WinDlgBox"]
+    pub fn WinDlgBox(parent: HWND, owner: HWND, pfn: PFNWP, hmod: u32, id: u32, params: *mut u8) -> u32;
+    #[link_name = "PMWIN.WinDefDlgProc"]
+    pub fn WinDefDlgProc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM) -> MRESULT;
+    #[link_name = "PMWIN.WinDismissDlg"]
+    pub fn WinDismissDlg(hwnd: HWND, result: u32) -> BOOL;
     #[link_name = "PMWIN.WinQuerySysValue"]
     pub fn WinQuerySysValue(hwnd: HWND, sv: i32) -> i32;
 

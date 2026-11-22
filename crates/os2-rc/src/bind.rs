@@ -611,3 +611,36 @@ fn ne(d: &[u8], h: usize, list: &[(u16, u16, u16, &[u8])]) -> Result<Vec<u8>, Bi
     }
     Ok(out)
 }
+
+/// The resource table of a 64-bit module (docs/API64.md): the module
+/// exports it as `RS2_RESOURCES` and rs2's loader finds resources in it.
+/// "RS2RES" and two NULs, a u32 count, a u32 0, then per resource a u16
+/// type, a u16 ID, a u32 offset from the table's start, a u32 size and a
+/// u32 0, then the data (each resource on 4 bytes). Named resources get
+/// [`name_id`]'s numbers (no RT_RESNAMES yet).
+pub fn table64(res: &[Resource]) -> Vec<u8> {
+    let mut o = Vec::new();
+    o.extend_from_slice(b"RS2RES\0\0");
+    o.extend_from_slice(&(res.len() as u32).to_le_bytes());
+    o.extend_from_slice(&0u32.to_le_bytes());
+    let mut at = 16 + 16 * res.len();
+    let mut data = Vec::new();
+    for r in res {
+        let id = match &r.name {
+            Name::Id(id) => *id,
+            Name::Str(s) => name_id(s),
+        };
+        o.extend_from_slice(&r.ty.to_le_bytes());
+        o.extend_from_slice(&id.to_le_bytes());
+        o.extend_from_slice(&(at as u32).to_le_bytes());
+        o.extend_from_slice(&(r.data.len() as u32).to_le_bytes());
+        o.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&r.data);
+        while data.len() % 4 != 0 {
+            data.push(0);
+        }
+        at = 16 + 16 * res.len() + data.len();
+    }
+    o.extend_from_slice(&data);
+    o
+}

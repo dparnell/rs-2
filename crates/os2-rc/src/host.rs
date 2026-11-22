@@ -45,3 +45,18 @@ impl crate::Files for HostFiles {
 pub fn path_string(p: &Path) -> String {
     String::from(p.to_string_lossy())
 }
+
+/// Compile the `.RC` script `rc` for a 64-bit module (a build script's
+/// job, docs/API64.md): its resource table ([`crate::bind::table64`]), or
+/// the diagnostics if there were errors.
+pub fn compile_table64(rc: &Path) -> Result<Vec<u8>, String> {
+    let dir = rc.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let name = rc.file_name().map(|n| String::from(n.to_string_lossy())).unwrap_or_default();
+    let mut files = HostFiles { dir };
+    let out = crate::compile(&mut files, &name, &crate::Options::default());
+    let bad: Vec<String> = out.diags.iter().filter(|d| d.severity() >= crate::Severity::Error).map(|d| d.format()).collect();
+    if !bad.is_empty() {
+        return Err(bad.join("\n"));
+    }
+    Ok(crate::bind::table64(&out.resources))
+}

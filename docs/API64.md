@@ -39,6 +39,15 @@ either format.
   `_GLOB_DAT`, `_JUMP_SLOT` (bound at load time; there is no lazy
   binding).
 - **Exports** are the module's defined dynamic symbols, by name.
+- **Resources**: a data symbol `RS2_RESOURCES` holds the module's
+  resource table (`os2_rc::bind::table64`: "RS2RES", a count, then type,
+  ID, offset and size per resource, then the data, in IBM's binary
+  formats as in LX modules). A build script compiles the module's `.RC`
+  script with `os2_rc::host::compile_table64` into
+  `$OUT_DIR/resources.bin` and `os2::resources!()` embeds it;
+  DosGetResource (and so WinLoadMenu, WinLoadDlg, WinLoadString,
+  WinCreateStdWindow's FCF_MENU...) finds resources there. Named
+  resources get IBM RC's numbers for their names (no RT_RESNAMES yet).
 - **Program type**: a data symbol `RS2_APPTYPE` (u32) holds the LX-style
   type, 3 for PM (`os2::app_type!(PM)`); without it a program is window
   compatible.
@@ -186,14 +195,15 @@ other way round:
   back).
 - Not yet: hooks (WinSetHook fails), message parameters that point to
   structures with pointers other than CREATESTRUCT (container records,
-  WM_QUERYWINDOWPARAMS' WNDPARAMS...), resources in 64-bit modules,
-  PMSHAPI and the other PM DLLs.
+  WM_QUERYWINDOWPARAMS' WNDPARAMS...), PMSHAPI and the other PM DLLs.
 
 `C:\RS2\PMDEMO64.EXE` (userland64/pmdemo64) is a 64-bit PM program: a
-frame window drawing text and shapes with GPI and counting timer ticks.
-`PMDEMO64 /SELFTEST` checks the layer (window procedures both ways,
-CREATESTRUCT, QMSG, CLASSINFO, QWP_PFNWP, subclassing the frame,
-WinSendMsg results, the message loop, painting) and prints PASS/FAIL and
+frame window with a menu from its resources (File: About, a dialog
+template; Exit), drawing its string table's greeting and shapes with GPI
+and counting timer ticks. `PMDEMO64 /SELFTEST` checks the layer (window
+and dialog procedures both ways, CREATESTRUCT, QMSG, CLASSINFO,
+QWP_PFNWP, subclassing the frame, WinSendMsg results, the menu, string
+and dialog resources, the message loop, painting) and prints PASS/FAIL and
 `pmdemo64 selftest done: N failure(s)`:
 
 ```text

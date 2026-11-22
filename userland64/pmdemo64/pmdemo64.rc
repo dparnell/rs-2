@@ -1,0 +1,32 @@
+/* PMDEMO64.EXE resources (a 64-bit module: docs/API64.md). */
+#define ID_MAIN    1
+#define IDM_FILE   10
+#define IDM_ABOUT  11
+#define IDM_EXIT   12
+#define IDS_HELLO  20
+#define IDD_ABOUT  30
+
+MENU ID_MAIN
+BEGIN
+    SUBMENU "~File", IDM_FILE
+    BEGIN
+        MENUITEM "~About...", IDM_ABOUT
+        MENUITEM SEPARATOR
+        MENUITEM "E~xit", IDM_EXIT
+    END
+END
+
+STRINGTABLE
+BEGIN
+    IDS_HELLO "Hello from a 64-bit Presentation Manager program!"
+END
+
+DLGTEMPLATE IDD_ABOUT
+BEGIN
+    DIALOG "About PMDEMO64", IDD_ABOUT, 40, 40, 200, 70, 0x80000000, 0x00000003
+    BEGIN
+        CTEXT "A 64-bit OS/2 program", -1, 10, 46, 180, 10
+        CTEXT "running on rs2", -1, 10, 34, 180, 10
+        DEFPUSHBUTTON "OK", 1, 75, 8, 50, 14
+    END
+END

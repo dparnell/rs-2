@@ -21,6 +21,33 @@ use os2::*;
 
 os2::entry!(main);
 os2::app_type!(PM);
+os2::resources!();
+
+const ID_MAIN: u32 = 1;
+const IDM_ABOUT: u16 = 11;
+const IDM_EXIT: u16 = 12;
+const IDS_HELLO: u32 = 20;
+const IDD_ABOUT: u32 = 30;
+
+static HELLO: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static INITDLG: AtomicBool = AtomicBool::new(false);
+
+/// The greeting from the string table (64 bytes kept).
+fn hello() -> String {
+    let mut b = [0u8; 64];
+    for (i, w) in HELLO.iter().enumerate() {
+        b[i * 8..i * 8 + 8].copy_from_slice(&w.load(Ordering::Relaxed).to_le_bytes());
+    }
+    let n = b.iter().position(|&c| c == 0).unwrap_or(64);
+    b[..n].iter().map(|&c| c as char).collect()
+}
+
+unsafe extern "C" fn about_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
+    if msg == WM_INITDLG {
+        INITDLG.store(true, Ordering::Relaxed);
+    }
+    unsafe { WinDefDlgProc(hwnd, msg, mp1, mp2) }
+}
 
 const CLASS: &core::ffi::CStr = c"PmHello64";
 
@@ -56,7 +83,7 @@ unsafe extern "C" fn client_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM)
             let top = r.yTop;
             let mut ok = 1;
             unsafe { GpiSetColor(hps, CLR_DARKBLUE) };
-            ok &= text_at(hps, 20, top - 30, "Hello from a 64-bit Presentation Manager program!");
+            ok &= text_at(hps, 20, top - 30, &hello());
             unsafe { GpiSetColor(hps, CLR_BLACK) };
             let here = client_proc as *const () as usize;
             ok &= text_at(hps, 20, top - 55, &format!("Window procedure at {here:#x}, MPARAM is {} bytes", size_of::<MPARAM>()));
@@ -92,6 +119,18 @@ unsafe extern "C" fn client_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM)
             }
             0
         }
+        WM_COMMAND => {
+            match short1frommp(mp1) {
+                IDM_ABOUT => unsafe {
+                    WinDlgBox(HWND_DESKTOP, hwnd, about_proc, 0, IDD_ABOUT, core::ptr::null_mut());
+                },
+                IDM_EXIT => unsafe {
+                    WinPostMsg(hwnd, WM_CLOSE, 0, 0);
+                },
+                _ => {}
+            }
+            0
+        }
         // Answers with a value from all 64 bits of what it was sent (the
         // 32-bit PMWIN keeps the low halves).
         WM_USER => mp1.wrapping_mul(3).wrapping_add(mp2),
@@ -124,7 +163,14 @@ fn main(s: &Startup) -> u32 {
     let same = ci.pfnWindowProc.map(|p| p as usize) == Some(client_proc as *const () as usize);
     check("WinQueryClassInfo gives the 64-bit procedure", ok && same && ci.cbWindowData == 0);
 
-    let mut fl = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST;
+    let mut text = [0u8; 64];
+    let n = unsafe { WinLoadString(hab, 0, IDS_HELLO, 64, text.as_mut_ptr()) };
+    for (i, w) in HELLO.iter().enumerate() {
+        w.store(u64::from_le_bytes(text[i * 8..i * 8 + 8].try_into().unwrap()), Ordering::Relaxed);
+    }
+    check("WinLoadString (a 64-bit module's string table)", n > 0 && hello().starts_with("Hello from a 64-bit"));
+
+    let mut fl = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST | FCF_MENU;
     let mut client = 0;
     let frame = unsafe {
         WinCreateStdWindow(
@@ -135,7 +181,7 @@ fn main(s: &Startup) -> u32 {
             c"64-bit PM".as_ptr().cast(),
             0,
             0,
-            0,
+            ID_MAIN,
             &mut client,
         )
     };
@@ -148,6 +194,12 @@ fn main(s: &Startup) -> u32 {
     check("WinSubclassWindow returns the frame's procedure", old.is_some());
     let r = unsafe { WinSendMsg(client, WM_USER, 0x1000, 7) };
     check("WinSendMsg to a 64-bit window procedure", r == 0x3007);
+    check("the frame's menu (a 64-bit module's resource)", unsafe { WinWindowFromID(frame, FID_MENU) } != 0);
+    let dlg = unsafe { WinLoadDlg(HWND_DESKTOP, frame, about_proc, 0, IDD_ABOUT, core::ptr::null_mut()) };
+    check("WinLoadDlg (dialog template resource, 64-bit dialog procedure)", dlg != 0 && INITDLG.load(Ordering::Relaxed));
+    let ok_button = unsafe { WinWindowFromID(dlg, DID_OK) };
+    check("the dialog's OK button", ok_button != 0);
+    unsafe { WinDestroyWindow(dlg) };
     let mut title = [0u8; 32];
     let n = unsafe { WinQueryWindowText(frame, 32, title.as_mut_ptr()) };
     check("WinQueryWindowText", &title[..n as usize] == b"64-bit PM");

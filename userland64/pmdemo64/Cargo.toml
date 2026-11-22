@@ -10,3 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 os2 = { path = "../os2" }
+
+[build-dependencies]
+os2-rc = { path = "../../crates/os2-rc", features = ["host"] }

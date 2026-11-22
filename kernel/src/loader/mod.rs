@@ -97,7 +97,7 @@ pub enum Format {
     Elf64,
 }
 
-pub use elfload::is_elf64;
+pub use elfload::{is_elf64, resource as elf_resource};
 
 /// A loaded object (LX) or segment (NE).
 pub struct Object {

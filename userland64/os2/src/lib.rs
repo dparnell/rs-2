@@ -110,6 +110,21 @@ macro_rules! app_type {
     };
 }
 
+/// Embed the module's resources: the table a build script made from the
+/// module's `.RC` script with `os2_rc::host::compile_table64` and wrote to
+/// `$OUT_DIR/resources.bin`. rs2's loader finds it by its name
+/// (`RS2_RESOURCES`), so DosGetResource, WinLoadMenu, WinLoadDlg... see
+/// them.
+#[macro_export]
+macro_rules! resources {
+    () => {
+        #[unsafe(no_mangle)]
+        #[used]
+        pub static RS2_RESOURCES: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/resources.bin")).len()] =
+            *include_bytes!(concat!(env!("OUT_DIR"), "/resources.bin"));
+    };
+}
+
 /// Define the program entry point: `os2::entry!(main)` where
 /// `fn main(s: &os2::Startup) -> u32`. The loader calls
 /// `_start(hmod, 0, env, cmdline)`; returning ends the process.
