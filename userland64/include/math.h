@@ -61,6 +61,7 @@ __RS2_MATH2(fmod) __RS2_MATH2(remainder) __RS2_MATH2(copysign) __RS2_MATH2(nexta
 __RS2_MATH2(fdim) __RS2_MATH2(fmax) __RS2_MATH2(fmin)
 #undef __RS2_MATH1
 #undef __RS2_MATH2
+extern int signgam _RS2_DATA(signgam);
 double fma(double, double, double);
 float fmaf(float, float, float);
 double frexp(double, int *);

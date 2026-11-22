@@ -25,9 +25,9 @@ typedef long ssize_t;
 #define _IOFBF 0
 #define _IOLBF 1
 #define _IONBF 2
-extern FILE *const stdin;
-extern FILE *const stdout;
-extern FILE *const stderr;
+extern FILE *const stdin _RS2_DATA(stdin);
+extern FILE *const stdout _RS2_DATA(stdout);
+extern FILE *const stderr _RS2_DATA(stderr);
 #define stdin stdin
 #define stdout stdout
 #define stderr stderr

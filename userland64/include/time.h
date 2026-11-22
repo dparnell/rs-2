@@ -31,8 +31,8 @@ size_t strftime(char *__restrict, size_t, const char *__restrict, const struct t
 int nanosleep(const struct timespec *, struct timespec *);
 /* The local time zone, from the TZ variable ("EST5EDT", "CET-1"). */
 void tzset(void);
-extern long timezone;
-extern int daylight;
-extern char *tzname[2];
+extern long timezone _RS2_DATA(timezone);
+extern int daylight _RS2_DATA(daylight);
+extern char *tzname[2] _RS2_DATA(tzname);
 _RS2_END
 #endif

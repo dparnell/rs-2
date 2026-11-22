@@ -28,6 +28,13 @@ typedef __SIZE_TYPE__ size_t;
 typedef __WCHAR_TYPE__ wchar_t;
 #endif
 #endif
+/* Data in the C library: with LIBC64.DLL (cc64.sh's default; -D
+ * _RS2_LIBC_DLL), imported from it by name. */
+#if defined(_RS2_LIBC_DLL) && !defined(_RS2_BUILDING_LIBC)
+#define _RS2_DATA(n) __asm__("LIBC64." #n)
+#else
+#define _RS2_DATA(n)
+#endif
 #define _RS2_PRINTF(f, a) __attribute__((format(printf, f, a)))
 #define _RS2_SCANF(f, a) __attribute__((format(scanf, f, a)))
 #endif

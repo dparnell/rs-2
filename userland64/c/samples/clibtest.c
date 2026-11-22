@@ -594,6 +594,38 @@ static void test_env_threads(const char *self) {
     check_str("popen", line, "hello from the child\n");
 }
 
+/* With LIBC64.DLL: a C DLL shares the program's C library. */
+static void test_shared_dll(void) {
+#ifdef _RS2_LIBC_DLL
+    HMODULE h;
+    char failed[64];
+    APIRET rc = DosLoadModule((PSZ)failed, sizeof failed, (PCSZ) "CLIBTDLL", &h);
+    check("DosLoadModule CLIBTDLL", rc == 0);
+    if (rc)
+        return;
+    char *(*upper)(const char *) = 0;
+    void (*print)(const char *) = 0;
+    void (*set_errno)(int) = 0;
+    DosQueryProcAddr(h, 0, (PCSZ) "dll_upper", (PPVOID)&upper);
+    DosQueryProcAddr(h, 0, (PCSZ) "dll_print", (PPVOID)&print);
+    DosQueryProcAddr(h, 0, (PCSZ) "dll_set_errno", (PPVOID)&set_errno);
+    check("DosQueryProcAddr", upper && print && set_errno);
+    if (!upper || !print || !set_errno)
+        return;
+    char *u = upper("shared heap");
+    check("DLL's malloc, program's free", u && !strcmp(u, "SHARED HEAP"));
+    free(u);
+    printf("  shared stdout: ");
+    print("ok");
+    printf("\n");
+    errno = 0;
+    set_errno(4321);
+    check("shared errno", errno == 4321);
+#else
+    printf("  (static C library: no shared DLL test)\n");
+#endif
+}
+
 static int child(int argc, char **argv) {
     if (!strcmp(argv[1], "child-out")) {
         printf("hello from the child\n");
@@ -612,7 +644,11 @@ static int child(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc > 1 && !strncmp(argv[1], "child", 5))
         return child(argc, argv);
-    printf("clibtest: rs2's 64-bit C library\n");
+#ifdef _RS2_LIBC_DLL
+    printf("clibtest: rs2's 64-bit C library (LIBC64.DLL)\n");
+#else
+    printf("clibtest: rs2's 64-bit C library (static)\n");
+#endif
     test_strings();
     test_printf();
     test_scanf();
@@ -623,6 +659,7 @@ int main(int argc, char **argv) {
     test_time();
     test_files();
     test_env_threads(argv[0]);
+    test_shared_dll();
     printf("clibtest: %d checks, %d failures\n", checks, failures);
     return failures;
 }
