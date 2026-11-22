@@ -65,12 +65,16 @@ fn check_names(fs: &dyn fs::FileSystem, p: &FullPath) -> Result<(), u32> {
 
 // ---- Read / write ----
 
-pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
+/// Write `len` bytes at user address `buf` (above 4 GB only from 64-bit
+/// callers, `Ctx::uptr`) to handle `hf`.
+pub fn write_handle(c: &Ctx, hf: u32, buf: impl Into<u64>, len: u32) -> (u32, u32) {
+    let buf: u64 = buf.into();
     let Some(h) = get(c, hf) else { return (err::INVALID_HANDLE, 0) };
     if let Handle::Drive(d) = &h {
+        let Ok(buf) = u32::try_from(buf) else { return (err::INVALID_ADDRESS, 0) };
         return dasd_rw(c, d, buf, len, true);
     }
-    let Some(data) = c.read_vec(buf, len) else { return (err::INVALID_ADDRESS, 0) };
+    let Some(data) = c.uread_vec(buf, len) else { return (err::INVALID_ADDRESS, 0) };
     match h {
         Handle::Con | Handle::Screen => {
             crate::console::write(&data);
@@ -96,7 +100,7 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             let mut pos = f.pos.lock();
             // Byte-range locks (mandatory): a write stops before the
             // first piece that hits one (api/filelock.rs).
-            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, buf, true, !c.is16);
+            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, lock_addr(buf), true, !c.is16);
             let fail = if locked { super::filelock::ERROR_LOCK_VIOLATION } else { 0 };
             if want == 0 && locked {
                 return (fail, 0);
@@ -128,9 +132,13 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     }
 }
 
-pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
+/// Read up to `len` bytes from handle `hf` to user address `buf` (any
+/// width, as `write_handle`).
+pub fn read_handle(c: &Ctx, hf: u32, buf: impl Into<u64>, len: u32) -> (u32, u32) {
+    let buf: u64 = buf.into();
     let Some(h) = get(c, hf) else { return (err::INVALID_HANDLE, 0) };
     if let Handle::Drive(d) = &h {
+        let Ok(buf) = u32::try_from(buf) else { return (err::INVALID_ADDRESS, 0) };
         return dasd_rw(c, d, buf, len, false);
     }
     let mut status = 0;
@@ -149,7 +157,7 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             let mut pos = f.pos.lock();
             // Byte-range locks (mandatory): a read stops before the
             // first piece that hits one (api/filelock.rs).
-            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, buf, false, !c.is16);
+            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, lock_addr(buf), false, !c.is16);
             if want == 0 && locked {
                 return (super::filelock::ERROR_LOCK_VIOLATION, 0);
             }
@@ -180,7 +188,7 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
         },
     };
     let n = data.len().min(len as usize);
-    if n > 0 && !c.write(buf, &data[..n]) {
+    if n > 0 && !c.uwrite(buf, &data[..n]) {
         return (err::INVALID_ADDRESS, 0);
     }
     (status, n as u32)
@@ -211,9 +219,15 @@ pub fn dos16_write(c: &mut Ctx) -> u32 {
     e
 }
 
+/// The buffer address byte-range locking chunks a transfer by (IBM's
+/// 64 KB pieces): memory above 4 GB counts as high memory.
+fn lock_addr(buf: u64) -> u32 {
+    u32::try_from(buf).unwrap_or(0x2000_0000)
+}
+
 pub fn dos_write(c: &mut Ctx) -> u32 {
-    let (e, n) = write_handle(c, c.arg(0), c.arg(1), c.arg(2));
-    c.write_u32(c.arg(3), n);
+    let (e, n) = write_handle(c, c.arg(0), c.uptr(1), c.arg(2));
+    c.uwrite_u32(c.uptr(3), n);
     e
 }
 
@@ -224,11 +238,11 @@ pub fn dos16_read(c: &mut Ctx) -> u32 {
 }
 
 pub fn dos_read(c: &mut Ctx) -> u32 {
-    let (e, n) = read_handle(c, c.arg(0), c.arg(1), c.arg(2));
+    let (e, n) = read_handle(c, c.arg(0), c.uptr(1), c.arg(2));
     if c.trace {
-        crate::trace!("    read {} of {} at {:x} (handle {})", n, c.arg(2), c.arg(1), c.arg(0));
+        crate::trace!("    read {} of {} at {:x} (handle {})", n, c.arg(2), c.uptr(1), c.arg(0));
     }
-    c.write_u32(c.arg(3), n);
+    c.uwrite_u32(c.uptr(3), n);
     e
 }
 

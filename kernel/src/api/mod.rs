@@ -249,7 +249,7 @@ impl Ctx<'_> {
         let stack = self.args_at.wrapping_sub(4);
         if self.is64 {
             let mut b = [0u8; 8];
-            let ok = self.read(self.f.rsp as u32, &mut b);
+            let ok = self.uread(self.f.rsp, &mut b);
             let f = &mut *self.f;
             f.rip = if ok { u64::from_le_bytes(b) } else { 0 };
             f.rsp += 8;
@@ -301,9 +301,10 @@ impl Ctx<'_> {
             4 => f.r8,
             5 => f.r9,
             _ => {
+                // Above the return address; the stack may be above 4 GB.
                 let mut b = [0u8; 8];
-                let at = self.args_at.wrapping_add(8 * (i as u32 - 6));
-                if self.read(at, &mut b) { u64::from_le_bytes(b) } else { 0 }
+                let at = f.rsp.wrapping_add(8 + 8 * (i as u64 - 6));
+                if self.uread(at, &mut b) { u64::from_le_bytes(b) } else { 0 }
             }
         }
     }
@@ -327,8 +328,10 @@ impl Ctx<'_> {
     /// 16-bit APIs). 0 stays 0.
     pub fn ptr(&self, i: usize) -> u32 {
         if self.is64 {
-            // Nothing of a 64-bit program is above 4 GB yet (phase 1):
-            // such a pointer is invalid.
+            // A pointer above 4 GB (the 64-bit arena, vm64.rs) is never
+            // truncated: code that takes such pointers uses `uptr`; here
+            // it is an invalid address. (api64 refuses such arguments to
+            // calls not written for them before they run.)
             let v = self.arg64(i);
             return if v > u32::MAX as u64 { 0xffff_ffff } else { v as u32 };
         }
@@ -344,6 +347,34 @@ impl Ctx<'_> {
         let sel = (v >> 16) as u16;
         let off = v & 0xffff;
         self.space().linear(sel, off).unwrap_or(0xffff_ffff)
+    }
+
+    /// Argument `i` as a user pointer of any width: all 64 bits of a
+    /// 64-bit call (memory above 4 GB too), else as `ptr`. For the
+    /// `u*` accessors below.
+    pub fn uptr(&self, i: usize) -> u64 {
+        if self.is64 { self.arg64(i) } else { self.ptr(i) as u64 }
+    }
+
+    /// `read` at any user address (above 4 GB: the 64-bit arena).
+    pub fn uread(&self, addr: u64, out: &mut [u8]) -> bool {
+        addr != 0 && self.space().read_bytes64(addr, out)
+    }
+
+    /// `write` at any user address.
+    pub fn uwrite(&self, addr: u64, data: &[u8]) -> bool {
+        addr != 0 && self.space().write_bytes64(addr, data)
+    }
+
+    pub fn uwrite_u32(&self, addr: u64, v: u32) -> bool {
+        self.uwrite(addr, &v.to_le_bytes())
+    }
+
+    pub fn uread_vec(&self, addr: u64, len: u32) -> Option<Vec<u8>> {
+        let mut v = Vec::new();
+        v.try_reserve_exact(len as usize).ok()?;
+        v.resize(len as usize, 0);
+        self.uread(addr, &mut v).then_some(v)
     }
 
     pub fn read(&self, addr: u32, out: &mut [u8]) -> bool {
@@ -470,7 +501,9 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     let is64 = f.cs as u16 == crate::arch::gdt::USER_CS64;
     // The trapping instruction is the 2-byte `int 0x99` before RIP.
     let (linear, ss_big, stack_linear) = if is64 {
-        (f.rip.wrapping_sub(2) as u32, true, f.rsp as u32)
+        // Code above 4 GB is never the gate (no truncation to a slot).
+        let rip = f.rip.wrapping_sub(2);
+        (u32::try_from(rip).unwrap_or(0), true, f.rsp as u32)
     } else {
         let space = process.space.lock();
         let lin = code_linear(&space, f.cs as u16, f.rip.wrapping_sub(2));

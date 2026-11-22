@@ -128,7 +128,23 @@ pub fn user_exception(f: &mut TrapFrame) {
         }
         let addr = crate::arch::read_cr2();
         let write = f.error & 2 != 0;
-        if addr < vm::TILED_TOP as u64 * 8 {
+        // The 64-bit arena (vm64.rs): demand paging, and the stack's
+        // default growth for a guard page (64-bit code has no exception
+        // handlers yet).
+        if crate::vm64::in_arena(addr) {
+            let r = p.space.lock().fault_in64(addr, write);
+            match r {
+                Fault::Resolved => return,
+                Fault::Guard => {
+                    let mut sp = p.space.lock();
+                    sp.guard_below64(addr & !(vm::PAGE as u64 - 1));
+                    if sp.fault_in64(addr, write) == Fault::Resolved {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        } else if addr < vm::TILED_TOP as u64 * 8 {
             let r = p.space.lock().fault_in(addr as u32, write);
             match r {
                 Fault::Resolved => return,
@@ -230,10 +246,13 @@ pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
     }
     let Some(t) = sched::current_opt() else { return false };
     let Some(p) = t.process() else { return false };
+    if addr > u32::MAX as u64 && !crate::vm64::in_arena(addr) {
+        return false;
+    }
     let mut sp = p.space.lock();
-    let r = sp.fault_in(addr as u32, error & 2 != 0);
+    let r = sp.fault_in64(addr, error & 2 != 0);
     if r == Fault::Guard {
-        sp.guard_below(addr as u32 & !(vm::PAGE - 1));
+        sp.guard_below64(addr & !(vm::PAGE as u64 - 1));
     }
     matches!(r, Fault::Resolved | Fault::Guard)
 }
