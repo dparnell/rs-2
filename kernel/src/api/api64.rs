@@ -66,6 +66,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
     match ordinal {
         311 => return Some(dos_create_thread64),
         318 => return Some(dos_load_module64),
+        354 => return Some(super::exceptions64::dos_set_exception_handler),
+        355 => return Some(super::exceptions64::dos_unset_exception_handler),
+        356 => return Some(super::exceptions64::dos_raise_exception),
+        357 => return Some(super::exceptions64::dos_unwind_exception),
         LOAD_MODULE32 => return Some(super::module::dos_load_module),
         312 => return Some(dos_get_info_blocks64),
         _ => {}

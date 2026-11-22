@@ -244,3 +244,84 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.286"]
     pub fn DosBeep(freq: u32, ms: u32) -> APIRET;
 }
+
+// ---- Exceptions (64-bit records: docs/API64.md, "Exceptions") ----
+
+pub const XCPT_CONTINUE_SEARCH: u32 = 0;
+pub const XCPT_CONTINUE_EXECUTION: u32 = 0xffff_ffff;
+pub const XCPT_ACCESS_VIOLATION: u32 = 0xC000_0005;
+pub const XCPT_INTEGER_DIVIDE_BY_ZERO: u32 = 0xC000_009B;
+pub const XCPT_UNWIND: u32 = 0xC000_0026;
+pub const XCPT_PROCESS_TERMINATE: u32 = 0xC001_0001;
+pub const XCPT_ASYNC_PROCESS_TERMINATE: u32 = 0xC001_0002;
+pub const XCPT_SIGNAL: u32 = 0xC001_0003;
+pub const EH_NONCONTINUABLE: u32 = 0x01;
+pub const EH_UNWINDING: u32 = 0x02;
+pub const EH_EXIT_UNWIND: u32 = 0x04;
+pub const EH_NESTED_CALL: u32 = 0x10;
+/// The end of the registration record chain.
+pub const END_OF_CHAIN: *mut ExceptionRegistrationRecord = usize::MAX as *mut ExceptionRegistrationRecord;
+
+pub type ExceptionHandler =
+    unsafe extern "C" fn(*mut ExceptionReportRecord, *mut ExceptionRegistrationRecord, *mut ContextRecord, *mut u8) -> u32;
+
+#[repr(C)]
+pub struct ExceptionRegistrationRecord {
+    pub prev: *mut ExceptionRegistrationRecord,
+    pub handler: Option<ExceptionHandler>,
+}
+
+#[repr(C)]
+pub struct ExceptionReportRecord {
+    pub num: u32,
+    pub flags: u32,
+    pub nested: *mut ExceptionReportRecord,
+    pub address: *mut u8,
+    pub cparams: u32,
+    pub reserved: u32,
+    pub info: [usize; 4],
+}
+
+/// CONTEXTRECORD of 64-bit code (CONTEXT_CONTROL | INTEGER | SEGMENTS).
+#[repr(C, align(16))]
+pub struct ContextRecord {
+    pub flags: u32,
+    pub reserved: u32,
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub rsp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    pub rip: u64,
+    pub rflags: u64,
+    pub cs: u32,
+    pub ss: u32,
+    pub ds: u32,
+    pub es: u32,
+    pub fs: u32,
+    pub gs: u32,
+    pub reserved2: [u32; 4],
+    pub fxsave: [u8; 512],
+}
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.354"]
+    pub fn DosSetExceptionHandler(rec: *mut ExceptionRegistrationRecord) -> APIRET;
+    #[link_name = "DOSCALLS.355"]
+    pub fn DosUnsetExceptionHandler(rec: *mut ExceptionRegistrationRecord) -> APIRET;
+    #[link_name = "DOSCALLS.356"]
+    pub fn DosRaiseException(report: *mut ExceptionReportRecord) -> APIRET;
+    #[link_name = "DOSCALLS.357"]
+    pub fn DosUnwindException(target: *mut ExceptionRegistrationRecord, ip: *const u8, report: *mut ExceptionReportRecord) -> APIRET;
+}

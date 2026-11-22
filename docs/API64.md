@@ -85,16 +85,15 @@ programs may call:
   dispatcher clears the high half;
 - calls with their own 64-bit versions: DosCreateThread (a 64-bit
   parameter, a long-mode thread function returning into the thread exit
-  stub) and DosGetInfoBlocks (64-bit TIB and PIB);
+  stub), DosGetInfoBlocks (64-bit TIB and PIB), DosLoadModule (64-bit
+  DLLs first) and the exception calls (see "Exceptions");
 - refused arguments: extended attribute lists (EAOP2 holds pointers), so
   DosOpen and DosCreateDir need a null `peaop2` and the EA levels of
   DosQueryPathInfo, DosQueryFileInfo, DosFindFirst, DosSetPathInfo and
   DosSetFileInfo return ERROR_INVALID_PARAMETER.
 
 Anything else returns ERROR_CALL_NOT_IMPLEMENTED and is logged once
-("not available to 64-bit programs yet"). Not yet: exception handlers
-(DosSetExceptionHandler and friends, with a 64-bit CONTEXTRECORD),
-DosExitList, muxwait semaphores (SEMRECORD holds an HSEM, a pointer),
+("not available to 64-bit programs yet"). Not yet: DosExitList, muxwait semaphores (SEMRECORD holds an HSEM, a pointer),
 DosStartSession (STARTDATA), DosQuerySysState, DosGetMessage, the VIO,
 KBD and MOU calls.
 
@@ -105,7 +104,7 @@ area at one address in every 64-bit process (`process::info64_base`):
 
 ```c
 typedef struct _TIB {          /* 40 bytes */
-    PVOID pexchain;            /* exception handlers: none yet (0) */
+    PVOID pexchain;            /* exception handlers (-1: none) */
     PVOID pstack, pstacklimit; /* stack base and top */
     PTIB2 ptib2;               /* the 32-bit TIB's TIB2 (same layout) */
     ULONG version, ordinal;
@@ -119,11 +118,50 @@ typedef struct _PIB {          /* 40 bytes */
 
 ### Exceptions
 
-Page faults resolve as for 32-bit code (committing, the stack's guard
-page grows it). Any other exception in 64-bit code ends the process
-(TC_TRAP) with a SYS3175 line on its console and the registers on the
-log. 32-bit code that runs in a 64-bit process (the PM thunks below) has
-the usual 32-bit exception handling.
+64-bit code has OS/2's exception handlers (`kernel/src/api/exceptions64.rs`),
+with 64-bit records: a chain of registration records headed by the
+64-bit TIB's `pexchain` (-1, all 64 bits, when empty), DosSetExceptionHandler,
+DosUnsetExceptionHandler (takes the record off the chain wherever it is),
+DosRaiseException and DosUnwindException.
+
+```c
+typedef struct _EXCEPTIONREGISTRATIONRECORD {    /* 16 bytes */
+    struct _EXCEPTIONREGISTRATIONRECORD *prev_structure;
+    _ERR *ExceptionHandler;
+} EXCEPTIONREGISTRATIONRECORD;
+typedef struct _EXCEPTIONREPORTRECORD {           /* 64 bytes */
+    ULONG ExceptionNum, fHandlerFlags;
+    struct _EXCEPTIONREPORTRECORD *NestedExceptionReportRecord;
+    PVOID ExceptionAddress;
+    ULONG cParameters, reserved;
+    ULONG_PTR ExceptionInfo[4];                   /* 64 bits each */
+} EXCEPTIONREPORTRECORD;
+typedef struct _CONTEXT {                         /* 704 bytes, aligned 16 */
+    ULONG ContextFlags, reserved;                 /* 7: control, integer, segments */
+    ULONG64 rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8 ... r15;   /* at 8 */
+    ULONG64 rip, rflags;                          /* at 136 */
+    ULONG cs, ss, ds, es, fs, gs;                 /* at 152 */
+    ULONG reserved2[4];
+    BYTE fxsave[512];                             /* at 192: not filled yet */
+} CONTEXTRECORD;
+ULONG handler(PEXCEPTIONREPORTRECORD, PEXCEPTIONREGISTRATIONRECORD,
+              PCONTEXTRECORD, PVOID);             /* System V */
+```
+
+The dispatch is the 32-bit one's: the kernel puts the records below the
+faulting stack pointer (past the red zone) and calls each handler in long
+mode, returning through the API gate; XCPT_CONTINUE_EXECUTION resumes
+with the (possibly changed) context, XCPT_CONTINUE_SEARCH goes on down
+the chain, and an exception nobody takes gets the default action: a
+SYS317x report with the 64-bit registers on the console and the log, and
+the process ends (TC_TRAP). Signals (XCPT_SIGNAL), DosKillThread and the
+termination of a thread or process (XCPT_PROCESS_TERMINATE,
+XCPT_ASYNC_PROCESS_TERMINATE, unwinding the whole chain) reach 64-bit
+handlers the same way. An access violation's ExceptionInfo[1] is the full
+fault address. Not yet: the floating point state in the context, guard
+page exceptions (the stack grows without asking the handlers), DosDebug
+of 64-bit code. 32-bit code running in a 64-bit process (the PM thunks)
+keeps the 32-bit chain in its 32-bit TIB.
 
 ## Memory
 
@@ -152,7 +190,11 @@ heap on DosAllocMem, and the routines the compiler expects (memcpy...).
 
 `C:\RS2\HELLO64.EXE` is the smoke test: TIB/PIB, DosQuerySysInfo, the
 heap, DosAllocMem, DosScanEnv, threads with a 64-bit parameter, an event
-semaphore, a file, DosQueryProcAddr and a call through its result.
+semaphore, a file, DosQueryProcAddr and a call through its result, and
+exception handlers (sparse memory committed on access violations, a
+division by zero continued with a changed context, DosRaiseException,
+DosUnwindException, a termination handler). `HELLO64 CRASH` shows the
+report of an unhandled exception.
 
 ```text
 cargo xtask run --headless --timeout 35 --init "OS2\CMD.EXE /K RS2\HELLO64.EXE"

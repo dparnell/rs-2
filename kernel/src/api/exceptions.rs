@@ -100,6 +100,8 @@ pub struct Dispatch {
     /// the records and handler frames once went right below it, over
     /// the throwing function's live stack).
     pub stack: u32,
+    /// 64-bit records and handler (exceptions64.rs).
+    pub is64: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -214,6 +216,10 @@ fn flat_stack(sp: &vm::AddressSpace, f: &TrapFrame) -> Option<u32> {
 
 /// Entry point for CPU exceptions raised by user code.
 pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
+    if super::exceptions64::is64(f) {
+        super::exceptions64::deliver(f, p, t);
+        return;
+    }
     let (code, info) = translate(f);
     if super::tracing() {
         crate::trace!("    exception {code:x} {info:x?} at {:x}:{:x} vector {} error {:x} esp {:x} ebp {:x}", f.cs, f.rip, f.vector, f.error, f.rsp, f.rbp);
@@ -231,6 +237,10 @@ pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 /// Start dispatching an exception. Returns false if there is no handler to
 /// call (the caller applies the default action).
 pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, flags: u32, info: &[u32], address: u32) -> bool {
+    if super::exceptions64::is64(f) {
+        let info: Vec<u64> = info.iter().map(|&v| v as u64).collect();
+        return super::exceptions64::raise(f, p, t, code, flags, &info, f.rip.max(address as u64));
+    }
     let tib = t.tib();
     let mut sp = p.space.lock();
     let Some(stack) = flat_stack(&sp, f) else {
@@ -251,7 +261,7 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     let nested = !t.xcpt.lock().is_empty();
     let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
     let Some((report, context)) = build_records(&mut sp, f, stack, code, flags, info, address) else { return false };
-    let d = Dispatch { report, context, reg: head, unwind: None, code, stack: report.wrapping_sub(16) };
+    let d = Dispatch { report, context, reg: head, unwind: None, code, stack: report.wrapping_sub(16), is64: false };
     call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -321,6 +331,10 @@ fn call_handler(sp: &mut vm::AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
 /// A handler returned (through the gate) with its result in EAX.
 pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let Some(mut d) = t.xcpt.lock().pop() else { return };
+    if d.is64 {
+        super::exceptions64::handler_returned(f, p, t, d);
+        return;
+    }
     let result = f.rax as u32;
     let mut sp = p.space.lock();
     if let Some(u) = d.unwind {
@@ -328,7 +342,7 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         let prev = rd(&mut sp, d.reg).unwrap_or(xcpt::END_OF_CHAIN);
         wr(&mut sp, t.tib(), prev);
         if prev == u.target || prev == xcpt::END_OF_CHAIN || prev == 0 {
-            finish_unwind(&mut sp, f, &u, t);
+            finish_unwind(f, &u, t);
             return;
         }
         d.reg = prev;
@@ -369,8 +383,7 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     t.xcpt.lock().push(d);
 }
 
-fn finish_unwind(sp: &mut vm::AddressSpace, f: &mut TrapFrame, u: &Unwind, t: &Arc<Thread>) {
-    let _ = sp;
+pub(super) fn finish_unwind(f: &mut TrapFrame, u: &Unwind, t: &Arc<Thread>) {
     if u.exit {
         t.exit_unwind.store(2, core::sync::atomic::Ordering::Relaxed);
     }
@@ -422,7 +435,7 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     }
     let u = Unwind { target, target_ip, resume, exit: false };
     if head == target || head == xcpt::END_OF_CHAIN || head == 0 {
-        finish_unwind(&mut sp, c.f, &u, &t);
+        finish_unwind(c.f, &u, &t);
         c.no_return = true;
         return 0;
     }
@@ -444,7 +457,7 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     wr(&mut sp, report + 4, flags | unwind_flag);
     let context = own.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, c.f);
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16) };
+    let d = Dispatch { report, context, reg: head, unwind: Some(u), code: xcpt::UNWIND, stack: context.wrapping_sub(16), is64: false };
     call_handler(&mut sp, c.f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -495,6 +508,9 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
     if tib == 0 || p.exitlist_tid.load(Ordering::Relaxed) == t.tid {
         return false;
     }
+    if super::exceptions64::is64(f) {
+        return super::exceptions64::exit_unwind(f, p, t);
+    }
     let mut sp = p.space.lock();
     let Some(stack) = flat_stack(&sp, f) else {
         return false;
@@ -515,7 +531,7 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
     let context = report.wrapping_sub(CONTEXT_SIZE) & !15;
     save_context(&mut sp, context, f);
     let u = Unwind { target: xcpt::END_OF_CHAIN, target_ip: 0, resume: *f, exit: true };
-    let d = Dispatch { report, context, reg: head, unwind: Some(u), code, stack: context.wrapping_sub(16) };
+    let d = Dispatch { report, context, reg: head, unwind: Some(u), code, stack: context.wrapping_sub(16), is64: false };
     call_handler(&mut sp, f, &d);
     drop(sp);
     t.xcpt.lock().push(d);
@@ -560,6 +576,11 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         c if (0xC000_0090..=0xC000_009A).contains(&c) => ("SYS3173", "floating point error"),
         _ => ("SYS3170", "unexpected exception"),
     };
+    if super::exceptions64::is64(f) {
+        super::exceptions64::report(f, p, t, sys, what, code);
+        p.exit(2, 0xffff);
+        return;
+    }
     crate::println!(
         "\n{sys}: A program generated an {what} at {:08x}.\n{} - {:08x}, process {}, thread {}.",
         f.rip as u32,
