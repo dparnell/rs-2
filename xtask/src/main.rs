@@ -1131,6 +1131,7 @@ const PROGRAMS64: &[(&str, &str)] = &[
 const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
     (&["c/samples/hello.c"], &[], "RS2\\CHELLO64.EXE"),
     (&["c/samples/pmhello.c"], &["--pm", "--rc", "userland64/c/samples/pmhello.rc"], "RS2\\CPMHELLO.EXE"),
+    (&["c/samples/clibtest.c"], &[], "RS2\\CLIBTEST.EXE"),
 ];
 
 /// Build the userland64 workspace (x86-64 ELF shared objects).

@@ -41,7 +41,7 @@ const PLAIN: &[u16] = &[
     // Semaphores (event, mutex).
     324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336,
     // Processes and threads.
-    111, 113, 229, 232, 233, 234, 235, 236, 237, 238, 280, 283, 349, 379, 380, 381, 415, 460,
+    111, 113, 229, 232, 233, 234, 235, 236, 237, 238, 280, 283, 349, 378, 379, 380, 381, 415, 418, 460,
     // Modules.
     318, 319, 320, 322, 323, 353, 572, 586, 873, 874,
     // Time, information, national language support.
@@ -154,6 +154,7 @@ const PTR_ARGS: &[(u16, u16)] = &[
     (345, 0b11),       // DosSubAllocMem(pbBase, ppb, cb)
     (346, 0b11),       // DosSubFreeMem(pbBase, pb, cb)
     (347, 0b1),        // DosSubUnsetMem(pbBase)
+    (378, 0b10),       // DosSetSignalExceptionFocus(flag, pulTimes)
     (454, 0b10),       // DosAllocThreadLocalMemory(cb, ppul)
     (455, 0b1),        // DosFreeThreadLocalMemory(pul)
     (324, 0b11),       // DosCreateEventSem(psz, phev, fl, state)
