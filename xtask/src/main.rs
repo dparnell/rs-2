@@ -1114,6 +1114,40 @@ fn build_userland() -> Option<image::FileList> {
         files.push((ul.join(src), dest.to_string()));
     }
     files.extend(build_userland_std()?);
+    files.extend(build_userland64()?);
+    Some(files)
+}
+
+/// 64-bit programs and DLLs in userland64/ (docs/API64.md): cargo
+/// package, file on the boot volume. They are ELF64 images as linked.
+const PROGRAMS64: &[(&str, &str)] = &[
+    ("hello64", "RS2\\HELLO64.EXE"),
+    ("pmwin", "RS2\\DLL64\\PMWIN.DLL"),
+    ("pmdemo64", "RS2\\PMDEMO64.EXE"),
+];
+
+/// Build the userland64 workspace (x86-64 ELF shared objects).
+fn build_userland64() -> Option<image::FileList> {
+    let dir = root().join("userland64");
+    let status = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+        .current_dir(&dir)
+        .args(["build", "--release"])
+        .env_remove("CARGO_TARGET_DIR")
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    // Their own directory: 64-bit DLLs have the 32-bit ones' names.
+    let out_dir = root().join("work/userland/64");
+    std::fs::create_dir_all(&out_dir).ok()?;
+    let mut files = Vec::new();
+    for (pkg, dest) in PROGRAMS64 {
+        let so = dir.join("target/x86_64-unknown-linux-gnu/release").join(format!("lib{pkg}.so"));
+        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
+        std::fs::copy(&so, &out).ok()?;
+        files.push((out, dest.to_string()));
+    }
     Some(files)
 }
 

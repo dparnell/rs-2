@@ -1,7 +1,11 @@
 # Self-hosting rs2 (notes for later)
 
-Status: an idea, not planned work. This records what it would take for rs2
-to build itself, i.e. `cargo xtask iso` running on rs2.
+Status: under way. This records what it would take for rs2 to build
+itself, i.e. `cargo xtask iso` running on rs2. The first step is done:
+rs2 runs 64-bit programs (ELF64, long mode) with a native 64-bit OS/2
+API, including PM: see [API64.md](API64.md). What remains for either
+route below starts with memory above 4 GB for 64-bit processes
+(API64.md "Memory", phase 2).
 
 ## What the build needs
 
@@ -18,8 +22,7 @@ LLVM on rs2.
   3 GB. rustc + LLVM compiling the kernel crate needs gigabytes.
 - There is no known LLVM or rustc port to OS/2.
 
-The compiler therefore has to run as a 64-bit process. rs2 has none today:
-user space is 32/16-bit compatibility mode only.
+The compiler therefore has to run as a 64-bit process ([API64.md](API64.md)).
 
 ## Route A (preferred): a Linux system-call layer for 64-bit ELF programs
 

@@ -1,0 +1,15 @@
+[package]
+name = "pmdemo64"
+description = "A 64-bit Presentation Manager program (docs/API64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+os2 = { path = "../os2" }
+
+[build-dependencies]
+os2-rc = { path = "../../crates/os2-rc", features = ["host"] }

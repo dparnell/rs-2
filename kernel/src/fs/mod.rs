@@ -844,6 +844,35 @@ pub fn find_module(name: &str) -> Result<(String, Arc<[u8]>), u32> {
     Err(NOT_FOUND)
 }
 
+/// Find a 64-bit DLL (docs/API64.md): `\RS2\DLL64` of the boot drive
+/// first, then the directories `find_module` searches; only ELF64 files
+/// count (a 32-bit DLL of the same name is passed over).
+pub fn find_module64(name: &str) -> Result<(String, Arc<[u8]>), u32> {
+    const NOT_FOUND: u32 = 2;
+    if name.contains(['\\', '/', ':']) {
+        return find_module(name);
+    }
+    let file = if name.contains('.') { name.to_string() } else { alloc::format!("{name}.DLL") };
+    // The system drive, as QSV_BOOT_DRIVE reports it.
+    let boot = 'C';
+    let mut dirs = alloc::vec![alloc::format!("{boot}:\\RS2\\DLL64")];
+    if let Some(p) = crate::task::sched::current_opt().and_then(|t| t.process()) {
+        let x = p.ext_libpath.lock();
+        dirs.extend(x.0.split(';').filter(|s| !s.is_empty()).map(String::from));
+    }
+    dirs.extend(libpath());
+    for dir in dirs {
+        let full = alloc::format!("{}\\{}", dir.trim_end_matches('\\'), file);
+        match load_file(&full) {
+            Ok(d) if crate::loader::is_elf64(&d) => return Ok((full.to_ascii_uppercase(), d)),
+            Ok(_) => {}
+            Err(e) if !not_here(e) => return Err(e),
+            Err(_) => {}
+        }
+    }
+    Err(NOT_FOUND)
+}
+
 /// Mount the boot volumes handed over by the loader: a module named
 /// `X.IMG` becomes drive X:.
 pub fn init(info: &bootinfo::BootInfo) {

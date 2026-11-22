@@ -12,6 +12,7 @@
 //! | `0x40`   | the BIOS data area of Windows programs (infoseg.rs) |
 //! | `0x53`   | user flat data (`DS`/`ES`/`SS` of 32-bit code) |
 //! | `0x5B`   | user flat 32-bit code |
+//! | `0x6B`   | user 64-bit code (64-bit programs, docs/API64.md) |
 //! | `0x150B` | thread information block (`FS` of 32-bit code) |
 //!
 //! Entries from `FIRST_DYNAMIC` up are handed out for global selectors such
@@ -29,6 +30,8 @@ pub const TSS_SEL: u16 = 0x20;
 pub const LDT_SEL: u16 = 0x30;
 pub const USER_DS: u16 = 0x53;
 pub const USER_CS: u16 = 0x5b;
+/// 64-bit user code (long mode): 64-bit processes (docs/API64.md).
+pub const USER_CS64: u16 = 0x6b;
 pub const TIB_SEL: u16 = 0x150b;
 
 pub const ENTRIES: usize = 8192;
@@ -234,6 +237,12 @@ pub fn init() {
         0xfffff,
         PRESENT | DPL3 | CODE_DATA | CODE | READABLE | ACCESSED,
         flags::BIG | flags::GRANULARITY,
+    );
+    g[USER_CS64 as usize / 8] = descriptor(
+        0,
+        0xfffff,
+        PRESENT | DPL3 | CODE_DATA | CODE | READABLE | ACCESSED,
+        flags::LONG | flags::GRANULARITY,
     );
     set_tib_base(0, 0xfff);
 
