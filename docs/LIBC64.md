@@ -23,6 +23,7 @@ a header or the script is newer than them):
 | `LIBC64.DLL` | the library as a DLL (xtask installs it in `C:\RS2\DLL64`); it exports the library's 410 functions and its data by name |
 | `libc64.a` | its import library: one member per function, a stub `name: jmp *LIBC64.name@GOTPCREL(%rip)`, so a program imports only what it calls |
 | `crt1.o` | a program's own start-up code (`_start`), linked into each program that uses the DLL |
+| `crtdll.o` | a DLL's own start-up code (`_DLL_InitTerm`), linked into each DLL cc64.sh makes |
 | `libc.a` | the library to link in (`--static`), crt1.o included |
 
 ## The DLL
@@ -42,8 +43,23 @@ a header or the script is newer than them):
   environment, command line, `main` and its own constructor and
   destructor lists (`__init_array_start` and the rest) to `__rs2_start`
   in the library. That function does everything else, as it does when
-  linked statically. A DLL has no start-up code of its own; LIBC64.DLL's
-  state starts as its data was initialised.
+  linked statically. LIBC64.DLL itself has no start-up code: its state
+  starts as its data was initialised.
+- **C DLLs' constructors and destructors.** Every DLL cc64.sh links gets
+  `crtdll.o`, which exports `_DLL_InitTerm(hmod, flag)`. The kernel calls
+  that once per process (see API64.md, "Executables"): when the process
+  starts using the DLL (before `main` for a DLL the program imports, or
+  inside DosLoadModule) and when it stops. With flag 0 it runs the DLL's
+  constructors and puts a function running its destructors on the C
+  library's exit list with `__cxa_atexit`, tagged with the DLL's
+  `__dso_handle`. So `exit()` runs the DLL's destructors, in reverse
+  order with the program's own and the `atexit` functions, while stdio
+  still works. With flag 1 (DosFreeModule, or a process that ends without
+  `exit`) it calls `__cxa_finalize` for the DLL, which runs its
+  destructors if they have not run yet. A DLL loaded again after its last
+  DosFreeModule gets fresh data and is constructed again, as OS/2 does.
+  Constructors run before the program's `__rs2_start`, so `environ` is
+  not set yet, but `getenv` asks DosScanEnv until it is.
 - **Functions** are imported through the stubs. A stub is a single jump,
   so even `setjmp` works through one. **Data** is imported directly: with
   `-D_RS2_LIBC_DLL`, which `cc64.sh` passes unless given `--static`, the
@@ -173,9 +189,9 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
 - wide characters beyond `mbtowc`/`wctomb` in the "C" locale (wchar.h,
   wctype.h); other locales.
 - threads.h and C11 atomics headers (clang's `__atomic` builtins work).
-- constructors in DLLs (a C DLL has no start-up code; its
-  `__attribute__((constructor))` functions do not run). With `--static`,
-  a DLL also has no `environ` (getenv asks DosScanEnv).
+- with `--static`, a DLL has no `environ` (getenv asks DosScanEnv), and
+  its destructors run at its termination, after the program's `exit` has
+  flushed the program's own streams.
 - versioning of LIBC64.DLL's exports: programs import by name, so adding
   functions is safe, but changing a structure's layout (`FILE` is opaque;
   `struct stat`, `struct tm` and `jmp_buf` are not) means rebuilding
@@ -187,18 +203,24 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
 ## Tests
 
 `C:\RS2\CLIBTEST.EXE` (userland64/c/samples/clibtest.c, with LIBC64.DLL)
-and `C:\RS2\CLIBTSTS.EXE` (the same program, `--static`) make 152 checks:
+and `C:\RS2\CLIBTSTS.EXE` (the same program, `--static`) make 157 checks:
 strings, conversions, printf (including exact float output), scanf,
 strtod round trips, the heap under a random load and in large blocks,
 sorting, math against known values, setjmp, SIGSEGV, SIGFPE and SIGINT
 handlers that longjmp or return, time zones and strftime, text and
 binary streams, handles, directories, the environment, threads with their
 own errno, `spawnv` with quoted arguments and an inherited variable,
-and `popen`. With the DLL there are four more: CLIBTEST loads
+`popen`, and C DLLs' constructors and destructors. The constructor of
+`C:\RS2\DLL64\CLIBTDL2.DLL` (clibtdll.c again), which the program
+imports, ran before `main`. DosLoadModule of `CLIBTDLL.DLL` runs its
+constructor, and DosFreeModule its destructor, which leaves a file
+behind. Loaded again, the DLL is constructed again. A child process that
+loads one DLL and imports the other leaves both files when it calls
+`exit`. With the DLL there are four more checks: CLIBTEST loads
 `C:\RS2\DLL64\CLIBTDLL.DLL` (clibtdll.c, a C DLL), frees a string the
 DLL malloc'd, has the DLL print into the same `stdout` buffer, and sees
 the `errno` the DLL set. It prints one line per check and
-`clibtest: N checks, M failures` (156 and 152), and exits with M:
+`clibtest: N checks, M failures` (161 and 157), and exits with M:
 
 ```text
 cargo xtask run --headless --timeout 120 --init "RS2\CLIBTEST.EXE"

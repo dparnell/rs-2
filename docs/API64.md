@@ -56,6 +56,19 @@ either format.
   `C:\RS2\DLL64`, then along BEGINLIBPATH and LIBPATH (only ELF64 files
   count there). DosLoadModule from 64-bit code finds 64-bit DLLs; 32-bit
   callers never see them.
+- **DLL initialisation**: a DLL that exports `_DLL_InitTerm` (the name
+  IBM's compilers give an LX DLL's init/term routine) has it called as
+  `unsigned long _DLL_InitTerm(unsigned long hmod, unsigned long flag)`
+  (System V), once per process. Flag 0 comes when the process starts
+  using the DLL: before the program's entry point for DLLs it imports,
+  imports first, or inside DosLoadModule before that returns. Flag 1
+  comes when the process stops using it: at DosFreeModule's last
+  reference, or after the exit list at the end of the process. Returning
+  0 from flag 0 fails the load (ERROR_INIT_ROUTINE_FAILED), as for LX
+  DLLs: kernel/src/api/module.rs runs both kinds the same way, returning
+  through the same gate slot. Writable data is each process's own, and a
+  DLL loaded again after its last DosFreeModule gets fresh data. C DLLs
+  get a `_DLL_InitTerm` that runs their constructors (LIBC64.md).
 
 The entry point is `_start(hmod, 0, env, cmdline)` (RDI, RSI, RDX, RCX),
 entered as if called from the exit stub: returning ends the process with

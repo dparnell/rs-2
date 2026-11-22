@@ -590,6 +590,13 @@ pub fn load_dll_again<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str,
     Ok(m)
 }
 
+/// Attach a DLL found by load_global64 for DosLoadModule from 64-bit code:
+/// as load_dll_again, a DLL this process let go of gets fresh data.
+pub fn attach_again(m: &Arc<Module>, used: &[u16], space: &mut AddressSpace) -> Result<(), u32> {
+    refresh_instance(m, used, &mut Vec::new(), space);
+    attach(m, space)
+}
+
 fn refresh_instance(m: &Arc<Module>, used: &[u16], seen: &mut Vec<u16>, space: &mut AddressSpace) {
     if used.contains(&m.hmte) || seen.contains(&m.hmte) {
         return;
