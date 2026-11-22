@@ -560,6 +560,10 @@ IBM's Warp 4.5 kernels (studied in the debug kernel `os2krnld` of Warp
 limit       VIRTUALADDRESSLIMIT (default 1 GB)         /
 ```
 
+64-bit processes also have a private arena from 4 GB to 512 GB
+(`kernel/src/vm64.rs`, docs/API64.md "Memory"); 32-bit code never sees
+it.
+
 Objects start on 64 KB boundaries in every arena. Shared objects (named
 and unnamed shared memory, DLL objects) have one address in every
 process: their ranges are reserved in one system-wide map.
