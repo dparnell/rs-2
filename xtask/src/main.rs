@@ -1135,6 +1135,7 @@ const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
     // The same, with the C library linked in (cc64.sh --static).
     (&["c/samples/clibtest.c"], &["--static"], "RS2\\CLIBTSTS.EXE"),
     (&["c/samples/clibtdll.c"], &["--dll"], "RS2\\DLL64\\CLIBTDLL.DLL"),
+    (&["c/samples/clibtdll.c"], &["--dll", "-DMARK=\"CLIBTDL2.FIN\""], "RS2\\DLL64\\CLIBTDL2.DLL"),
 ];
 
 /// Build the userland64 workspace (x86-64 ELF shared objects).

@@ -54,10 +54,12 @@ cc() {
 #   libc64.a      its import library: one stub per function,
 #                 "jmp *LIBC64.name@GOTPCREL(%rip)"
 #   crt1.o        a program's start-up code, for use with the DLL
+#   crtdll.o      a DLL's start-up code (_DLL_InitTerm: constructors)
 libdir=${LIBC64_DIR:-$root/target/libc64}
 lib=$libdir/libc.a
 implib=$libdir/libc64.a
 crt1=$libdir/crt1.o
+crtdll=$libdir/crtdll.o
 dllfile=$libdir/LIBC64.DLL
 # Where LIBC64.DLL is linked (the loader moves it if that range is taken).
 LIBC64_BASE=0x18100000
@@ -66,7 +68,7 @@ link() {
         --hash-style=sysv --gc-sections "$@"
 }
 build_libc() {
-    if [ -f "$lib" ] && [ -f "$implib" ] && [ -f "$dllfile" ] && [ -f "$crt1" ] &&
+    if [ -f "$lib" ] && [ -f "$implib" ] && [ -f "$dllfile" ] && [ -f "$crt1" ] && [ -f "$crtdll" ] &&
         [ -z "$(find "$ul/libc" "$ul/include" "$here/cc64.sh" -newer "$lib" -type f | head -1)" ]; then
         return
     fi
@@ -76,6 +78,10 @@ build_libc() {
         n=$(basename "$s" | sed 's/\.[cS]$//')
         cc -ffreestanding -fno-builtin -D_RS2_BUILDING_LIBC -Werror -c "$s" -o "$libdir/obj/$n.o"
         [ "$n" = crt1 ] && continue
+        if [ "$n" = crtdll ]; then
+            mv "$libdir/obj/crtdll.o" "$crtdll"
+            continue
+        fi
         # The DLL exports the library's functions and data (internal
         # ones are hidden in libc.h).
         cc -ffreestanding -fno-builtin -D_RS2_BUILDING_LIBC -fvisibility=default -Werror -c "$s" -o "$libdir/dll/$n.o"
@@ -136,8 +142,8 @@ done
         printf '.section .rodata\n.globl RS2_RESOURCES\n.type RS2_RESOURCES,@object\n.p2align 2\nRS2_RESOURCES: .incbin "%s"\n' "$tmp/res.bin"
     fi
     if [ -n "$dll" ]; then
-        # A DLL has no C start-up: the library's state starts as it is
-        # initialised in its data.
+        # The ELF entry point, unused for a DLL (crtdll.o's _DLL_InitTerm
+        # is its initialisation).
         printf '.text\n.globl _start\n_start: ret\n'
     fi
 } > "$tmp/meta.s"
@@ -146,7 +152,9 @@ if [ -n "$static" ]; then
     libs=$lib
 else
     libs=$implib
-    # A program's own start-up code (a DLL has none).
+    # A program's own start-up code.
     [ -n "$dll" ] || objs="$crt1 $objs"
 fi
+# A DLL's: _DLL_InitTerm runs its constructors.
+[ -n "$dll" ] && objs="$crtdll $objs"
 link --export-dynamic-symbol=RS2_APPTYPE --export-dynamic-symbol=RS2_RESOURCES "$tmp/meta.o" $objs $libs -o "$out"

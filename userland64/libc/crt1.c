@@ -9,6 +9,9 @@ int main(int argc, char **argv, char **envp);
 extern void (*__init_array_start[])(void), (*__init_array_end[])(void);
 extern void (*__fini_array_start[])(void), (*__fini_array_end[])(void);
 
+/* This module, for __cxa_atexit (and C++). */
+HIDDEN void *__dso_handle = &__dso_handle;
+
 unsigned long _start(ULONG hmod, ULONG reserved, PCSZ env, PCSZ cmdline) {
     (void)reserved;
     struct _rs2_startup st = {hmod, env, cmdline, main, __init_array_start, __init_array_end,

@@ -11,6 +11,11 @@
 //! modules are 64-bit DLLs (loader::load_global64). Exports are the
 //! module's defined dynamic symbols. A data symbol `RS2_APPTYPE` (a u32)
 //! gives a program's type (3 = PM; 2, window compatible, by default).
+//! A DLL that exports `_DLL_InitTerm` has it called as
+//! `unsigned long _DLL_InitTerm(unsigned long hmod, unsigned long flag)`
+//! (System V), once per process: flag 0 when the process starts using
+//! the DLL, 1 when it stops; 0 back from an initialisation fails the load
+//! (api/module.rs runs these as it runs LX DLLs' init/term routines).
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -239,6 +244,7 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
     let mut exports = Vec::new();
     let mut names = BTreeMap::new();
     let mut app_type = 2;
+    let mut init_term = None;
     for s in &syms {
         if s.shndx == 0 || s.name.is_empty() || (s.bind != 1 && s.bind != 2) {
             continue;
@@ -248,6 +254,9 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
             if let Some(b) = img.slice(s.value, 4) {
                 app_type = u32le(b, 0);
             }
+        }
+        if s.name == "_DLL_InitTerm" {
+            init_term = Some(addr);
         }
         exports.push(Export::At(Target::flat32(addr, true)));
         names.insert(s.name.clone(), exports.len() as u16);
@@ -403,9 +412,9 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
         imports,
         cyclic: crate::sync::SpinLock::new(Vec::new()),
         start,
-        init: None,
-        per_process_init: false,
-        per_process_term: false,
+        init: init_term.filter(|_| dll).map(|a| Start { entry: Target::flat32(a, true), ..Default::default() }),
+        per_process_init: true,
+        per_process_term: init_term.is_some(),
         global_init_done: core::sync::atomic::AtomicBool::new(true),
         image: Some(data.clone()),
     }))

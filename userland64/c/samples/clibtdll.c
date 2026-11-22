@@ -23,3 +23,33 @@ RS2_EXPORT void dll_print(const char *s) {
 RS2_EXPORT void dll_set_errno(int e) {
     errno = e;
 }
+
+/* Constructors and destructors (crtdll.o runs them). The destructor
+ * leaves a file, MARK (named by the build), so the program can see it
+ * ran: at DosFreeModule, or at the end of a process. */
+#ifndef MARK
+#define MARK "CLIBTDLL.FIN"
+#endif
+static int ctor_count;
+static char *ctor_alloc;
+
+__attribute__((constructor)) static void ctor(void) {
+    ctor_count++;
+    ctor_alloc = malloc(16);   /* the C library works in a constructor */
+    if (ctor_alloc)
+        strcpy(ctor_alloc, "constructed");
+}
+
+__attribute__((destructor)) static void dtor(void) {
+    FILE *f = fopen(MARK, "w");
+    if (f) {
+        fputs(ctor_alloc ? ctor_alloc : "?", f);
+        fclose(f);
+    }
+    free(ctor_alloc);
+    ctor_alloc = 0;
+}
+
+RS2_EXPORT int dll_ctor_count(void) {
+    return ctor_count;
+}

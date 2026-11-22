@@ -5,18 +5,26 @@
 #include <stdio.h>
 #include <signal.h>
 
-/* atexit: up to 32 at first, more as needed. */
-static void (*exit_fns[32])(void);
-static void (**exit_list)(void) = exit_fns;
+/* The exit list: atexit functions and __cxa_atexit ones (a DLL's
+ * destructors, C++ objects), run last first. Each may belong to a module
+ * (dso): __cxa_finalize runs and drops a module's own when it is freed. */
+struct exit_fn {
+    void (*fn)(void *);
+    void *arg;
+    void *dso;
+    int plain;   /* atexit: fn takes no argument */
+};
+static struct exit_fn exit_fns[32];
+static struct exit_fn *exit_list = exit_fns;
 static int exit_count, exit_cap = 32;
 static void (*quick_fns[32])(void);
 static int quick_count;
 static _rs2_lock_t exit_lock;
 
-int atexit(void (*fn)(void)) {
+static int add(void (*fn)(void *), void *arg, void *dso, int plain) {
     _rs2_lock(&exit_lock);
     if (exit_count == exit_cap) {
-        void (**n)(void) = malloc(sizeof(*n) * exit_cap * 2);
+        struct exit_fn *n = malloc(sizeof(*n) * exit_cap * 2);
         if (!n) {
             _rs2_unlock(&exit_lock);
             return -1;
@@ -27,9 +35,41 @@ int atexit(void (*fn)(void)) {
         exit_list = n;
         exit_cap *= 2;
     }
-    exit_list[exit_count++] = fn;
+    exit_list[exit_count++] = (struct exit_fn){fn, arg, dso, plain};
     _rs2_unlock(&exit_lock);
     return 0;
+}
+
+int atexit(void (*fn)(void)) {
+    return add((void (*)(void *))fn, 0, 0, 1);
+}
+
+int __cxa_atexit(void (*fn)(void *), void *arg, void *dso) {
+    return add(fn, arg, dso, 0);
+}
+
+static void call(struct exit_fn e) {
+    if (e.plain)
+        ((void (*)(void))e.fn)();
+    else
+        e.fn(e.arg);
+}
+
+/* Runs (and drops) the functions of module dso, or all of them for 0.
+ * The lock is let go around each call: a function may add more. */
+void __cxa_finalize(void *dso) {
+    _rs2_lock(&exit_lock);
+    for (int i = exit_count - 1; i >= 0; i--) {
+        if (i >= exit_count || (dso && exit_list[i].dso != dso))
+            continue;
+        struct exit_fn e = exit_list[i];
+        memmove(&exit_list[i], &exit_list[i + 1], sizeof(*exit_list) * (exit_count - i - 1));
+        exit_count--;
+        _rs2_unlock(&exit_lock);
+        call(e);
+        _rs2_lock(&exit_lock);
+    }
+    _rs2_unlock(&exit_lock);
 }
 
 int at_quick_exit(void (*fn)(void)) {
@@ -40,10 +80,7 @@ int at_quick_exit(void (*fn)(void)) {
 }
 
 void exit(int code) {
-    _rs2_lock(&exit_lock);
-    while (exit_count > 0)
-        exit_list[--exit_count]();
-    _rs2_unlock(&exit_lock);
+    __cxa_finalize(0);
     _rs2_stdio_exit();
     DosExit(EXIT_PROCESS, (ULONG)code);
     __builtin_unreachable();

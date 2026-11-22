@@ -262,6 +262,7 @@ fn dos_load_module64(c: &mut Ctx) -> u32 {
     let (fail, cbfail, pname, phmod) = (c.ptr(0), c.arg(1), c.ptr(2), c.ptr(3));
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
     let loading = crate::loader::lock();
+    let used = super::module::in_use_handles(&c.process);
     let m = match crate::loader::load_global64(&name) {
         Ok(m) if m.format == crate::loader::Format::Elf64 => m,
         _ => {
@@ -269,7 +270,7 @@ fn dos_load_module64(c: &mut Ctx) -> u32 {
             return super::module::dos_load_module(c);
         }
     };
-    if let Err(e) = crate::loader::attach(&m, &mut c.space()) {
+    if let Err(e) = crate::loader::attach_again(&m, &used, &mut c.space()) {
         if fail != 0 && cbfail > 0 {
             let n = (cbfail as usize - 1).min(m.name.len());
             c.write_str(fail, &m.name[..n]);
@@ -284,9 +285,19 @@ fn dos_load_module64(c: &mut Ctx) -> u32 {
         }
     }
     drop(loading);
-    if !c.write_u32(phmod, m.hmte as u32) {
-        return err::INVALID_ADDRESS;
+    // Its _DLL_InitTerm (and its imports') first, then DosLoadModule
+    // returns (api/module.rs).
+    let calls = super::module::init_order(core::slice::from_ref(&m), &c.process);
+    if calls.is_empty() {
+        if !c.write_u32(phmod, m.hmte as u32) {
+            return err::INVALID_ADDRESS;
+        }
+        return 0;
     }
+    c.complete_return(0);
+    let (p, t) = (c.process.clone(), c.thread.clone());
+    super::module::start(&p, &t, c.f, calls, false, Some((phmod, false, m.hmte)));
+    c.no_return = true;
     0
 }
 

@@ -192,6 +192,11 @@ pub fn term_order(p: &Process) -> Vec<InitCall> {
     in_use(p).into_iter().rev().filter(|m| needs_term(m, p)).map(|module| InitCall { module, flag: 1 }).collect()
 }
 
+/// The handles of the modules a process uses (see in_use).
+pub fn in_use_handles(p: &Process) -> Vec<u16> {
+    in_use(p).iter().map(|m| m.hmte).collect()
+}
+
 /// The modules a process uses (its program, what it loaded, their imports),
 /// imports first.
 fn in_use(p: &Process) -> Vec<Arc<Module>> {
@@ -281,6 +286,21 @@ fn setup_call(p: &Process, t: &Thread, f: &mut TrapFrame, call: &InitCall, top: 
             f.rdi = f.ds;
             f.rcx = heap as u64;
         }
+    } else if m.format == loader::Format::Elf64 {
+        // A 64-bit DLL's _DLL_InitTerm(hmod, flag), System V: the return
+        // address (the gate slot, whose code runs in either mode) on an
+        // aligned stack.
+        let rsp = (top.wrapping_sub(0x40) & !0xf).wrapping_sub(8);
+        sp.poke_bytes(rsp, &(ret as u64).to_le_bytes());
+        f.ss = USER_DS as u64;
+        f.rsp = rsp as u64;
+        f.cs = crate::arch::gdt::USER_CS64 as u64;
+        f.rip = start.entry.flat as u64;
+        f.rdi = m.hmte as u64;
+        f.rsi = call.flag as u64;
+        f.ds = USER_DS as u64;
+        f.es = USER_DS as u64;
+        f.fs = TIB_SEL as u64;
     } else {
         // _DLL_InitTerm(hmod, flag)
         let esp = top.wrapping_sub(0x40) & !0xf;

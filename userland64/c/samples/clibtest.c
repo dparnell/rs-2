@@ -27,6 +27,10 @@
 
 static int failures, checks;
 
+/* CLIBTDL2.DLL (clibtdll.c again) is imported, so it is loaded and
+ * initialised before main. */
+extern int dll2_ctor_count(void) __asm__("CLIBTDL2.dll_ctor_count");
+
 static void check(const char *what, int ok) {
     checks++;
     printf("  %s: %s\n", what, ok ? "ok" : "FAILED");
@@ -621,12 +625,54 @@ static void test_shared_dll(void) {
     errno = 0;
     set_errno(4321);
     check("shared errno", errno == 4321);
+    DosFreeModule(h);
 #else
     printf("  (static C library: no shared DLL test)\n");
 #endif
 }
 
+static int file_says(const char *name, const char *want) {
+    char b[32] = "";
+    FILE *f = fopen(name, "r");
+    if (!f)
+        return 0;
+    fgets(b, sizeof b, f);
+    fclose(f);
+    remove(name);
+    return !strcmp(b, want);
+}
+
+/* A C DLL's constructors and destructors (crtdll.o, _DLL_InitTerm). */
+static void test_dll_ctors(const char *self) {
+    check("imported DLL's constructor ran before main", dll2_ctor_count() == 1);
+    remove("CLIBTDLL.FIN");
+    HMODULE h;
+    char failed[64];
+    int (*count)(void) = 0;
+    APIRET rc = DosLoadModule((PSZ)failed, sizeof failed, (PCSZ) "CLIBTDLL", &h);
+    if (rc == 0)
+        DosQueryProcAddr(h, 0, (PCSZ) "dll_ctor_count", (PPVOID)&count);
+    check("DosLoadModule runs the constructor", count && count() == 1);
+    check("DosFreeModule runs the destructor", DosFreeModule(h) == 0 && file_says("CLIBTDLL.FIN", "constructed"));
+    rc = DosLoadModule((PSZ)failed, sizeof failed, (PCSZ) "CLIBTDLL", &h);
+    count = 0;
+    if (rc == 0)
+        DosQueryProcAddr(h, 0, (PCSZ) "dll_ctor_count", (PPVOID)&count);
+    check("loaded again: constructed again", count && count() == 1);
+    /* The destructors of DLLs still loaded run at exit: in a child. */
+    remove("CLIBTDL2.FIN");
+    char *argv[] = {(char *)self, "child-dll", 0};
+    int r = spawnv(P_WAIT, self, argv);
+    check("destructors at exit", r == 5 && file_says("CLIBTDLL.FIN", "constructed") && file_says("CLIBTDL2.FIN", "constructed"));
+}
+
 static int child(int argc, char **argv) {
+    if (!strcmp(argv[1], "child-dll")) {
+        HMODULE h;
+        char failed[64];
+        DosLoadModule((PSZ)failed, sizeof failed, (PCSZ) "CLIBTDLL", &h);
+        exit(5);
+    }
     if (!strcmp(argv[1], "child-out")) {
         printf("hello from the child\n");
         return 0;
@@ -660,6 +706,7 @@ int main(int argc, char **argv) {
     test_files();
     test_env_threads(argv[0]);
     test_shared_dll();
+    test_dll_ctors(argv[0]);
     printf("clibtest: %d checks, %d failures\n", checks, failures);
     return failures;
 }
