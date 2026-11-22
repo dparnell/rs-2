@@ -1126,6 +1126,13 @@ const PROGRAMS64: &[(&str, &str)] = &[
     ("pmdemo64", "RS2\\PMDEMO64.EXE"),
 ];
 
+/// 64-bit programs written in C (userland64/c): sources, cc64.sh flags
+/// (paths relative to userland64), file on the boot volume.
+const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
+    (&["c/samples/hello.c"], &[], "RS2\\CHELLO64.EXE"),
+    (&["c/samples/pmhello.c"], &["--pm", "--rc", "userland64/c/samples/pmhello.rc"], "RS2\\CPMHELLO.EXE"),
+];
+
 /// Build the userland64 workspace (x86-64 ELF shared objects).
 fn build_userland64() -> Option<image::FileList> {
     let dir = root().join("userland64");
@@ -1146,6 +1153,20 @@ fn build_userland64() -> Option<image::FileList> {
         let so = dir.join("target/x86_64-unknown-linux-gnu/release").join(format!("lib{pkg}.so"));
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         std::fs::copy(&so, &out).ok()?;
+        files.push((out, dest.to_string()));
+    }
+    // The C samples (userland64/c/cc64.sh: clang and rust-lld).
+    for (srcs, flags, dest) in C_PROGRAMS64 {
+        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
+        let mut cmd = Command::new(dir.join("c/cc64.sh"));
+        cmd.current_dir(root()).arg("-o").arg(&out).args(flags.iter());
+        for s in *srcs {
+            cmd.arg(dir.join(s));
+        }
+        if !cmd.status().ok()?.success() {
+            eprintln!("cc64.sh failed for {dest}");
+            return None;
+        }
         files.push((out, dest.to_string()));
     }
     Some(files)

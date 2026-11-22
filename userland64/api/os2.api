@@ -1,0 +1,10 @@
+# The whole 64-bit API in one header: #include <os2.h> (C). Rust programs
+# use the os2 crate (`use os2::*`), which has all of it.
+
+c
+#include "os2def.h"
+#include "bsedos.h"
+#include "bsexcpt.h"
+#include "pmwin.h"
+#include "pmgpi.h"
+end

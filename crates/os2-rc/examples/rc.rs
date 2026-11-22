@@ -1,5 +1,7 @@
-//! Host front end for testing: `rc compile SCRIPT OUT.RES [-i DIR]...` and
-//! `rc attach IN.RES IN.EXE OUT.EXE [-x1|-x2] [-p]`.
+//! Host front end for testing: `rc compile SCRIPT OUT.RES [-i DIR]...`,
+//! `rc attach IN.RES IN.EXE OUT.EXE [-x1|-x2] [-p]`, and `rc table64 SCRIPT
+//! OUT.BIN`: the resource table of a 64-bit module (docs/API64.md; C
+//! programs link it with userland64/c/cc64.sh).
 //!
 //! `cargo run -p os2-rc --features host --example rc -- ...`
 
@@ -31,6 +33,13 @@ fn main() {
             }
             std::fs::write(&a[2], res::write(&out.resources)).unwrap();
         }
+        Some("table64") => match os2_rc::host::compile_table64(std::path::Path::new(&a[1])) {
+            Ok(t) => std::fs::write(&a[2], t).unwrap(),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         Some("attach") => {
             let r = res::read(&std::fs::read(&a[1]).unwrap()).expect("not a .RES file");
             let exe = std::fs::read(&a[2]).unwrap();

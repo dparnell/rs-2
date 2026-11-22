@@ -1,5 +1,10 @@
 //! rs2's 64-bit OS/2 API (docs/API64.md): bindings and a minimal runtime.
 //!
+//! The bindings (`api`, re-exported here: `use os2::*`) are generated from
+//! userland64/api/*.api by tools/scripts/gen_api64.py, the description the
+//! C headers (userland64/include) come from too: the same names, types,
+//! structures and constants as in C (HWND, QMSG, WinCreateStdWindow...).
+//!
 //! The API is OS/2's with 64-bit pointers: ULONG, APIRET and the handles
 //! (HFILE, HEV, HMODULE, HWND...) stay 32 bits, pointers (PVOID, PSZ,
 //! PFN, MPARAM) are 64. Calls use the System V convention (`extern "C"`).
@@ -10,22 +15,21 @@
 
 extern crate alloc;
 
-pub mod dos;
+pub mod api;
 pub mod fmt;
 pub mod heap;
-pub mod pm;
 
 /// Programs using `alloc` get the OS/2 heap.
 #[cfg(feature = "heap")]
 #[global_allocator]
 static HEAP: heap::Os2Heap = heap::Os2Heap;
 
-pub use dos::*;
+pub use api::*;
 
 /// Write bytes to standard output.
 pub fn write(b: &[u8]) {
     let mut n = 0;
-    unsafe { DosWrite(1, b.as_ptr(), b.len() as u32, &mut n) };
+    unsafe { DosWrite(1, b.as_ptr().cast(), b.len() as u32, &mut n) };
 }
 
 /// The code page bytes of text held in a `str` one character per byte.
@@ -40,7 +44,7 @@ pub fn text_bytes(s: &str) -> alloc::borrow::Cow<'_, [u8]> {
 pub fn write_text(hf: u32, s: &str) {
     let b = text_bytes(s);
     let mut n = 0;
-    unsafe { DosWrite(hf, b.as_ptr(), b.len() as u32, &mut n) };
+    unsafe { DosWrite(hf, b.as_ptr().cast(), b.len() as u32, &mut n) };
 }
 
 pub fn print(s: &str) {
@@ -107,6 +111,14 @@ macro_rules! app_type {
         #[unsafe(no_mangle)]
         #[used]
         pub static RS2_APPTYPE: u32 = 3;
+    };
+}
+
+/// A NUL-terminated string literal as a PCSZ: `psz!("Hello")`.
+#[macro_export]
+macro_rules! psz {
+    ($s:literal) => {
+        concat!($s, "\0").as_ptr() as $crate::PCSZ
     };
 }
 

@@ -223,7 +223,7 @@ fn proc32(cache: &AtomicU32, name: &str) -> u32 {
         HMOD32.store(h, Ordering::Relaxed);
     }
     let mut pfn = 0usize;
-    if unsafe { DosQueryProcAddr(h, 0, name.as_ptr(), &mut pfn) } != 0 {
+    if unsafe { DosQueryProcAddr(h, 0, name.as_ptr(), (&raw mut pfn).cast()) } != 0 {
         os2::println!("PMWIN (64-bit): {} not found in the 32-bit PMWIN", name.trim_end_matches('\0'));
         return 0;
     }
@@ -273,7 +273,7 @@ fn page() -> *mut u8 {
         return p as *mut u8;
     }
     let mut m: *mut u8 = core::ptr::null_mut();
-    unsafe { DosAllocMem(&mut m, (PROC32_AT + 8) as u32, PAG_READ | PAG_WRITE | PAG_EXECUTE | PAG_COMMIT) };
+    unsafe { DosAllocMem((&raw mut m).cast(), (PROC32_AT + 8) as u32, PAG_READ | PAG_WRITE | PAG_EXECUTE | PAG_COMMIT) };
     unsafe {
         let far = m.add(FAR64);
         (far as *mut u32).write_unaligned(&rs2_entry64 as *const u8 as u32);

@@ -1,0 +1,431 @@
+# DOSCALLS for 64-bit programs: the calls kernel/src/api/api64.rs offers
+# 64-bit code, with DOSCALLS' 32-bit ordinals (docs/API64.md).
+
+include os2def
+
+# ---- Processes and threads ----
+
+const EXIT_THREAD 0
+const EXIT_PROCESS 1
+const EXEC_SYNC 0
+const EXEC_ASYNC 1
+const EXEC_ASYNCRESULT 2
+const EXEC_TRACE 3
+const EXEC_BACKGROUND 4
+const DCWA_PROCESS 0
+const DCWA_PROCESSTREE 1
+const DCWW_WAIT 0
+const DCWW_NOWAIT 1
+const DKP_PROCESSTREE 0
+const DKP_PROCESS 1
+const CREATE_READY 0
+const CREATE_SUSPENDED 1
+const STACK_SPARSE 0
+const STACK_COMMITTED 2
+const PRTYS_PROCESS 0
+const PRTYS_PROCESSTREE 1
+const PRTYS_THREAD 2
+const PRTYC_NOCHANGE 0
+const PRTYC_IDLETIME 1
+const PRTYC_REGULAR 2
+const PRTYC_TIMECRITICAL 3
+const PRTYC_FOREGROUNDSERVER 4
+const TC_EXIT 0
+const TC_HARDERROR 1
+const TC_TRAP 2
+const TC_KILLPROCESS 3
+
+struct RESULTCODES
+  ULONG codeTerminate
+  ULONG codeResult
+end
+
+# The 64-bit TIB and PIB (DosGetInfoBlocks).
+struct TIB2
+  ULONG tib2_ultid
+  ULONG tib2_ulpri
+  ULONG tib2_version
+  USHORT tib2_usMCCount
+  USHORT tib2_fMCForceFlag
+end
+
+struct TIB
+  PVOID tib_pexchain
+  PVOID tib_pstack
+  PVOID tib_pstacklimit
+  PTIB2 tib_ptib2
+  ULONG tib_version
+  ULONG tib_ordinal
+end
+
+struct PIB
+  ULONG pib_ulpid
+  ULONG pib_ulppid
+  ULONG pib_hmte
+  PCHAR pib_pchcmd
+  PCHAR pib_pchenv
+  ULONG pib_flstatus
+  ULONG pib_ultype
+end
+
+ptr PPTIB PTIB
+ptr PPPIB PPIB
+fnptr PFNTHREAD VOID (ULONG_PTR)
+
+fn DOSCALLS.234 VOID DosExit(ULONG action, ULONG result)
+fn DOSCALLS.311 APIRET DosCreateThread(PTID ptid, PFNTHREAD pfn, ULONG_PTR param, ULONG flag, ULONG cbStack)
+fn DOSCALLS.349 APIRET DosWaitThread(PTID ptid, ULONG option)
+fn DOSCALLS.111 APIRET DosKillThread(TID tid)
+fn DOSCALLS.238 APIRET DosSuspendThread(TID tid)
+fn DOSCALLS.237 APIRET DosResumeThread(TID tid)
+fn DOSCALLS.312 APIRET DosGetInfoBlocks(PPTIB pptib, PPPIB pppib)
+fn DOSCALLS.283 APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PCSZ pArg, PCSZ pEnv, PRESULTCODES pRes, PCSZ pName)
+fn DOSCALLS.280 APIRET DosWaitChild(ULONG action, ULONG option, PRESULTCODES pres, PPID ppid, PID pid)
+fn DOSCALLS.235 APIRET DosKillProcess(ULONG action, PID pid)
+fn DOSCALLS.236 APIRET DosSetPriority(ULONG scope, ULONG ulClass, LONG delta, ULONG PorTid)
+fn DOSCALLS.232 APIRET DosEnterCritSec(VOID)
+fn DOSCALLS.233 APIRET DosExitCritSec(VOID)
+fn DOSCALLS.380 APIRET DosEnterMustComplete(PULONG pulNesting)
+fn DOSCALLS.381 APIRET DosExitMustComplete(PULONG pulNesting)
+fn DOSCALLS.229 APIRET DosSleep(ULONG msec)
+fn DOSCALLS.227 APIRET DosScanEnv(PCSZ pszName, PPVOID ppszValue)
+fn DOSCALLS.323 APIRET DosQueryAppType(PCSZ pszName, PULONG pFlags)
+fn DOSCALLS.415 APIRET DosShutdown(ULONG ulReserved)
+
+# ---- Memory ----
+
+const PAG_READ 0x0001
+const PAG_WRITE 0x0002
+const PAG_EXECUTE 0x0004
+const PAG_GUARD 0x0008
+const PAG_COMMIT 0x0010
+const PAG_DECOMMIT 0x0020
+const OBJ_TILE 0x0040
+const OBJ_PROTECTED 0x0080
+const OBJ_GETTABLE 0x0100
+const OBJ_GIVEABLE 0x0200
+# From 64-bit code: memory above 4 GB (docs/API64.md, "Memory").
+const OBJ_ANY 0x0400
+const PAG_DEFAULT 0x0400
+const PAG_SHARED 0x2000
+const PAG_FREE 0x4000
+const PAG_BASE 0x10000
+const fPERM PAG_EXECUTE | PAG_READ | PAG_WRITE
+const DOSSUB_INIT 0x01
+const DOSSUB_GROW 0x02
+const DOSSUB_SPARSE_OBJ 0x04
+const DOSSUB_SERIALIZE 0x08
+
+fn DOSCALLS.299 APIRET DosAllocMem(PPVOID ppb, ULONG cb, ULONG flag)
+fn DOSCALLS.304 APIRET DosFreeMem(PVOID pb)
+fn DOSCALLS.305 APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
+fn DOSCALLS.306 APIRET DosQueryMem(PVOID pb, PULONG pcb, PULONG pFlag)
+fn DOSCALLS.300 APIRET DosAllocSharedMem(PPVOID ppb, PCSZ pszName, ULONG cb, ULONG flag)
+fn DOSCALLS.301 APIRET DosGetNamedSharedMem(PPVOID ppb, PCSZ pszName, ULONG flag)
+fn DOSCALLS.302 APIRET DosGetSharedMem(PVOID pb, ULONG flag)
+fn DOSCALLS.303 APIRET DosGiveSharedMem(PVOID pb, PID pid, ULONG flag)
+fn DOSCALLS.345 APIRET DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb)
+fn DOSCALLS.344 APIRET DosSubSetMem(PVOID pbBase, ULONG flag, ULONG cb)
+fn DOSCALLS.346 APIRET DosSubFreeMem(PVOID pbBase, PVOID pb, ULONG cb)
+fn DOSCALLS.347 APIRET DosSubUnsetMem(PVOID pbBase)
+fn DOSCALLS.454 APIRET DosAllocThreadLocalMemory(ULONG cb, PPVOID p)
+fn DOSCALLS.455 APIRET DosFreeThreadLocalMemory(PVOID p)
+
+# ---- Semaphores ----
+
+const SEM_INDEFINITE_WAIT 0xffffffff
+const SEM_IMMEDIATE_RETURN 0
+const DC_SEM_SHARED 0x01
+
+fn DOSCALLS.324 APIRET DosCreateEventSem(PCSZ pszName, PHEV phev, ULONG flAttr, BOOL fState)
+fn DOSCALLS.325 APIRET DosOpenEventSem(PCSZ pszName, PHEV phev)
+fn DOSCALLS.326 APIRET DosCloseEventSem(HEV hev)
+fn DOSCALLS.327 APIRET DosResetEventSem(HEV hev, PULONG pulPostCt)
+fn DOSCALLS.328 APIRET DosPostEventSem(HEV hev)
+fn DOSCALLS.329 APIRET DosWaitEventSem(HEV hev, ULONG ulTimeout)
+fn DOSCALLS.330 APIRET DosQueryEventSem(HEV hev, PULONG pulPostCt)
+fn DOSCALLS.331 APIRET DosCreateMutexSem(PCSZ pszName, PHMTX phmtx, ULONG flAttr, BOOL fState)
+fn DOSCALLS.332 APIRET DosOpenMutexSem(PCSZ pszName, PHMTX phmtx)
+fn DOSCALLS.333 APIRET DosCloseMutexSem(HMTX hmtx)
+fn DOSCALLS.334 APIRET DosRequestMutexSem(HMTX hmtx, ULONG ulTimeout)
+fn DOSCALLS.335 APIRET DosReleaseMutexSem(HMTX hmtx)
+fn DOSCALLS.336 APIRET DosQueryMutexSem(HMTX hmtx, PPID ppid, PTID ptid, PULONG pulCount)
+
+# ---- Files and directories ----
+
+const FILE_BEGIN 0
+const FILE_CURRENT 1
+const FILE_END 2
+const FILE_NORMAL 0x0000
+const FILE_READONLY 0x0001
+const FILE_HIDDEN 0x0002
+const FILE_SYSTEM 0x0004
+const FILE_DIRECTORY 0x0010
+const FILE_ARCHIVED 0x0020
+const FILE_EXISTED 0x0001
+const FILE_CREATED 0x0002
+const FILE_TRUNCATED 0x0003
+const OPEN_ACTION_FAIL_IF_EXISTS 0x0000
+const OPEN_ACTION_OPEN_IF_EXISTS 0x0001
+const OPEN_ACTION_REPLACE_IF_EXISTS 0x0002
+const OPEN_ACTION_FAIL_IF_NEW 0x0000
+const OPEN_ACTION_CREATE_IF_NEW 0x0010
+const OPEN_ACCESS_READONLY 0x0000
+const OPEN_ACCESS_WRITEONLY 0x0001
+const OPEN_ACCESS_READWRITE 0x0002
+const OPEN_SHARE_DENYREADWRITE 0x0010
+const OPEN_SHARE_DENYWRITE 0x0020
+const OPEN_SHARE_DENYREAD 0x0030
+const OPEN_SHARE_DENYNONE 0x0040
+const OPEN_FLAGS_NOINHERIT 0x0080
+const OPEN_FLAGS_FAIL_ON_ERROR 0x2000
+const OPEN_FLAGS_WRITE_THROUGH 0x4000
+const OPEN_FLAGS_SEQUENTIAL 0x0100
+const OPEN_FLAGS_RANDOM 0x0200
+const HDIR_SYSTEM 1
+const HDIR_CREATE 0xffffffff
+const FIL_STANDARD 1
+const FIL_QUERYEASIZE 2
+const FIL_STANDARDL 11
+const FSIL_ALLOC 1
+const FSIL_VOLSER 2
+const DCPY_EXISTING 0x0001
+const DCPY_APPEND 0x0002
+const DSP_PATHREF 0x0001
+const DSP_ENVIRONMENT 0x0002
+const DSP_IGNORENETERR 0x0004
+const HANDTYPE_FILE 0x0000
+const HANDTYPE_DEVICE 0x0001
+const HANDTYPE_PIPE 0x0002
+const HANDTYPE_NETWORK 0x8000
+
+struct FDATE
+  USHORT date   # day 0-4, month 5-8, year since 1980 9-15
+end
+
+struct FTIME
+  USHORT time   # twosecs 0-4, minutes 5-10, hours 11-15
+end
+
+struct FILESTATUS3
+  FDATE fdateCreation
+  FTIME ftimeCreation
+  FDATE fdateLastAccess
+  FTIME ftimeLastAccess
+  FDATE fdateLastWrite
+  FTIME ftimeLastWrite
+  ULONG cbFile
+  ULONG cbFileAlloc
+  ULONG attrFile
+end
+
+struct FILEFINDBUF3
+  ULONG oNextEntryOffset
+  FDATE fdateCreation
+  FTIME ftimeCreation
+  FDATE fdateLastAccess
+  FTIME ftimeLastAccess
+  FDATE fdateLastWrite
+  FTIME ftimeLastWrite
+  ULONG cbFile
+  ULONG cbFileAlloc
+  ULONG attrFile
+  UCHAR cchName
+  CHAR achName[256]
+end
+
+struct FSALLOCATE
+  ULONG idFileSystem
+  ULONG cSectorUnit
+  ULONG cUnit
+  ULONG cUnitAvail
+  USHORT cbSector
+end
+
+# Extended attribute lists are not available to 64-bit code yet: the
+# peaop2 arguments must be NULL.
+fn DOSCALLS.273 APIRET DosOpen(PCSZ pszFileName, PHFILE phf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PVOID peaop2)
+fn DOSCALLS.981 APIRET DosOpenL(PCSZ pszFileName, PHFILE phf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PVOID peaop2)
+fn DOSCALLS.257 APIRET DosClose(HFILE hFile)
+fn DOSCALLS.281 APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
+fn DOSCALLS.282 APIRET DosWrite(HFILE hFile, PCVOID pBuffer, ULONG cbWrite, PULONG pcbActual)
+fn DOSCALLS.256 APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
+fn DOSCALLS.988 APIRET DosSetFilePtrL(HFILE hFile, LONGLONG ib, ULONG method, PLONGLONG ibActual)
+fn DOSCALLS.272 APIRET DosSetFileSize(HFILE hFile, ULONG cbSize)
+fn DOSCALLS.989 APIRET DosSetFileSizeL(HFILE hFile, LONGLONG cbSize)
+fn DOSCALLS.254 APIRET DosResetBuffer(HFILE hFile)
+fn DOSCALLS.260 APIRET DosDupHandle(HFILE hFile, PHFILE pHfile)
+fn DOSCALLS.239 APIRET DosCreatePipe(PHFILE phfRead, PHFILE phfWrite, ULONG cb)
+fn DOSCALLS.224 APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
+fn DOSCALLS.221 APIRET DosSetFHState(HFILE hFile, ULONG mode)
+fn DOSCALLS.276 APIRET DosQueryFHState(HFILE hFile, PULONG pMode)
+fn DOSCALLS.209 APIRET DosSetMaxFH(ULONG cFH)
+fn DOSCALLS.382 APIRET DosSetRelMaxFH(PLONG pcbReqCount, PULONG pcbCurMaxFH)
+fn DOSCALLS.259 APIRET DosDelete(PCSZ pszFile)
+fn DOSCALLS.110 APIRET DosForceDelete(PCSZ pszFile)
+fn DOSCALLS.258 APIRET DosCopy(PCSZ pszOld, PCSZ pszNew, ULONG option)
+fn DOSCALLS.271 APIRET DosMove(PCSZ pszOld, PCSZ pszNew)
+fn DOSCALLS.270 APIRET DosCreateDir(PCSZ pszDirName, PVOID peaop2)
+fn DOSCALLS.226 APIRET DosDeleteDir(PCSZ pszDir)
+fn DOSCALLS.255 APIRET DosSetCurrentDir(PCSZ pszDir)
+fn DOSCALLS.274 APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
+fn DOSCALLS.220 APIRET DosSetDefaultDisk(ULONG disknum)
+fn DOSCALLS.275 APIRET DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical)
+fn DOSCALLS.264 APIRET DosFindFirst(PCSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfindbuf, ULONG cbBuf, PULONG pcFileNames, ULONG ulInfoLevel)
+fn DOSCALLS.265 APIRET DosFindNext(HDIR hDir, PVOID pfindbuf, ULONG cbfindbuf, PULONG pcFilenames)
+fn DOSCALLS.263 APIRET DosFindClose(HDIR hDir)
+fn DOSCALLS.223 APIRET DosQueryPathInfo(PCSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf)
+fn DOSCALLS.219 APIRET DosSetPathInfo(PCSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf, ULONG flOptions)
+fn DOSCALLS.279 APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf)
+fn DOSCALLS.218 APIRET DosSetFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf)
+fn DOSCALLS.278 APIRET DosQueryFSInfo(ULONG disknum, ULONG infolevel, PVOID pBuf, ULONG cbBuf)
+fn DOSCALLS.228 APIRET DosSearchPath(ULONG flag, PCSZ pszPathOrName, PCSZ pszFilename, PBYTE pBuf, ULONG cbBuf)
+fn DOSCALLS.261 APIRET DosEditName(ULONG metalevel, PCSZ pszSource, PCSZ pszEdit, PBYTE pszTarget, ULONG cbTarget)
+fn DOSCALLS.284 APIRET DosDevIOCtl(HFILE hDevice, ULONG category, ULONG function, PVOID pParams, ULONG cbParmLenMax, PULONG pcbParmLen, PVOID pData, ULONG cbDataLenMax, PULONG pcbDataLen)
+
+# ---- Named pipes ----
+
+const NP_ACCESS_INBOUND 0x0000
+const NP_ACCESS_OUTBOUND 0x0001
+const NP_ACCESS_DUPLEX 0x0002
+const NP_NOINHERIT 0x0080
+const NP_WRITEBEHIND 0x4000
+const NP_WAIT 0x0000
+const NP_NOWAIT 0x8000
+const NP_READMODE_BYTE 0x0000
+const NP_READMODE_MESSAGE 0x0100
+const NP_TYPE_BYTE 0x0000
+const NP_TYPE_MESSAGE 0x0400
+const NP_UNLIMITED_INSTANCES 0x00ff
+
+struct AVAILDATA
+  USHORT cbpipe
+  USHORT cbmessage
+end
+
+fn DOSCALLS.243 APIRET DosCreateNPipe(PCSZ pszName, PHPIPE pHpipe, ULONG openmode, ULONG pipemode, ULONG cbInbuf, ULONG cbOutbuf, ULONG msec)
+fn DOSCALLS.241 APIRET DosConnectNPipe(HPIPE hpipe)
+fn DOSCALLS.242 APIRET DosDisConnectNPipe(HPIPE hpipe)
+fn DOSCALLS.244 APIRET DosPeekNPipe(HPIPE hpipe, PVOID pBuf, ULONG cbBuf, PULONG pcbActual, PAVAILDATA pAvail, PULONG pState)
+fn DOSCALLS.245 APIRET DosQueryNPHState(HPIPE hpipe, PULONG pState)
+fn DOSCALLS.250 APIRET DosSetNPHState(HPIPE hpipe, ULONG state)
+fn DOSCALLS.248 APIRET DosQueryNPipeInfo(HPIPE hpipe, ULONG infolevel, PVOID pBuf, ULONG size)
+fn DOSCALLS.252 APIRET DosTransactNPipe(HPIPE hNP, PVOID pOutbuf, ULONG cbOut, PVOID pInbuf, ULONG cbIn, PULONG pcbRead)
+fn DOSCALLS.240 APIRET DosCallNPipe(PCSZ pszName, PVOID pInbuf, ULONG cbIn, PVOID pOutbuf, ULONG cbOut, PULONG pcbActual, ULONG msec)
+fn DOSCALLS.253 APIRET DosWaitNPipe(PCSZ pszName, ULONG msec)
+
+# ---- Queues ----
+
+const QUE_FIFO 0
+const QUE_LIFO 1
+const QUE_PRIORITY 2
+const QUE_NOCONVERT_ADDRESS 0
+const QUE_CONVERT_ADDRESS 4
+
+struct REQUESTDATA
+  PID pid
+  ULONG ulData
+end
+
+fn DOSCALLS.668 APIRET DosCreateQueue(PHQUEUE phq, ULONG priority, PCSZ pszName)
+fn DOSCALLS.667 APIRET DosOpenQueue(PPID ppid, PHQUEUE phq, PCSZ pszName)
+fn DOSCALLS.663 APIRET DosCloseQueue(HQUEUE hq)
+fn DOSCALLS.666 APIRET DosWriteQueue(HQUEUE hq, ULONG request, ULONG cbData, PVOID pbData, ULONG priority)
+fn DOSCALLS.661 APIRET DosReadQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, ULONG element, BOOL wait, PBYTE ppriority, HEV hsem)
+fn DOSCALLS.665 APIRET DosPeekQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, PULONG element, BOOL nowait, PBYTE ppriority, HEV hsem)
+fn DOSCALLS.664 APIRET DosQueryQueue(HQUEUE hq, PULONG pcbEntries)
+fn DOSCALLS.662 APIRET DosPurgeQueue(HQUEUE hq)
+
+# ---- Modules and resources ----
+
+const PT_16BIT 0
+const PT_32BIT 1
+const RT_POINTER 1
+const RT_BITMAP 2
+const RT_MENU 3
+const RT_DIALOG 4
+const RT_STRING 5
+const RT_FONTDIR 6
+const RT_FONT 7
+const RT_ACCELTABLE 8
+const RT_RCDATA 9
+const RT_MESSAGE 10
+const RT_DLGINCLUDE 11
+const RT_HELPTABLE 18
+const RT_HELPSUBTABLE 19
+fnptr PFN APIRET ()
+
+# DosLoadModule from 64-bit code: a 64-bit DLL first, else a 32-bit one.
+fn DOSCALLS.318 APIRET DosLoadModule(PSZ pszName, ULONG cbName, PCSZ pszModname, PHMODULE phmod)
+fn DOSCALLS.322 APIRET DosFreeModule(HMODULE hmod)
+fn DOSCALLS.321 APIRET DosQueryProcAddr(HMODULE hmod, ULONG ordinal, PCSZ pszName, PPVOID ppfn)
+fn DOSCALLS.319 APIRET DosQueryModuleHandle(PCSZ pszModname, PHMODULE phmod)
+fn DOSCALLS.320 APIRET DosQueryModuleName(HMODULE hmod, ULONG cbName, PCHAR pch)
+fn DOSCALLS.586 APIRET DosQueryProcType(HMODULE hmod, ULONG ordinal, PCSZ pszName, PULONG pulproctype)
+fn DOSCALLS.352 APIRET DosGetResource(HMODULE hmod, ULONG idType, ULONG idName, PPVOID ppb)
+fn DOSCALLS.353 APIRET DosFreeResource(PVOID pb)
+fn DOSCALLS.572 APIRET DosQueryResourceSize(HMODULE hmod, ULONG idt, ULONG idn, PULONG pulsize)
+fn DOSCALLS.873 APIRET DosSetExtLIBPATH(PCSZ pszExtLIBPATH, ULONG flags)
+fn DOSCALLS.874 APIRET DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags)
+
+# ---- Time, system information, national language support ----
+
+const QSV_MAX_PATH_LENGTH 1
+const QSV_MAX_TEXT_SESSIONS 2
+const QSV_MAX_PM_SESSIONS 3
+const QSV_MAX_VDM_SESSIONS 4
+const QSV_BOOT_DRIVE 5
+const QSV_DYN_PRI_VARIATION 6
+const QSV_MAX_WAIT 7
+const QSV_MIN_SLICE 8
+const QSV_MAX_SLICE 9
+const QSV_PAGE_SIZE 10
+const QSV_VERSION_MAJOR 11
+const QSV_VERSION_MINOR 12
+const QSV_VERSION_REVISION 13
+const QSV_MS_COUNT 14
+const QSV_TIME_LOW 15
+const QSV_TIME_HIGH 16
+const QSV_TOTPHYSMEM 17
+const QSV_TOTRESMEM 18
+const QSV_TOTAVAILMEM 19
+const QSV_MAXPRMEM 20
+const QSV_MAXSHMEM 21
+const QSV_TIMER_INTERVAL 22
+const QSV_MAX_COMP_LENGTH 23
+const QSV_FOREGROUND_FS_SESSION 24
+const QSV_FOREGROUND_PROCESS 25
+const QSV_NUMPROCESSORS 26
+
+struct DATETIME
+  UCHAR hours
+  UCHAR minutes
+  UCHAR seconds
+  UCHAR hundredths
+  UCHAR day
+  UCHAR month
+  USHORT year
+  SHORT timezone
+  UCHAR weekday
+end
+
+struct COUNTRYCODE
+  ULONG country
+  ULONG codepage
+end
+
+fn DOSCALLS.230 APIRET DosGetDateTime(PDATETIME pdt)
+fn DOSCALLS.292 APIRET DosSetDateTime(PDATETIME pdt)
+fn DOSCALLS.348 APIRET DosQuerySysInfo(ULONG iStart, ULONG iLast, PVOID pBuf, ULONG cbBuf)
+fn DOSCALLS.362 APIRET DosTmrQueryFreq(PULONG pulTmrFreq)
+fn DOSCALLS.363 APIRET DosTmrQueryTime(PULONGLONG pqwTmrTime)
+fn DOSCALLS.350 APIRET DosAsyncTimer(ULONG msec, HEV hsem, PHTIMER phtimer)
+fn DOSCALLS.351 APIRET DosStartTimer(ULONG msec, HEV hsem, PHTIMER phtimer)
+fn DOSCALLS.290 APIRET DosStopTimer(HTIMER htimer)
+fn DOSCALLS.286 APIRET DosBeep(ULONG freq, ULONG dur)
+fn DOSCALLS.212 APIRET DosError(ULONG error)
+fn DOSCALLS.291 APIRET DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP)
+fn DOSCALLS.289 APIRET DosSetProcessCp(ULONG cp)
+fn DOSCALLS.396 APIRET DosQueryDBCSEnv(ULONG cb, PCOUNTRYCODE pcc, PCHAR pBuf)
+fn DOSCALLS.397 APIRET DosMapCase(ULONG cb, PCOUNTRYCODE pcc, PCHAR pch)
+fn DOSCALLS.398 APIRET DosQueryCollate(ULONG cb, PCOUNTRYCODE pcc, PCHAR pch, PULONG pcch)

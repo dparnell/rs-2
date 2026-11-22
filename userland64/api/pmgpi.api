@@ -1,0 +1,524 @@
+# Graphics (GPI) and device contexts for 64-bit programs: exports of the
+# 64-bit PMWIN, which passes them on to rs2's 32-bit PMWIN (where the GPI
+# lives); docs/API64.md.
+
+include os2def
+
+const GPI_ERROR 0 : LONG
+const GPI_OK 1 : LONG
+const GPI_ALTERROR -1 : LONG
+const GPI_HITS 2 : LONG
+const LCID_ERROR -1 : LONG
+const LCID_DEFAULT 0 : LONG
+
+# ---- Colours and mixes ----
+
+const CLR_FALSE -5 : LONG
+const CLR_TRUE -4 : LONG
+const CLR_ERROR -255 : LONG
+const CLR_DEFAULT -3 : LONG
+const CLR_WHITE -2 : LONG
+const CLR_BLACK -1 : LONG
+const CLR_BACKGROUND 0 : LONG
+const CLR_BLUE 1 : LONG
+const CLR_RED 2 : LONG
+const CLR_PINK 3 : LONG
+const CLR_GREEN 4 : LONG
+const CLR_CYAN 5 : LONG
+const CLR_YELLOW 6 : LONG
+const CLR_NEUTRAL 7 : LONG
+const CLR_DARKGRAY 8 : LONG
+const CLR_DARKBLUE 9 : LONG
+const CLR_DARKRED 10 : LONG
+const CLR_DARKPINK 11 : LONG
+const CLR_DARKGREEN 12 : LONG
+const CLR_DARKCYAN 13 : LONG
+const CLR_BROWN 14 : LONG
+const CLR_PALEGRAY 15 : LONG
+const RGB_BLACK 0x00000000 : LONG
+const RGB_BLUE 0x000000FF : LONG
+const RGB_GREEN 0x0000FF00 : LONG
+const RGB_CYAN 0x0000FFFF : LONG
+const RGB_RED 0x00FF0000 : LONG
+const RGB_PINK 0x00FF00FF : LONG
+const RGB_YELLOW 0x00FFFF00 : LONG
+const RGB_WHITE 0x00FFFFFF : LONG
+const LCOL_RESET 0x0001
+const LCOL_REALIZABLE 0x0002
+const LCOL_PURECOLOR 0x0004
+const LCOLF_DEFAULT 0 : LONG
+const LCOLF_INDRGB 1 : LONG
+const LCOLF_CONSECRGB 2 : LONG
+const LCOLF_RGB 3 : LONG
+const LCOLF_PALETTE 4 : LONG
+const FM_ERROR -1 : LONG
+const FM_DEFAULT 0 : LONG
+const FM_OR 1 : LONG
+const FM_OVERPAINT 2 : LONG
+const FM_LEAVEALONE 5 : LONG
+const FM_XOR 4 : LONG
+const FM_AND 6 : LONG
+const FM_SUBTRACT 7 : LONG
+const FM_MASKSRCNOT 8 : LONG
+const FM_ZERO 9 : LONG
+const FM_NOTMERGESRC 10 : LONG
+const FM_NOTXORSRC 11 : LONG
+const FM_INVERT 12 : LONG
+const FM_MERGESRCNOT 13 : LONG
+const FM_NOTCOPYSRC 14 : LONG
+const FM_MERGENOTSRC 15 : LONG
+const FM_NOTMASKSRC 16 : LONG
+const FM_ONE 17 : LONG
+const BM_DEFAULT 0 : LONG
+const BM_OR 1 : LONG
+const BM_OVERPAINT 2 : LONG
+const BM_LEAVEALONE 5 : LONG
+const BM_XOR 4 : LONG
+
+fn PMWIN BOOL GpiSetColor(HPS hps, LONG lColor)
+fn PMWIN LONG GpiQueryColor(HPS hps)
+fn PMWIN BOOL GpiSetBackColor(HPS hps, LONG lColor)
+fn PMWIN LONG GpiQueryBackColor(HPS hps)
+fn PMWIN BOOL GpiSetMix(HPS hps, LONG lMixMode)
+fn PMWIN LONG GpiQueryMix(HPS hps)
+fn PMWIN BOOL GpiSetBackMix(HPS hps, LONG lMixMode)
+fn PMWIN LONG GpiQueryBackMix(HPS hps)
+fn PMWIN BOOL GpiCreateLogColorTable(HPS hps, ULONG flOptions, LONG lFormat, LONG lStart, LONG lCount, PLONG alTable)
+fn PMWIN LONG GpiQueryRGBColor(HPS hps, ULONG flOptions, LONG lColorIndex)
+fn PMWIN LONG GpiQueryColorIndex(HPS hps, ULONG flOptions, LONG lRgbColor)
+fn PMWIN LONG GpiQueryNearestColor(HPS hps, ULONG flOptions, LONG lRgbIn)
+
+# ---- Presentation spaces ----
+
+const PU_ARBITRARY 0x0004
+const PU_PELS 0x0008
+const PU_LOMETRIC 0x000C
+const PU_HIMETRIC 0x0010
+const PU_LOENGLISH 0x0014
+const PU_HIENGLISH 0x0018
+const PU_TWIPS 0x001C
+const GPIF_DEFAULT 0
+const GPIF_SHORT 0x0100
+const GPIF_LONG 0x0200
+const GPIT_NORMAL 0
+const GPIT_MICRO 0x1000
+const GPIA_NOASSOC 0
+const GPIA_ASSOC 0x4000
+
+fn PMWIN HPS GpiCreatePS(HAB hab, HDC hdc, PSIZEL psizlSize, ULONG flOptions)
+fn PMWIN BOOL GpiDestroyPS(HPS hps)
+fn PMWIN BOOL GpiAssociate(HPS hps, HDC hdc)
+fn PMWIN HDC GpiQueryDevice(HPS hps)
+fn PMWIN LONG GpiSavePS(HPS hps)
+fn PMWIN BOOL GpiRestorePS(HPS hps, LONG lPSid)
+fn PMWIN BOOL GpiErase(HPS hps)
+fn PMWIN BOOL GpiSetDrawingMode(HPS hps, LONG lMode)
+
+# ---- Lines, areas, arcs ----
+
+const DRO_FILL 1
+const DRO_OUTLINE 2
+const DRO_OUTLINEFILL 3
+const LINETYPE_DEFAULT 0 : LONG
+const LINETYPE_DOT 1 : LONG
+const LINETYPE_SHORTDASH 2 : LONG
+const LINETYPE_DASHDOT 3 : LONG
+const LINETYPE_DOUBLEDOT 4 : LONG
+const LINETYPE_LONGDASH 5 : LONG
+const LINETYPE_DASHDOUBLEDOT 6 : LONG
+const LINETYPE_SOLID 7 : LONG
+const LINETYPE_INVISIBLE 8 : LONG
+const LINETYPE_ALTERNATE 9 : LONG
+const LINEWIDTH_DEFAULT 0 : LONG
+const LINEWIDTH_NORMAL 0x00010000 : LONG
+const LINEWIDTH_THICK 0x00020000 : LONG
+const PATSYM_DEFAULT 0 : LONG
+const PATSYM_DENSE1 1 : LONG
+const PATSYM_DENSE2 2 : LONG
+const PATSYM_DENSE3 3 : LONG
+const PATSYM_DENSE4 4 : LONG
+const PATSYM_DENSE5 5 : LONG
+const PATSYM_DENSE6 6 : LONG
+const PATSYM_DENSE7 7 : LONG
+const PATSYM_DENSE8 8 : LONG
+const PATSYM_VERT 9 : LONG
+const PATSYM_HORIZ 10 : LONG
+const PATSYM_DIAG1 11 : LONG
+const PATSYM_DIAG2 12 : LONG
+const PATSYM_DIAG3 13 : LONG
+const PATSYM_DIAG4 14 : LONG
+const PATSYM_NOSHADE 15 : LONG
+const PATSYM_SOLID 16 : LONG
+const PATSYM_HALFTONE 17 : LONG
+const PATSYM_HATCH 18 : LONG
+const PATSYM_DIAGHATCH 19 : LONG
+const PATSYM_BLANK 64 : LONG
+const BA_NOBOUNDARY 0
+const BA_BOUNDARY 0x0001
+const BA_ALTERNATE 0
+const BA_WINDING 0x0002
+const BA_INCL 0
+const BA_EXCL 8
+
+struct ARCPARAMS
+  LONG lP
+  LONG lQ
+  LONG lR
+  LONG lS
+end
+
+fn PMWIN BOOL GpiMove(HPS hps, PPOINTL pptlPoint)
+fn PMWIN BOOL GpiSetCurrentPosition(HPS hps, PPOINTL pptlPoint)
+fn PMWIN BOOL GpiQueryCurrentPosition(HPS hps, PPOINTL pptlPoint)
+fn PMWIN LONG GpiLine(HPS hps, PPOINTL pptlEndPoint)
+fn PMWIN LONG GpiPolyLine(HPS hps, LONG lCount, PPOINTL aptlPoints)
+fn PMWIN LONG GpiPolyLineDisjoint(HPS hps, LONG lCount, PPOINTL aptlPoints)
+fn PMWIN LONG GpiBox(HPS hps, LONG lControl, PPOINTL pptlPoint, LONG lHRound, LONG lVRound)
+fn PMWIN LONG GpiFullArc(HPS hps, LONG lControl, FIXED fxMultiplier)
+fn PMWIN LONG GpiPartialArc(HPS hps, PPOINTL pptlCenter, FIXED fxMultiplier, FIXED fxStartAngle, FIXED fxSweepAngle)
+fn PMWIN LONG GpiPointArc(HPS hps, PPOINTL pptl2)
+fn PMWIN LONG GpiPolySpline(HPS hps, LONG lCount, PPOINTL aptlPoints)
+fn PMWIN LONG GpiPolyFillet(HPS hps, LONG lCount, PPOINTL aptlPoints)
+fn PMWIN BOOL GpiSetArcParams(HPS hps, PARCPARAMS parcpArcParams)
+fn PMWIN BOOL GpiQueryArcParams(HPS hps, PARCPARAMS parcpArcParams)
+fn PMWIN BOOL GpiSetLineType(HPS hps, LONG lLineType)
+fn PMWIN LONG GpiQueryLineType(HPS hps)
+fn PMWIN BOOL GpiSetLineWidth(HPS hps, FIXED fxLineWidth)
+fn PMWIN FIXED GpiQueryLineWidth(HPS hps)
+fn PMWIN BOOL GpiSetLineWidthGeom(HPS hps, LONG lLineWidth)
+fn PMWIN BOOL GpiSetPattern(HPS hps, LONG lPatternSymbol)
+fn PMWIN LONG GpiQueryPattern(HPS hps)
+fn PMWIN BOOL GpiBeginArea(HPS hps, ULONG flOptions)
+fn PMWIN LONG GpiEndArea(HPS hps)
+fn PMWIN LONG GpiSetPel(HPS hps, PPOINTL pptlPoint)
+fn PMWIN LONG GpiQueryPel(HPS hps, PPOINTL pptlPoint)
+fn PMWIN LONG GpiMarker(HPS hps, PPOINTL pptlPoint)
+fn PMWIN LONG GpiPolyMarker(HPS hps, LONG lCount, PPOINTL aptlPoint)
+fn PMWIN BOOL GpiSetMarker(HPS hps, LONG lSymbol)
+fn PMWIN LONG GpiFloodFill(HPS hps, LONG lOptions, LONG lColor)
+fn PMWIN BOOL GpiBeginPath(HPS hps, LONG lPath)
+fn PMWIN BOOL GpiEndPath(HPS hps)
+fn PMWIN BOOL GpiCloseFigure(HPS hps)
+fn PMWIN LONG GpiFillPath(HPS hps, LONG lPath, LONG lOptions)
+fn PMWIN LONG GpiStrokePath(HPS hps, LONG lPath, ULONG flOptions)
+fn PMWIN LONG GpiOutlinePath(HPS hps, LONG lPath, LONG lOptions)
+
+# ---- Text and fonts ----
+
+const FACESIZE 32
+const FATTR_SEL_ITALIC 0x0001
+const FATTR_SEL_UNDERSCORE 0x0002
+const FATTR_SEL_OUTLINE 0x0008
+const FATTR_SEL_STRIKEOUT 0x0010
+const FATTR_SEL_BOLD 0x0020
+const FATTR_TYPE_KERNING 0x0004
+const FATTR_TYPE_MBCS 0x0008
+const FATTR_TYPE_DBCS 0x0010
+const FATTR_TYPE_ANTIALIASED 0x0020
+const FATTR_FONTUSE_NOMIX 0x0002
+const FATTR_FONTUSE_OUTLINE 0x0004
+const FATTR_FONTUSE_TRANSFORMABLE 0x0008
+const FM_TYPE_FIXED 0x0001
+const FM_DEFN_OUTLINE 0x0001
+const FM_SEL_ITALIC 0x0001
+const FM_SEL_BOLD 0x0020
+const CM_DEFAULT 0 : LONG
+const CM_MODE1 1 : LONG
+const CM_MODE2 2 : LONG
+const CM_MODE3 3 : LONG
+const TA_NORMAL_HORIZ 0x0001 : LONG
+const TA_LEFT 0x0002 : LONG
+const TA_CENTER 0x0003 : LONG
+const TA_RIGHT 0x0004 : LONG
+const TA_STANDARD_HORIZ 0x0005 : LONG
+const TA_NORMAL_VERT 0x0100 : LONG
+const TA_TOP 0x0200 : LONG
+const TA_HALF 0x0300 : LONG
+const TA_BASE 0x0400 : LONG
+const TA_BOTTOM 0x0500 : LONG
+const TA_STANDARD_VERT 0x0600 : LONG
+const TXTBOX_TOPLEFT 0 : LONG
+const TXTBOX_BOTTOMLEFT 1 : LONG
+const TXTBOX_TOPRIGHT 2 : LONG
+const TXTBOX_BOTTOMRIGHT 3 : LONG
+const TXTBOX_CONCAT 4 : LONG
+const TXTBOX_COUNT 5 : LONG
+const CHS_OPAQUE 0x0001
+const CHS_VECTOR 0x0002
+const CHS_LEAVEPOS 0x0008
+const CHS_CLIP 0x0010
+const CHS_UNDERSCORE 0x0200
+const CHS_STRIKEOUT 0x0400
+
+struct FATTRS
+  USHORT usRecordLength
+  USHORT fsSelection
+  LONG lMatch
+  CHAR szFacename[FACESIZE]
+  USHORT idRegistry
+  USHORT usCodePage
+  LONG lMaxBaselineExt
+  LONG lAveCharWidth
+  USHORT fsType
+  USHORT fsFontUse
+end
+
+struct PANOSE
+  BYTE bFamilyType
+  BYTE bSerifStyle
+  BYTE bWeight
+  BYTE bProportion
+  BYTE bContrast
+  BYTE bStrokeVariation
+  BYTE bArmStyle
+  BYTE bLetterform
+  BYTE bMidline
+  BYTE bXHeight
+  BYTE fbPassedISO
+  BYTE fbFailedISO
+end
+
+struct FONTMETRICS
+  CHAR szFamilyname[FACESIZE]
+  CHAR szFacename[FACESIZE]
+  USHORT idRegistry
+  USHORT usCodePage
+  LONG lEmHeight
+  LONG lXHeight
+  LONG lMaxAscender
+  LONG lMaxDescender
+  LONG lLowerCaseAscent
+  LONG lLowerCaseDescent
+  LONG lInternalLeading
+  LONG lExternalLeading
+  LONG lAveCharWidth
+  LONG lMaxCharInc
+  LONG lEmInc
+  LONG lMaxBaselineExt
+  SHORT sCharSlope
+  SHORT sInlineDir
+  SHORT sCharRot
+  USHORT usWeightClass
+  USHORT usWidthClass
+  SHORT sXDeviceRes
+  SHORT sYDeviceRes
+  SHORT sFirstChar
+  SHORT sLastChar
+  SHORT sDefaultChar
+  SHORT sBreakChar
+  SHORT sNominalPointSize
+  SHORT sMinimumPointSize
+  SHORT sMaximumPointSize
+  USHORT fsType
+  USHORT fsDefn
+  USHORT fsSelection
+  USHORT fsCapabilities
+  LONG lSubscriptXSize
+  LONG lSubscriptYSize
+  LONG lSubscriptXOffset
+  LONG lSubscriptYOffset
+  LONG lSuperscriptXSize
+  LONG lSuperscriptYSize
+  LONG lSuperscriptXOffset
+  LONG lSuperscriptYOffset
+  LONG lUnderscoreSize
+  LONG lUnderscorePosition
+  LONG lStrikeoutSize
+  LONG lStrikeoutPosition
+  SHORT sKerningPairs
+  SHORT sFamilyClass
+  LONG lMatch
+  LONG FamilyNameAtom
+  LONG FaceNameAtom
+  PANOSE panose
+end
+
+struct SIZEF
+  FIXED cx
+  FIXED cy
+end
+
+struct GRADIENTL
+  LONG x
+  LONG y
+end
+
+fn PMWIN LONG GpiCharString(HPS hps, LONG lCount, PCH pchString)
+fn PMWIN LONG GpiCharStringAt(HPS hps, PPOINTL pptlPoint, LONG lCount, PCH pchString)
+fn PMWIN LONG GpiCharStringPos(HPS hps, PRECTL prclRect, ULONG flOptions, LONG lCount, PCH pchString, PLONG alAdx)
+fn PMWIN LONG GpiCharStringPosAt(HPS hps, PPOINTL pptlStart, PRECTL prclRect, ULONG flOptions, LONG lCount, PCH pchString, PLONG alAdx)
+fn PMWIN BOOL GpiQueryTextBox(HPS hps, LONG lCount1, PCH pchString, LONG lCount2, PPOINTL aptlPoints)
+fn PMWIN BOOL GpiQueryWidthTable(HPS hps, LONG lFirstChar, LONG lCount, PLONG alData)
+fn PMWIN BOOL GpiSetCharBox(HPS hps, PSIZEF psizfxBox)
+fn PMWIN BOOL GpiSetCharAngle(HPS hps, PGRADIENTL pgradlAngle)
+fn PMWIN BOOL GpiSetCharMode(HPS hps, LONG lMode)
+fn PMWIN BOOL GpiSetTextAlignment(HPS hps, LONG lHoriz, LONG lVert)
+fn PMWIN LONG GpiCreateLogFont(HPS hps, PVOID pName, LONG lLcid, PFATTRS pfatAttrs)
+fn PMWIN BOOL GpiSetCharSet(HPS hps, LONG llcid)
+fn PMWIN BOOL GpiDeleteSetId(HPS hps, LONG lLcid)
+fn PMWIN BOOL GpiQueryFontMetrics(HPS hps, LONG lMetricsLength, PFONTMETRICS pfmMetrics)
+fn PMWIN LONG GpiQueryFonts(HPS hps, ULONG flOptions, PCSZ pszFacename, PLONG plReqFonts, LONG lMetricsLength, PFONTMETRICS afmMetrics)
+
+# ---- Bitmaps ----
+
+const ROP_SRCCOPY 0x00CC : LONG
+const ROP_SRCPAINT 0x00EE : LONG
+const ROP_SRCAND 0x0088 : LONG
+const ROP_SRCINVERT 0x0066 : LONG
+const ROP_SRCERASE 0x0044 : LONG
+const ROP_NOTSRCCOPY 0x0033 : LONG
+const ROP_NOTSRCERASE 0x0011 : LONG
+const ROP_MERGECOPY 0x00C0 : LONG
+const ROP_MERGEPAINT 0x00BB : LONG
+const ROP_PATCOPY 0x00F0 : LONG
+const ROP_PATPAINT 0x00FB : LONG
+const ROP_PATINVERT 0x005A : LONG
+const ROP_DSTINVERT 0x0055 : LONG
+const ROP_ZERO 0x0000 : LONG
+const ROP_ONE 0x00FF : LONG
+const BBO_OR 0
+const BBO_AND 1
+const BBO_IGNORE 2
+const BBO_PAL_COLORS 4
+const BBO_NO_COLOR_INFO 8
+const CBM_INIT 0x0004
+const HBM_ERROR -1 : LONG
+
+struct BITMAPINFOHEADER2
+  ULONG cbFix
+  ULONG cx
+  ULONG cy
+  USHORT cPlanes
+  USHORT cBitCount
+  ULONG ulCompression
+  ULONG cbImage
+  ULONG cxResolution
+  ULONG cyResolution
+  ULONG cclrUsed
+  ULONG cclrImportant
+  USHORT usUnits
+  USHORT usReserved
+  USHORT usRecording
+  USHORT usRendering
+  ULONG cSize1
+  ULONG cSize2
+  ULONG ulColorEncoding
+  ULONG ulIdentifier
+end
+
+struct RGB2
+  BYTE bBlue
+  BYTE bGreen
+  BYTE bRed
+  BYTE fcOptions
+end
+
+struct BITMAPINFO2
+  ULONG cbFix
+  ULONG cx
+  ULONG cy
+  USHORT cPlanes
+  USHORT cBitCount
+  ULONG ulCompression
+  ULONG cbImage
+  ULONG cxResolution
+  ULONG cyResolution
+  ULONG cclrUsed
+  ULONG cclrImportant
+  USHORT usUnits
+  USHORT usReserved
+  USHORT usRecording
+  USHORT usRendering
+  ULONG cSize1
+  ULONG cSize2
+  ULONG ulColorEncoding
+  ULONG ulIdentifier
+  RGB2 argbColor[1]
+end
+
+fn PMWIN HBITMAP GpiCreateBitmap(HPS hps, PBITMAPINFOHEADER2 pbmpNew, ULONG flOptions, PBYTE pbInitData, PBITMAPINFO2 pbmiInfoTable)
+fn PMWIN BOOL GpiDeleteBitmap(HBITMAP hbm)
+fn PMWIN HBITMAP GpiSetBitmap(HPS hps, HBITMAP hbm)
+fn PMWIN HBITMAP GpiLoadBitmap(HPS hps, HMODULE Resource, ULONG idBitmap, LONG lWidth, LONG lHeight)
+fn PMWIN BOOL GpiQueryBitmapInfoHeader(HBITMAP hbm, PBITMAPINFOHEADER2 pbmpData)
+fn PMWIN LONG GpiSetBitmapBits(HPS hps, LONG lScanStart, LONG lScans, PBYTE pbBuffer, PBITMAPINFO2 pbmiInfoTable)
+fn PMWIN LONG GpiQueryBitmapBits(HPS hps, LONG lScanStart, LONG lScans, PBYTE pbBuffer, PBITMAPINFO2 pbmiInfoTable)
+fn PMWIN LONG GpiBitBlt(HPS hpsTarget, HPS hpsSource, LONG lCount, PPOINTL aptlPoints, LONG lRop, ULONG flOptions)
+fn PMWIN LONG GpiWCBitBlt(HPS hpsTarget, HBITMAP hbmSource, LONG lCount, PPOINTL aptlPoints, LONG lRop, ULONG flOptions)
+fn PMWIN LONG GpiDrawBits(HPS hps, PVOID pBits, PBITMAPINFO2 pbmiInfoTable, LONG lCount, PPOINTL aptlPoints, LONG lRop, ULONG flOptions)
+
+# ---- Regions and clipping ----
+
+const CRGN_OR 1 : LONG
+const CRGN_COPY 2 : LONG
+const CRGN_XOR 4 : LONG
+const CRGN_AND 6 : LONG
+const CRGN_DIFF 7 : LONG
+const RGN_ERROR 0 : LONG
+const RGN_NULL 1 : LONG
+const RGN_RECT 2 : LONG
+const RGN_COMPLEX 3 : LONG
+const HRGN_ERROR -1 : LONG
+
+fn PMWIN HRGN GpiCreateRegion(HPS hps, LONG lCount, PRECTL arclRectangles)
+fn PMWIN BOOL GpiDestroyRegion(HPS hps, HRGN hrgn)
+fn PMWIN LONG GpiCombineRegion(HPS hps, HRGN hrgnDest, HRGN hrgnSrc1, HRGN hrgnSrc2, LONG lMode)
+fn PMWIN LONG GpiPaintRegion(HPS hps, HRGN hrgn)
+fn PMWIN LONG GpiFrameRegion(HPS hps, HRGN hrgn, PSIZEL thickness)
+fn PMWIN LONG GpiQueryRegionBox(HPS hps, HRGN hrgn, PRECTL prclBound)
+fn PMWIN LONG GpiPtInRegion(HPS hps, HRGN hrgn, PPOINTL pptlPoint)
+fn PMWIN LONG GpiSetClipRegion(HPS hps, HRGN hrgn, PHRGN phrgnOld)
+fn PMWIN LONG GpiIntersectClipRectangle(HPS hps, PRECTL prclRectangle)
+fn PMWIN LONG GpiExcludeClipRectangle(HPS hps, PRECTL prclRectangle)
+fn PMWIN LONG GpiQueryClipBox(HPS hps, PRECTL prclBound)
+
+# ---- Device contexts ----
+
+const OD_QUEUED 2 : LONG
+const OD_DIRECT 5 : LONG
+const OD_INFO 6 : LONG
+const OD_METAFILE 3 : LONG
+const OD_MEMORY 8 : LONG
+const OD_METAFILE_NOQUERY 7 : LONG
+const CAPS_FAMILY 0 : LONG
+const CAPS_IO_CAPS 1 : LONG
+const CAPS_TECHNOLOGY 2 : LONG
+const CAPS_DRIVER_VERSION 3 : LONG
+const CAPS_WIDTH 4 : LONG
+const CAPS_HEIGHT 5 : LONG
+const CAPS_HEIGHT_IN_CHARS 6 : LONG
+const CAPS_WIDTH_IN_CHARS 7 : LONG
+const CAPS_HORIZONTAL_RESOLUTION 8 : LONG
+const CAPS_VERTICAL_RESOLUTION 9 : LONG
+const CAPS_CHAR_HEIGHT 10 : LONG
+const CAPS_CHAR_WIDTH 11 : LONG
+const CAPS_SMALL_CHAR_HEIGHT 12 : LONG
+const CAPS_SMALL_CHAR_WIDTH 13 : LONG
+const CAPS_COLORS 14 : LONG
+const CAPS_COLOR_PLANES 15 : LONG
+const CAPS_COLOR_BITCOUNT 16 : LONG
+const CAPS_COLOR_TABLE_SUPPORT 17 : LONG
+const CAPS_MOUSE_BUTTONS 18 : LONG
+const CAPS_FOREGROUND_MIX_SUPPORT 19 : LONG
+const CAPS_BACKGROUND_MIX_SUPPORT 20 : LONG
+const CAPS_VERTICAL_FONT_RES 32 : LONG
+const CAPS_HORIZONTAL_FONT_RES 33 : LONG
+
+# DEVOPENSTRUC is an array of pointers: the 64-bit PMWIN passes it on
+# converted (docs/API64.md).
+struct DEVOPENSTRUC
+  PSZ pszLogAddress
+  PSZ pszDriverName
+  PVOID pdriv
+  PSZ pszDataType
+  PSZ pszComment
+  PSZ pszQueueProcName
+  PSZ pszQueueProcParams
+  PSZ pszSpoolerParams
+  PSZ pszNetworkParams
+end
+type DEVOPENDATA PVOID
+
+fn PMWIN HDC DevOpenDC(HAB hab, LONG lType, PCSZ pszToken, LONG lCount, DEVOPENDATA pdopData, HDC hdcComp)
+fn PMWIN HMODULE DevCloseDC(HDC hdc)
+fn PMWIN BOOL DevQueryCaps(HDC hdc, LONG lStart, LONG lCount, PLONG alArray)

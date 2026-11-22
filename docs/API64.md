@@ -215,15 +215,95 @@ taken for the gate. More calls move to `uptr` as programs need them.
 
 ## Building 64-bit programs
 
+Rust and C are both first-class: they get the same API from one
+description.
+
+### The API description
+
+`userland64/api/*.api` describes the 64-bit API once: types, constants,
+structures (in their 64-bit layouts), function pointer types and the
+functions with their imports (`DOSCALLS.282`, `PMWIN.WinCreateWindow`).
+`python3 -I tools/scripts/gen_api64.py` turns it into both
+
+- C headers, `userland64/include/*.h` (`#include <os2.h>` for all of
+  them: os2def.h, bsedos.h, bsexcpt.h, pmwin.h, pmgpi.h), and
+- Rust bindings, `userland64/os2/src/api/*.rs`, which the `os2` crate
+  re-exports (`use os2::*`),
+
+with the same names as OS/2's headers (HWND, QMSG, WinCreateStdWindow,
+DosOpen...) in both languages. The generated files are committed; rerun
+the script after changing a `.api` file. It checks that every DOSCALLS
+ordinal is one `kernel/src/api/api64.rs` lets 64-bit code call, and that
+every PMWIN function is an export of the 32-bit PMWIN with the same
+number of arguments (the 64-bit PMWIN passes each on as one 32-bit
+value). Constants were checked against the values rs2's own 32-bit code
+uses. The description covers DOSCALLS as far as 64-bit code may call it,
+exception handling, and the core of PMWIN (windows, messages, frames,
+painting, dialogs, menus, the standard controls' messages, the clipboard,
+atoms) and the GPI (drawing, text and fonts, bitmaps, regions, device
+contexts): about 370 functions. The 64-bit PMWIN exports all of the
+32-bit one's functions; more of them only need lines in `pmwin.api` or
+`pmgpi.api`.
+
+### Rust
+
 `userland64/` is a Cargo workspace for `x86_64-unknown-linux-gnu`
 (`no_std`; only its precompiled `core` and `alloc` are used, never
 Linux). Every program and DLL is a `cdylib`; `.cargo/config.toml` links
 with rust-lld and `link64.ld` (`-Bsymbolic`, `-z now`, SysV hash table).
-The `os2` crate there is the 64-bit API: bindings (`#[link_name =
-"DOSCALLS.282"]`), the `entry!` and `app_type!` macros, `println!`, a
-heap on DosAllocMem, and the routines the compiler expects (memcpy...).
-`cargo xtask build` builds the workspace and puts each program
-(`PROGRAMS64` in xtask) on the boot volume as it was linked.
+The `os2` crate is the 64-bit API (the generated bindings) and a small
+runtime: `os2::entry!(main)` (`fn main(&Startup) -> u32`, with the
+program name and arguments), `os2::app_type!(PM)`, `os2::resources!()`
+(with a build script calling `os2_rc::host::compile_table64` on the
+program's `.RC`, as userland64/pmdemo64/build.rs does), `psz!("text")`
+for string arguments, `println!`, `alloc` on a heap over DosAllocMem
+(above 4 GB once the low arena is full), and MPARAM helpers
+(`mpfrom2short`, `short1frommp`, `MPVOID`, ...). The bindings are as raw
+as the C headers (`unsafe`, `PVOID` is `*mut c_void`, procedures are
+`Option<unsafe extern "C" fn ...>`), as with `windows-sys`.
+
+A new Rust program: a crate in userland64 (`crate-type = ["cdylib"]`,
+`os2 = { path = "../os2" }`), added to the workspace's members and to
+`PROGRAMS64` in xtask (crate, file on the boot volume):
+
+```rust
+#![no_std]
+use os2::*;
+os2::entry!(main);
+
+fn main(s: &Startup) -> u32 {
+    os2::println!("Hello from Rust, arguments \"{}\"", core::str::from_utf8(s.args()).unwrap_or("?"));
+    0
+}
+```
+
+`C:\RS2\HELLO64.EXE` and `C:\RS2\PMDEMO64.EXE` (below) are the Rust
+examples.
+
+### C
+
+`userland64/c/cc64.sh -o OUT.EXE [--pm] [--dll] [--rc FILE.RC] FILE.c...`
+compiles with clang (Apple's will do: `--target=x86_64-unknown-linux-gnu`,
+freestanding, `-fPIC`, hidden visibility) against userland64/include and
+links with rust-lld and `link64.ld`, as the Rust programs are. Programs
+get `userland64/c/crt0.c`: `_start` splits the command line into
+`main(argc, argv, envp)` (double quotes group words) and returns main's
+result; it also has the memcpy, memmove, memset and memcmp the compiler
+may call. There is no C library yet: programs use the OS/2 API. `--pm`
+marks a PM program, `--rc` compiles the module's `.RC` script into its
+resources (os2-rc's `rc table64`), and `--dll` makes a DLL (export
+functions with `RS2_EXPORT`). `C_PROGRAMS64` in xtask lists the C
+programs `cargo xtask build` makes:
+
+- `C:\RS2\CHELLO64.EXE` (userland64/c/samples/hello.c): its arguments,
+  then checks of DosQuerySysInfo, DosGetInfoBlocks, DosAllocMem, a thread
+  with a 64-bit parameter, an event semaphore, a file and an exception
+  handler; `CHELLO64: all tests passed`.
+- `C:\RS2\CPMHELLO.EXE` (pmhello.c, pmhello.rc): a PM window with a menu
+  and a title from its resources, drawing with GPI; `CPMHELLO /SELFTEST`
+  prints PASS/FAIL and `cpmhello selftest done: N failure(s)`.
+
+### Tests
 
 `C:\RS2\HELLO64.EXE` is the smoke test: TIB/PIB, DosQuerySysInfo, the
 heap, DosAllocMem, DosScanEnv, threads with a 64-bit parameter, an event

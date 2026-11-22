@@ -9,7 +9,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{self, null_mut};
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
-use crate::dos::*;
+use crate::api::*;
 
 const CHUNK: usize = 1 << 20;
 const LARGE: usize = 256 * 1024;
@@ -116,10 +116,10 @@ fn alloc_mem(size: usize) -> *mut u8 {
     let Ok(cb) = u32::try_from(size) else { return null_mut() };
     let mut p: *mut u8 = null_mut();
     let fl = PAG_READ | PAG_WRITE | PAG_COMMIT;
-    if unsafe { DosAllocMem(&mut p, cb, fl) } == 0 {
+    if unsafe { DosAllocMem((&raw mut p).cast(), cb, fl) } == 0 {
         return p;
     }
-    if unsafe { DosAllocMem(&mut p, cb, fl | OBJ_ANY) } == 0 { p } else { null_mut() }
+    if unsafe { DosAllocMem((&raw mut p).cast(), cb, fl | OBJ_ANY) } == 0 { p } else { null_mut() }
 }
 
 /// A replacement for the heap (PMWIN keeps all it allocates in the
@@ -157,7 +157,7 @@ pub unsafe fn alloc_private(size: usize) -> *mut u8 {
 /// `p` and `size` as from [`alloc_private`].
 pub unsafe fn free_private(p: *mut u8, size: usize) {
     if size >= LARGE {
-        unsafe { DosFreeMem(p) };
+        unsafe { DosFreeMem(p.cast()) };
         return;
     }
     lock();
@@ -188,7 +188,7 @@ unsafe impl GlobalAlloc for Os2Heap {
             return unsafe { ((*r).dealloc)(p, l) };
         }
         if l.size() >= LARGE && l.align() <= 4096 {
-            unsafe { DosFreeMem(p) };
+            unsafe { DosFreeMem(p.cast()) };
             return;
         }
         lock();
