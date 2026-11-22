@@ -65,6 +65,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
     }
     match ordinal {
         311 => return Some(dos_create_thread64),
+        318 => return Some(dos_load_module64),
+        LOAD_MODULE32 => return Some(super::module::dos_load_module),
         312 => return Some(dos_get_info_blocks64),
         _ => {}
     }
@@ -93,6 +95,45 @@ pub fn refused(c: &Ctx, module: u8, ordinal: u16) -> Option<u32> {
         _ => false,
     };
     bad.then_some(err::INVALID_PARAMETER)
+}
+
+/// rs2's private DOSCALLS entry `Dos64LoadModule32` (same arguments as
+/// DosLoadModule): load a 32-bit DLL into a 64-bit process, for the 64-bit
+/// DLLs that call 32-bit ones (the 64-bit PMWIN).
+pub const LOAD_MODULE32: u16 = 2040;
+
+/// DosLoadModule from 64-bit code: a 64-bit DLL of that name, else a
+/// 32-bit one (whose procedures 64-bit code calls through thunks).
+fn dos_load_module64(c: &mut Ctx) -> u32 {
+    let (fail, cbfail, pname, phmod) = (c.ptr(0), c.arg(1), c.ptr(2), c.ptr(3));
+    let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
+    let loading = crate::loader::lock();
+    let m = match crate::loader::load_global64(&name) {
+        Ok(m) if m.format == crate::loader::Format::Elf64 => m,
+        _ => {
+            drop(loading);
+            return super::module::dos_load_module(c);
+        }
+    };
+    if let Err(e) = crate::loader::attach(&m, &mut c.space()) {
+        if fail != 0 && cbfail > 0 {
+            let n = (cbfail as usize - 1).min(m.name.len());
+            c.write_str(fail, &m.name[..n]);
+        }
+        return e;
+    }
+    {
+        let mut l = c.process.loaded.lock();
+        match l.iter_mut().find(|(x, _)| alloc::sync::Arc::ptr_eq(x, &m)) {
+            Some(e) => e.1 += 1,
+            None => l.push((m.clone(), 1)),
+        }
+    }
+    drop(loading);
+    if !c.write_u32(phmod, m.hmte as u32) {
+        return err::INVALID_ADDRESS;
+    }
+    0
 }
 
 /// After a successful call: widen pointers returned through arguments.

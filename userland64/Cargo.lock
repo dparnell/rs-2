@@ -12,3 +12,17 @@ dependencies = [
 [[package]]
 name = "os2"
 version = "0.1.0"
+
+[[package]]
+name = "pmdemo64"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmwin"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]

@@ -1120,7 +1120,11 @@ fn build_userland() -> Option<image::FileList> {
 
 /// 64-bit programs and DLLs in userland64/ (docs/API64.md): cargo
 /// package, file on the boot volume. They are ELF64 images as linked.
-const PROGRAMS64: &[(&str, &str)] = &[("hello64", "RS2\\HELLO64.EXE")];
+const PROGRAMS64: &[(&str, &str)] = &[
+    ("hello64", "RS2\\HELLO64.EXE"),
+    ("pmwin", "RS2\\DLL64\\PMWIN.DLL"),
+    ("pmdemo64", "RS2\\PMDEMO64.EXE"),
+];
 
 /// Build the userland64 workspace (x86-64 ELF shared objects).
 fn build_userland64() -> Option<image::FileList> {
@@ -1134,7 +1138,9 @@ fn build_userland64() -> Option<image::FileList> {
     if !status.success() {
         return None;
     }
-    let out_dir = root().join("work/userland");
+    // Their own directory: 64-bit DLLs have the 32-bit ones' names.
+    let out_dir = root().join("work/userland/64");
+    std::fs::create_dir_all(&out_dir).ok()?;
     let mut files = Vec::new();
     for (pkg, dest) in PROGRAMS64 {
         let so = dir.join("target/x86_64-unknown-linux-gnu/release").join(format!("lib{pkg}.so"));

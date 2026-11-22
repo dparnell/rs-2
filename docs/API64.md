@@ -149,10 +149,53 @@ semaphore, a file, DosQueryProcAddr and a call through its result.
 cargo xtask run --headless --timeout 35 --init "OS2\CMD.EXE /K RS2\HELLO64.EXE"
 ```
 
-## Presentation Manager
+## PM for 64-bit programs
 
 PM's shared state (the window tree, classes, queues) lives in shared
 memory of the 32-bit PMWIN.DLL as i686 Rust structures, so a 64-bit
-PMWIN cannot share it. 64-bit PM programs therefore call rs2's 32-bit
-PMWIN and PMGPI through thunks, the way Windows runs 32-bit programs on
-64-bit Windows, the other way round: see "PM for 64-bit programs" below.
+PMWIN cannot share it. A 64-bit program's PMWIN (`C:\RS2\DLL64\PMWIN.DLL`,
+userland64/pmwin) is therefore a layer over the 32-bit one in the same
+process, the way Windows runs 32-bit programs on 64-bit Windows, the
+other way round:
+
+- **64 → 32.** Each export (all of the 32-bit PMWIN's, Win* and Gpi*, by
+  name) calls the 32-bit function of the same name: `rs2_call32` copies
+  the arguments, truncated to 32 bits, below the 64-bit frame, enters the
+  function in compatibility mode with RETFQ (CS 0x5B), and is back in long
+  mode by a far jump through [EBX] once the function returns to a 32-bit
+  stub (EBX and EBP survive: the callee keeps them). The 32-bit DLL is
+  loaded with rs2's private `Dos64LoadModule32` (DOSCALLS 2040), its
+  procedures found by DosQueryProcAddr on first use. The generic exports
+  are generated from the 32-bit PMWIN's trampoline list (name, argument
+  count): `python3 -I tools/scripts/gen_pm64.py` writes
+  `userland64/pmwin/src/thunks.rs`.
+- **32 → 64.** A 64-bit window procedure given to PMWIN (WinRegisterClass,
+  WinSubclassWindow, WinSetWindowPtr(QWP_PFNWP), WinDlgBox, WinLoadDlg,
+  WinCreateDlg) is replaced by a 32-bit stub (`mov eax, slot; jmp far` to
+  `rs2_entry64`), one per procedure, in a page of executable memory; the
+  stub's long-mode side calls the procedure with System V arguments
+  (MPARAMs zero-extended) and returns to PMWIN with RETFQ to a 32-bit RET.
+  A 32-bit procedure PMWIN hands out (WinSubclassWindow's previous
+  procedure, QWP_PFNWP, CLASSINFO) becomes a 64-bit stub that calls it
+  through `rs2_call32`; a stub of our own gives its procedure back, so
+  pointers compare equal.
+- **Structures with pointers** are converted: QMSG (WinGetMsg,
+  WinPeekMsg, WinDispatchMsg, WinTranslateAccel, WinCallMsgFilter),
+  CLASSINFO, DEVOPENSTRUC (DevOpenDC), and WM_CREATE's CREATESTRUCT (a
+  64-bit copy that remembers the original, so WinDefWindowProc gets that
+  back).
+- Not yet: hooks (WinSetHook fails), message parameters that point to
+  structures with pointers other than CREATESTRUCT (container records,
+  WM_QUERYWINDOWPARAMS' WNDPARAMS...), resources in 64-bit modules,
+  PMSHAPI and the other PM DLLs.
+
+`C:\RS2\PMDEMO64.EXE` (userland64/pmdemo64) is a 64-bit PM program: a
+frame window drawing text and shapes with GPI and counting timer ticks.
+`PMDEMO64 /SELFTEST` checks the layer (window procedures both ways,
+CREATESTRUCT, QMSG, CLASSINFO, QWP_PFNWP, subclassing the frame,
+WinSendMsg results, the message loop, painting) and prints PASS/FAIL and
+`pmdemo64 selftest done: N failure(s)`:
+
+```text
+cargo xtask run --headless --timeout 45 --init "RS2\PMDEMO64.EXE /SELFTEST"
+```

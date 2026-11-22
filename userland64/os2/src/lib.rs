@@ -13,6 +13,7 @@ extern crate alloc;
 pub mod dos;
 pub mod fmt;
 pub mod heap;
+pub mod pm;
 
 /// Programs using `alloc` get the OS/2 heap.
 #[cfg(feature = "heap")]

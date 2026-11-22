@@ -3,7 +3,7 @@
 # them and puts them on the C: image.
 [workspace]
 resolver = "3"
-members = ["os2", "hello64"]
+members = ["os2", "hello64", "pmwin", "pmdemo64"]
 
 [workspace.package]
 edition = "2024"

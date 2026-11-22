@@ -1,0 +1,12 @@
+[package]
+name = "pmwin"
+description = "PMWIN for 64-bit programs: thunks to rs2's 32-bit PMWIN (docs/API64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+os2 = { path = "../os2" }
