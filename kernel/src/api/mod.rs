@@ -8,7 +8,10 @@
 //! * 32-bit `_System`: arguments at `ESP+4`, caller pops; result in EAX.
 //! * 16-bit far `_Pascal`: arguments pushed left to right above the far
 //!   return address, callee pops them; result in AX.
+//! * 64-bit (long mode, docs/API64.md): System V, arguments in RDI, RSI,
+//!   RDX, RCX, R8, R9 and then above the return address; result in RAX.
 
+pub mod api64;
 pub mod audio;
 pub mod debug;
 pub mod doscalls;
@@ -218,6 +221,8 @@ pub struct Ctx<'a> {
     pub process: Arc<Process>,
     /// 16-bit `_Pascal` convention.
     pub is16: bool,
+    /// Called from 64-bit code (api64).
+    pub is64: bool,
     /// Argument sizes, left to right (16-bit only).
     sig: &'static [u8],
     /// Linear address of the first argument byte above the return address.
@@ -241,7 +246,17 @@ impl Ctx<'_> {
     /// Emulate the API's return to its caller now, with `result` in
     /// EAX/AX (the far return and argument pop for 16-bit APIs).
     pub fn complete_return(&mut self, result: u32) {
-        let stack = self.args_at - 4;
+        let stack = self.args_at.wrapping_sub(4);
+        if self.is64 {
+            let mut b = [0u8; 8];
+            let ok = self.read(self.f.rsp as u32, &mut b);
+            let f = &mut *self.f;
+            f.rip = if ok { u64::from_le_bytes(b) } else { 0 };
+            f.rsp += 8;
+            f.rax = result as u64;
+            self.no_return = true;
+            return;
+        }
         let ret = self.read_u32(stack).unwrap_or(0);
         let f = &mut *self.f;
         if self.is16 {
@@ -272,8 +287,32 @@ impl Ctx<'_> {
         self.process.space.lock()
     }
 
-    /// Raw argument `i` (0 = leftmost).
+    /// Argument `i` of a 64-bit call, all 64 bits (32-bit calls: `arg`).
+    pub fn arg64(&self, i: usize) -> u64 {
+        if !self.is64 {
+            return self.arg(i) as u64;
+        }
+        let f = &*self.f;
+        match i {
+            0 => f.rdi,
+            1 => f.rsi,
+            2 => f.rdx,
+            3 => f.rcx,
+            4 => f.r8,
+            5 => f.r9,
+            _ => {
+                let mut b = [0u8; 8];
+                let at = self.args_at.wrapping_add(8 * (i as u32 - 6));
+                if self.read(at, &mut b) { u64::from_le_bytes(b) } else { 0 }
+            }
+        }
+    }
+
+    /// Raw argument `i` (0 = leftmost); of a 64-bit call, its low 32 bits.
     pub fn arg(&self, i: usize) -> u32 {
+        if self.is64 {
+            return self.arg64(i) as u32;
+        }
         if self.is16 {
             let Some(&size) = self.sig.get(i) else { return 0 };
             let off: u32 = self.sig[i + 1..].iter().map(|&s| sigs::size(s)).sum();
@@ -287,6 +326,12 @@ impl Ctx<'_> {
     /// Argument `i` as a pointer, converted to a flat address (16:16 for
     /// 16-bit APIs). 0 stays 0.
     pub fn ptr(&self, i: usize) -> u32 {
+        if self.is64 {
+            // Nothing of a 64-bit program is above 4 GB yet (phase 1):
+            // such a pointer is invalid.
+            let v = self.arg64(i);
+            return if v > u32::MAX as u64 { 0xffff_ffff } else { v as u32 };
+        }
         let v = self.arg(i);
         if self.is16 { self.far16_to_flat(v) } else { v }
     }
@@ -422,8 +467,11 @@ pub fn dispatch(f: &mut TrapFrame) {
 pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     let thread = sched::current();
     let Some(process) = thread.process() else { return };
+    let is64 = f.cs as u16 == crate::arch::gdt::USER_CS64;
     // The trapping instruction is the 2-byte `int 0x99` before RIP.
-    let (linear, ss_big, stack_linear) = {
+    let (linear, ss_big, stack_linear) = if is64 {
+        (f.rip.wrapping_sub(2) as u32, true, f.rsp as u32)
+    } else {
         let space = process.space.lock();
         let lin = code_linear(&space, f.cs as u16, f.rip.wrapping_sub(2));
         let dss = space.descriptor(f.ss as u16);
@@ -486,8 +534,9 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
             thread: thread.clone(),
             process: process.clone(),
             is16: false,
+            is64,
             sig: &[],
-            args_at: stack_linear + 4,
+            args_at: stack_linear + if is64 { 8 } else { 4 },
             no_return: true,
             dx: None,
             pop32: 0,
@@ -533,8 +582,9 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         thread: thread.clone(),
         process: process.clone(),
         is16,
+        is64,
         sig,
-        args_at: stack_linear + 4,
+        args_at: stack_linear + if is64 { 8 } else { 4 },
         no_return: false,
         dx: None,
         pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
@@ -562,13 +612,30 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         "MOUCALLS" => mou::refused(&ctx),
         _ => None,
     });
-    if forced.is_none() && route && subsys::route(&mut ctx, module as u8, ordinal as u16) {
+    // Replacement subsystems are 32-bit code.
+    if forced.is_none() && route && !is64 && subsys::route(&mut ctx, module as u8, ordinal as u16) {
         return;
     }
     let timed = crate::fs::iostat::begin();
-    let result = match (forced, doscalls::handler(module as u8, ordinal as u16)) {
+    let forced = forced.or_else(|| if is64 { api64::refused(&ctx, module as u8, ordinal as u16) } else { None });
+    let handler = if is64 { api64::handler(module as u8, ordinal as u16) } else { doscalls::handler(module as u8, ordinal as u16) };
+    if is64 && handler.is_none() && forced.is_none() {
+        let mut w = WARNED.lock();
+        if !w.contains(&(module | 0x100, ordinal)) {
+            w.push((module | 0x100, ordinal));
+            crate::println!(
+                "[API {}.{} {} is not available to 64-bit programs yet; called by {}]",
+                gate::MODULES[module as usize],
+                ordinal,
+                names::display(module as u8, ordinal as u16),
+                process.exe.name
+            );
+        }
+    }
+    let result = match (forced, handler) {
         (Some(r), _) => r,
         (None, Some(h)) => h(&mut ctx),
+        (None, None) if is64 => err::CALL_NOT_IMPLEMENTED,
         (None, None) => {
             let mut w = WARNED.lock();
             if !w.contains(&(module, ordinal)) {
@@ -585,6 +652,9 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         }
     };
     crate::fs::iostat::api(timed, module as u8, ordinal as u16);
+    if is64 && result == 0 && forced.is_none() {
+        api64::after(&ctx, module as u8, ordinal as u16);
+    }
     if trace {
         crate::trace!("    -> {}", result);
     }

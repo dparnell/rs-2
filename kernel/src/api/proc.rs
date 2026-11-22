@@ -382,7 +382,7 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
     start_thread(c, frame, base, base + sp_off, ptid, false, true, 0)
 }
 
-fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspended: bool, tid16: bool, owned_stack: u32) -> u32 {
+pub(super) fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspended: bool, tid16: bool, owned_stack: u32) -> u32 {
     let t = match c.process.new_thread(frame, base, top) {
         Ok(t) => t,
         Err(e) => return e,

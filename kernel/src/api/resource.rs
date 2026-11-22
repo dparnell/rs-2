@@ -20,6 +20,8 @@ pub fn find(m: &Module, ty: u16, name: u16) -> Option<(u32, u32)> {
             let obj = m.objects.get((r.object as usize).checked_sub(1)?)?;
             Some((obj.base + r.offset, r.size))
         }
+        // 64-bit modules have no resources yet (docs/API64.md).
+        Format::Elf64 => None,
         Format::Ne => {
             // OS/2 NE: (type, name) pairs; the resources are the last
             // segments of the segment table.

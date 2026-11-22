@@ -9,6 +9,7 @@
 //! Executables are loaded into the private arena of their process.
 
 pub mod gate;
+mod elfload;
 mod lxload;
 mod neload;
 
@@ -92,7 +93,11 @@ pub enum Format {
     Virtual,
     Lx,
     Ne,
+    /// A 64-bit module (ELF64, docs/API64.md).
+    Elf64,
 }
+
+pub use elfload::is_elf64;
 
 /// A loaded object (LX) or segment (NE).
 pub struct Object {
@@ -412,7 +417,8 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let by_path = name.contains(['\\', '/', ':']);
     let found = {
         let r = REGISTRY.lock();
-        let named = |m: &&Arc<Module>| m.is_dll && m.name.eq_ignore_ascii_case(&mname);
+        // 64-bit modules are another namespace (load_global64).
+        let named = |m: &&Arc<Module>| m.is_dll && m.format != Format::Elf64 && m.name.eq_ignore_ascii_case(&mname);
         let m = if by_path {
             // The kernel's API modules have no file.
             r.modules.iter().filter(named).find(|m| m.format == Format::Virtual)
@@ -444,9 +450,49 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     if let Some(m) = find_loaded_path(&path).and_then(reuse) {
         return Ok(m);
     }
+    if is_elf64(&data) {
+        crate::trace!("loader: {path} is a 64-bit module");
+        set_fail(name);
+        return Err(err::BAD_EXE_FORMAT);
+    }
     let m = load_image(&path, data, true, by_path, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());
     Pending::loaded(&m);
+    Ok(m)
+}
+
+/// Load (or find) a 64-bit DLL system-wide (docs/API64.md): the kernel's
+/// API modules, or ELF64 DLLs, found in `\RS2\DLL64` of the boot drive
+/// and then along the LIBPATH (files that are not 64-bit are passed over).
+/// 64-bit and 32-bit modules of one name are different modules.
+pub fn load_global64(name: &str) -> Result<Arc<Module>, u32> {
+    let _l = lock();
+    let mname = module_name(name);
+    let by_path = name.contains(['\\', '/', ':']);
+    let found = {
+        let r = REGISTRY.lock();
+        r.modules
+            .iter()
+            .find(|m| {
+                m.is_dll
+                    && m.name.eq_ignore_ascii_case(&mname)
+                    && (m.format == Format::Virtual || (m.format == Format::Elf64 && !m.specific && !by_path))
+            })
+            .cloned()
+    }
+    .or_else(|| if by_path { find_loaded_path(name).filter(|m| m.format == Format::Elf64) } else { None });
+    if let Some(m) = found {
+        return Ok(m);
+    }
+    let (path, data) = crate::fs::find_module64(name).map_err(|e| {
+        set_fail(name);
+        if e == err::FILE_NOT_FOUND { err::MOD_NOT_FOUND } else { e }
+    })?;
+    if let Some(m) = find_loaded_path(&path).filter(|m| m.format == Format::Elf64) {
+        return Ok(m);
+    }
+    let m = elfload::load(&path, data, true, by_path, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
+    register(m.clone());
     Ok(m)
 }
 
@@ -617,6 +663,9 @@ pub fn load_exe(path: &str, data: Arc<[u8]>, space: &mut AddressSpace) -> Result
 /// Parse and relocate a module. DLLs go to the shared arena (`space` is
 /// None); an EXE is loaded straight into `space`.
 fn load_image(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
+    if is_elf64(&data) {
+        return elfload::load(path, data, dll, specific, space);
+    }
     match os2_exe::detect(&data) {
         Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, specific, space),
         Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, specific, space),

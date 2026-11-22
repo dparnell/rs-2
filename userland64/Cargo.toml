@@ -1,0 +1,19 @@
+# 64-bit OS/2 programs and DLLs (docs/API64.md): x86-64 ELF shared objects
+# linked with link64.ld, loaded by rs2's ELF64 loader. cargo xtask builds
+# them and puts them on the C: image.
+[workspace]
+resolver = "3"
+members = ["os2", "hello64"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

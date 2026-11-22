@@ -1,0 +1,12 @@
+[package]
+name = "hello64"
+description = "A 64-bit OS/2 text program: rs2's 64-bit API smoke test"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+os2 = { path = "../os2" }

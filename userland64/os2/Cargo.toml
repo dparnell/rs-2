@@ -1,0 +1,10 @@
+[package]
+name = "os2"
+description = "rs2's 64-bit OS/2 API bindings and a minimal runtime (docs/API64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+default = ["heap"]
+heap = []

@@ -46,6 +46,29 @@ pub fn info_base() -> u32 {
     *b
 }
 
+/// The 64-bit process information area (docs/API64.md): PIB at 0, the
+/// TIB of thread n at `TIB64_0 + n * TIB_STRIDE` (its TIB2 is the 32-bit
+/// TIB's). At one address in every 64-bit process, as [`info_base`].
+pub fn info64_base() -> u32 {
+    static BASE: SpinLock<u32> = SpinLock::new(0);
+    let mut b = BASE.lock();
+    if *b == 0 {
+        *b = vm::reserve_shared(INFO64_SIZE, None).expect("64-bit process information area");
+    }
+    *b
+}
+
+pub const TIB64_0: u32 = 0x100;
+pub const INFO64_SIZE: u32 = 0x2_0000;
+
+fn write_u64s(space: &mut AddressSpace, at: u32, v: &[u64]) {
+    let mut b = Vec::with_capacity(v.len() * 8);
+    for x in v {
+        b.extend_from_slice(&x.to_le_bytes());
+    }
+    space.poke_bytes(at, &b);
+}
+
 /// Why and how a process ended (for DosCWait / DosWaitChild).
 #[derive(Clone, Copy, Debug)]
 pub struct ExitInfo {
@@ -246,8 +269,28 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let pib = [pid, ppid, exe.hmte as u32, env + cmd_off, env, 0, exe_type(&exe, p.session)];
     write_u32s(&mut space, info + info::PIB, &pib);
 
+    let is64 = exe.format == loader::Format::Elf64;
+    if is64 {
+        // PIB: pid, ppid, hmte, (pad), command line, environment,
+        // status, type.
+        let i64 = space
+            .alloc_instance(info64_base(), INFO64_SIZE, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data)
+            .map_err(|e| e.code())?;
+        write_u32s(&mut space, i64, &[pid, ppid, exe.hmte as u32, 0]);
+        write_u64s(&mut space, i64 + 16, &[(env + cmd_off) as u64, env as u64]);
+        write_u32s(&mut space, i64 + 32, &[0, exe_type(&exe, p.session)]);
+    }
+
     // Stack.
-    let (stack_flat, stack_sel, stack_off) = if start.stack.flat != 0 || start.stack.sel != 0 {
+    let (stack_flat, stack_sel, stack_off) = if is64 {
+        // 64-bit programs: 1 MB, growing down from a committed top page
+        // over a guard page.
+        let size = 0x10_0000;
+        let base = space.alloc(size, pag::READ | pag::WRITE, SegKind::Data, None).map_err(|e| e.code())?;
+        let _ = space.set_mem(base + size - vm::PAGE, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
+        let _ = space.set_mem(base + size - 2 * vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
+        (base + size, 0, 0)
+    } else if start.stack.flat != 0 || start.stack.sel != 0 {
         (start.stack.flat, start.stack.sel, start.stack.off)
     } else {
         // No stack object: allocate one (32-bit programs).
@@ -282,6 +325,22 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
             frame.rsi = 0;
             frame.rax = 0;
         }
+    } else if is64 {
+        // _start(hmod, 0, env, cmdline) in RDI, RSI, RDX, RCX, called
+        // from the exit stub: RSP + 8 is 16-byte aligned (System V).
+        let sp = ((stack_flat - 64) & !15) - 8;
+        let exit_stub = loader::gate::slot_address(0, 0);
+        write_u64s(&mut space, sp, &[exit_stub as u64]);
+        frame.cs = crate::arch::gdt::USER_CS64 as u64;
+        frame.rip = start.entry.flat as u64;
+        frame.ss = USER_DS as u64;
+        frame.ds = USER_DS as u64;
+        frame.es = USER_DS as u64;
+        frame.fs = TIB_SEL as u64;
+        frame.rsp = sp as u64;
+        frame.rdi = hmte as u64;
+        frame.rdx = env as u64;
+        frame.rcx = (env + cmd_off) as u64;
     } else {
         // [esp] = return address (exit stub), hmod, 0, env, cmdline.
         let sp = (stack_flat - 20) & !3;
@@ -358,7 +417,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         dregs: [const { AtomicU32::new(0) }; 4],
         dr7: AtomicU32::new(0),
     });
-    let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
+    let stack_bottom = if is64 { stack_flat - 0x10_0000 } else { stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000)) };
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
     {
         let mut sp = proc.space.lock();
@@ -473,6 +532,13 @@ impl Process {
             // version, ordinal.
             write_u32s(&mut sp, tib, &[0xffff_ffff, stack_bottom, stack_top, tib2, 20, t.id]);
             write_u32s(&mut sp, tib2, &[tid, t.priority(), 20, 0]);
+            if self.is64() {
+                // TIB: exception chain (none), stack base, stack limit,
+                // TIB2 (the 32-bit TIB's), version, ordinal.
+                let at = info64_base() + TIB64_0 + tid * info::TIB_STRIDE;
+                write_u64s(&mut sp, at, &[0, stack_bottom as u64, stack_top as u64, tib2 as u64]);
+                write_u32s(&mut sp, at + 32, &[20, t.id]);
+            }
         }
         Ok(t)
     }
@@ -491,6 +557,11 @@ impl Process {
             t.request_exit();
         }
         others
+    }
+
+    /// A 64-bit program (docs/API64.md).
+    pub fn is64(&self) -> bool {
+        self.exe.format == loader::Format::Elf64
     }
 
     pub fn main_thread(&self) -> Option<Arc<Thread>> {
