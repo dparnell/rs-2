@@ -329,10 +329,10 @@ pub fn dos16_chg_file_ptr(c: &mut Ctx) -> u32 {
 
 pub fn dos_set_file_ptr_l(c: &mut Ctx) -> u32 {
     // DosSetFilePtrL(hf, LONGLONG ib, method, PLONGLONG pibActual)
-    let off = (c.arg(1) as u64 | (c.arg(2) as u64) << 32) as i64;
-    match seek(c, c.arg(0), off, c.arg(3)) {
+    let (off, k) = c.arg_ll(1);
+    match seek(c, c.arg(0), off as i64, c.arg(k)) {
         Ok(p) => {
-            let a = c.arg(4);
+            let a = c.arg(k + 1);
             c.write_u32(a, p as u32);
             c.write_u32(a + 4, (p >> 32) as u32);
             0
@@ -362,7 +362,7 @@ pub fn dos_set_file_size(c: &mut Ctx) -> u32 {
 }
 
 pub fn dos_set_file_size_l(c: &mut Ctx) -> u32 {
-    set_size(c, c.arg(0), c.arg(1) as u64 | (c.arg(2) as u64) << 32)
+    set_size(c, c.arg(0), c.arg_ll(1).0)
 }
 
 pub fn dos_reset_buffer(c: &mut Ctx) -> u32 {
@@ -569,9 +569,9 @@ pub fn dos_open_l(c: &mut Ctx) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let size = c.arg(3) as u64 | (c.arg(4) as u64) << 32;
-    let eas = OpenEas { eaop: c.arg(8), ..NO_EAS };
-    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7), eas) {
+    let (size, k) = c.arg_ll(3);
+    let eas = OpenEas { eaop: c.arg(k + 3), ..NO_EAS };
+    match open(c, &name, size, c.arg(k), c.arg(k + 1), c.arg(k + 2), eas) {
         Ok((h, act)) => {
             c.write_u32(c.arg(1), h);
             c.write_u32(c.arg(2), act);
@@ -635,7 +635,7 @@ pub fn dos16_set_file_ptr_l(c: &mut Ctx) -> u32 {
 }
 
 pub fn dos16_set_file_size_l(c: &mut Ctx) -> u32 {
-    set_size(c, c.arg(0), c.arg(1) as u64 | (c.arg(2) as u64) << 32)
+    set_size(c, c.arg(0), c.arg_ll(1).0)
 }
 
 pub fn dos16_open2(c: &mut Ctx) -> u32 {
