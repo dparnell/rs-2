@@ -282,18 +282,18 @@ examples.
 
 ### C
 
-`userland64/c/cc64.sh -o OUT.EXE [--pm] [--dll] [--rc FILE.RC] FILE.c...`
+`userland64/c/cc64.sh -o OUT.EXE [--pm] [--dll] [--rc FILE.RC] FILE.c|.o|.a...`
 compiles with clang (Apple's will do: `--target=x86_64-unknown-linux-gnu`,
-freestanding, `-fPIC`, hidden visibility) against userland64/include and
-links with rust-lld and `link64.ld`, as the Rust programs are. Programs
-get `userland64/c/crt0.c`: `_start` splits the command line into
-`main(argc, argv, envp)` (double quotes group words) and returns main's
-result; it also has the memcpy, memmove, memset and memcmp the compiler
-may call. There is no C library yet: programs use the OS/2 API. `--pm`
-marks a PM program, `--rc` compiles the module's `.RC` script into its
-resources (os2-rc's `rc table64`), and `--dll` makes a DLL (export
-functions with `RS2_EXPORT`). `C_PROGRAMS64` in xtask lists the C
-programs `cargo xtask build` makes:
+`-nostdinc` with userland64/include as the only system headers, `-fPIC`,
+hidden visibility) and links with rust-lld and `link64.ld`, as the Rust
+programs are, against rs2's C library (`libc.a`, built from
+userland64/libc: see [LIBC64.md](LIBC64.md)). Its `_start` gives
+programs `main(argc, argv, envp)`; the whole of C11's library (stdio,
+malloc, math, time, signals, ...) and the OS/2 API are both there. `-c`
+only compiles. `--pm` marks a PM program, `--rc` compiles the module's
+`.RC` script into its resources (os2-rc's `rc table64`), and `--dll`
+makes a DLL (export functions with `RS2_EXPORT`). `C_PROGRAMS64` in
+xtask lists the C programs `cargo xtask build` makes:
 
 - `C:\RS2\CHELLO64.EXE` (userland64/c/samples/hello.c): its arguments,
   then checks of DosQuerySysInfo, DosGetInfoBlocks, DosAllocMem, a thread
@@ -302,6 +302,8 @@ programs `cargo xtask build` makes:
 - `C:\RS2\CPMHELLO.EXE` (pmhello.c, pmhello.rc): a PM window with a menu
   and a title from its resources, drawing with GPI; `CPMHELLO /SELFTEST`
   prints PASS/FAIL and `cpmhello selftest done: N failure(s)`.
+- `C:\RS2\CLIBTEST.EXE` (clibtest.c): the C library's tests
+  (LIBC64.md, "Tests"); `clibtest: N checks, 0 failures`.
 
 ### Tests
 

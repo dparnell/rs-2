@@ -130,4 +130,10 @@ unsafe extern "C" {
     pub fn DosRaiseException(pexcept: PEXCEPTIONREPORTRECORD) -> APIRET;
     #[link_name = "DOSCALLS.357"]
     pub fn DosUnwindException(phandler: PEXCEPTIONREGISTRATIONRECORD, pTargetIP: PVOID, pERepRec: PEXCEPTIONREPORTRECORD) -> APIRET;
+    #[link_name = "DOSCALLS.378"]
+    pub fn DosSetSignalExceptionFocus(flag: BOOL, pulTimes: PULONG) -> APIRET;
+    #[link_name = "DOSCALLS.418"]
+    pub fn DosAcknowledgeSignalException(ulSignalNum: ULONG) -> APIRET;
+    #[link_name = "DOSCALLS.379"]
+    pub fn DosSendSignalException(pid: PID, exception: ULONG) -> APIRET;
 }

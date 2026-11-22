@@ -311,6 +311,16 @@ impl Ctx<'_> {
     }
 
     /// Raw argument `i` (0 = leftmost); of a 64-bit call, its low 32 bits.
+    /// A LONGLONG argument at `i`, and the index of the argument after it:
+    /// one register for 64-bit callers, two stack slots for 32-bit ones.
+    pub fn arg_ll(&self, i: usize) -> (u64, usize) {
+        if self.is64 {
+            (self.arg64(i), i + 1)
+        } else {
+            (self.arg(i) as u64 | (self.arg(i + 1) as u64) << 32, i + 2)
+        }
+    }
+
     pub fn arg(&self, i: usize) -> u32 {
         if self.is64 {
             return self.arg64(i) as u32;

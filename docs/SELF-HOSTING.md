@@ -3,9 +3,9 @@
 Status: under way. This records what it would take for rs2 to build
 itself, i.e. `cargo xtask iso` running on rs2. The first step is done:
 rs2 runs 64-bit programs (ELF64, long mode) with a native 64-bit OS/2
-API, including PM: see [API64.md](API64.md). What remains for either
-route below starts with memory above 4 GB for 64-bit processes
-(API64.md "Memory", phase 2).
+API, including PM: see [API64.md](API64.md). They can use memory above
+4 GB (API64.md, "Memory"), and C programs have a C library of their own
+([LIBC64.md](LIBC64.md)), which is the base route B needs.
 
 ## What the build needs
 
@@ -73,7 +73,8 @@ until rustc runs.
 ## Route B: a native rs2 target
 
 An `x86_64-unknown-rs2` target with a Rust `std` port. It needs the same
-64-bit process and memory work, plus a C library (e.g. mlibc) and
+64-bit process and memory work (done), plus a C library (a first one is
+done: LIBC64.md) and
 cross-building LLVM (C++), rustc and cargo with their C dependencies (curl,
 libgit2, zlib). It's cleaner and more "rs2", but much more work. It's only
 worth it if native tools matter more than a compatibility layer.
