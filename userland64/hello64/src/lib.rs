@@ -35,44 +35,44 @@ static TERMINATED: AtomicU32 = AtomicU32::new(0);
 
 /// Commits pages of the sparse object on access violations; fixes a
 /// division by zero (divisor in RCX) to 5; continues our own code 0x2A00_0001.
-unsafe extern "C" fn handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, c: *mut ContextRecord, _d: *mut u8) -> u32 {
+unsafe extern "C" fn handler(r: *mut EXCEPTIONREPORTRECORD, _reg: *mut EXCEPTIONREGISTRATIONRECORD, c: *mut CONTEXTRECORD, _d: PVOID) -> u32 {
     let (r, c) = unsafe { (&*r, &mut *c) };
     SEEN.fetch_add(1, Ordering::SeqCst);
-    match r.num {
+    match r.ExceptionNum {
         XCPT_ACCESS_VIOLATION => {
             let base = SPARSE.load(Ordering::SeqCst) as usize;
-            let at = r.info[1];
+            let at = r.ExceptionInfo[1];
             if base != 0 && (base..base + 0x10_0000).contains(&at) {
-                unsafe { DosSetMem((at & !0xfff) as *mut u8, 4096, PAG_COMMIT | PAG_READ | PAG_WRITE) };
+                unsafe { DosSetMem((at & !0xfff) as PVOID, 4096, PAG_COMMIT | PAG_READ | PAG_WRITE) };
                 return XCPT_CONTINUE_EXECUTION;
             }
             XCPT_CONTINUE_SEARCH
         }
-        XCPT_INTEGER_DIVIDE_BY_ZERO if c.rcx == 0 => {
-            c.rcx = 5;
+        XCPT_INTEGER_DIVIDE_BY_ZERO if c.ctx_RegRcx == 0 => {
+            c.ctx_RegRcx = 5;
             XCPT_CONTINUE_EXECUTION
         }
-        0x2A00_0001 if r.cparams == 2 && r.info[0] == 0x1234_5678_9abc && r.info[1] == 7 => XCPT_CONTINUE_EXECUTION,
+        0x2A00_0001 if r.cParameters == 2 && r.ExceptionInfo[0] == 0x1234_5678_9abc && r.ExceptionInfo[1] == 7 => XCPT_CONTINUE_EXECUTION,
         _ => XCPT_CONTINUE_SEARCH,
     }
 }
 
-unsafe extern "C" fn unwind_handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, _c: *mut ContextRecord, _d: *mut u8) -> u32 {
-    if unsafe { (*r).flags } & EH_UNWINDING != 0 {
+unsafe extern "C" fn unwind_handler(r: *mut EXCEPTIONREPORTRECORD, _reg: *mut EXCEPTIONREGISTRATIONRECORD, _c: *mut CONTEXTRECORD, _d: PVOID) -> u32 {
+    if unsafe { (*r).fHandlerFlags } & EH_UNWINDING != 0 {
         UNWOUND.fetch_add(1, Ordering::SeqCst);
     }
     XCPT_CONTINUE_SEARCH
 }
 
-unsafe extern "C" fn term_handler(r: *mut ExceptionReportRecord, _reg: *mut ExceptionRegistrationRecord, _c: *mut ContextRecord, _d: *mut u8) -> u32 {
-    if unsafe { (*r).num } == XCPT_PROCESS_TERMINATE {
+unsafe extern "C" fn term_handler(r: *mut EXCEPTIONREPORTRECORD, _reg: *mut EXCEPTIONREGISTRATIONRECORD, _c: *mut CONTEXTRECORD, _d: PVOID) -> u32 {
+    if unsafe { (*r).ExceptionNum } == XCPT_PROCESS_TERMINATE {
         TERMINATED.fetch_add(1, Ordering::SeqCst);
     }
     XCPT_CONTINUE_SEARCH
 }
 
 unsafe extern "C" fn exiting_thread(_: usize) {
-    let mut rec = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(term_handler) };
+    let mut rec = EXCEPTIONREGISTRATIONRECORD { prev_structure: core::ptr::null_mut(), ExceptionHandler: Some(term_handler) };
     unsafe {
         DosSetExceptionHandler(&mut rec);
         DosExit(EXIT_THREAD, 0);
@@ -80,17 +80,17 @@ unsafe extern "C" fn exiting_thread(_: usize) {
 }
 
 fn exceptions(failed: &mut u32) {
-    let mut tib: *mut Tib = core::ptr::null_mut();
-    let mut pib: *mut Pib = core::ptr::null_mut();
+    let mut tib: *mut TIB = core::ptr::null_mut();
+    let mut pib: *mut PIB = core::ptr::null_mut();
     unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
-    check("empty handler chain is END_OF_CHAIN", unsafe { (*tib).pexchain } as usize == usize::MAX, failed);
-    let mut rec = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(handler) };
+    check("empty handler chain is END_OF_CHAIN", unsafe { (*tib).tib_pexchain } as usize == usize::MAX, failed);
+    let mut rec = EXCEPTIONREGISTRATIONRECORD { prev_structure: core::ptr::null_mut(), ExceptionHandler: Some(handler) };
     let rc = unsafe { DosSetExceptionHandler(&mut rec) };
-    check("DosSetExceptionHandler", rc == 0 && unsafe { (*tib).pexchain } as usize == &rec as *const _ as usize, failed);
+    check("DosSetExceptionHandler", rc == 0 && unsafe { (*tib).tib_pexchain } as usize == &rec as *const _ as usize, failed);
 
     // Sparse memory: reserved, committed by the handler on first touch.
     let mut p: *mut u8 = core::ptr::null_mut();
-    unsafe { DosAllocMem(&mut p, 0x10_0000, PAG_READ | PAG_WRITE) };
+    unsafe { DosAllocMem((&raw mut p).cast(), 0x10_0000, PAG_READ | PAG_WRITE) };
     SPARSE.store(p as u64, Ordering::SeqCst);
     let before = SEEN.load(Ordering::SeqCst);
     let ok = unsafe {
@@ -106,37 +106,37 @@ fn exceptions(failed: &mut u32) {
     check("divide by zero continued with a changed context", q == 20, failed);
 
     // DosRaiseException with 64-bit parameters.
-    let mut r = ExceptionReportRecord {
-        num: 0x2A00_0001,
-        flags: 0,
-        nested: core::ptr::null_mut(),
-        address: core::ptr::null_mut(),
-        cparams: 2,
+    let mut r = EXCEPTIONREPORTRECORD {
+        ExceptionNum: 0x2A00_0001,
+        fHandlerFlags: 0,
+        NestedExceptionReportRecord: core::ptr::null_mut(),
+        ExceptionAddress: core::ptr::null_mut(),
+        cParameters: 2,
         reserved: 0,
-        info: [0x1234_5678_9abc, 7, 0, 0],
+        ExceptionInfo: [0x1234_5678_9abc, 7, 0, 0],
     };
     check("DosRaiseException, continued", unsafe { DosRaiseException(&mut r) } == 0, failed);
 
     // DosUnwindException: two more records, unwound back to `rec`.
-    let mut a = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(unwind_handler) };
-    let mut b = ExceptionRegistrationRecord { prev: core::ptr::null_mut(), handler: Some(unwind_handler) };
+    let mut a = EXCEPTIONREGISTRATIONRECORD { prev_structure: core::ptr::null_mut(), ExceptionHandler: Some(unwind_handler) };
+    let mut b = EXCEPTIONREGISTRATIONRECORD { prev_structure: core::ptr::null_mut(), ExceptionHandler: Some(unwind_handler) };
     unsafe {
         DosSetExceptionHandler(&mut a);
         DosSetExceptionHandler(&mut b);
-        DosUnwindException(&mut rec, core::ptr::null(), core::ptr::null_mut());
+        DosUnwindException(&mut rec, core::ptr::null_mut(), core::ptr::null_mut());
     }
-    let head = unsafe { (*tib).pexchain } as usize;
+    let head = unsafe { (*tib).tib_pexchain } as usize;
     check("DosUnwindException", UNWOUND.load(Ordering::SeqCst) == 2 && head == &rec as *const _ as usize, failed);
-    check("DosUnsetExceptionHandler", unsafe { DosUnsetExceptionHandler(&mut rec) } == 0 && unsafe { (*tib).pexchain } as usize == usize::MAX, failed);
+    check("DosUnsetExceptionHandler", unsafe { DosUnsetExceptionHandler(&mut rec) } == 0 && unsafe { (*tib).tib_pexchain } as usize == usize::MAX, failed);
 
     // A thread ending with DosExit sees XCPT_PROCESS_TERMINATE.
     let mut tid = 0;
     unsafe {
-        DosCreateThread(&mut tid, exiting_thread, 0, 0, 65536);
+        DosCreateThread(&mut tid, Some(exiting_thread), 0, 0, 65536);
         DosWaitThread(&mut tid, DCWW_WAIT);
     }
     check("termination handler of an ending thread", TERMINATED.load(Ordering::SeqCst) == 1, failed);
-    unsafe { DosFreeMem(p) };
+    unsafe { DosFreeMem(p.cast()) };
 }
 
 fn check(name: &str, ok: bool, failed: &mut u32) {
@@ -154,20 +154,20 @@ fn main(s: &Startup) -> u32 {
     }
     println!("Hello from 64-bit OS/2!");
     let here = main as *const () as usize;
-    let mut tib: *mut Tib = core::ptr::null_mut();
-    let mut pib: *mut Pib = core::ptr::null_mut();
+    let mut tib: *mut TIB = core::ptr::null_mut();
+    let mut pib: *mut PIB = core::ptr::null_mut();
     unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
     let (pid, tid, prog) = unsafe {
         let p = &*pib;
-        ((*p).pid, (*(*tib).ptib2).tid, String::from_utf8_lossy(cstr(p.pchcmd)).into_owned())
+        ((*p).pib_ulpid, (*(*tib).tib_ptib2).tib2_ultid, String::from_utf8_lossy(cstr(p.pib_pchcmd.cast())).into_owned())
     };
     println!("  pid {pid}, tid {tid}, program {prog}, code at {here:#x}, rsp near {:#x}", &failed as *const _ as usize);
     println!("  arguments: \"{}\"", String::from_utf8_lossy(s.args()));
-    check("TIB/PIB", pid != 0 && tid == 1 && s.cmdline == unsafe { (*pib).pchcmd }, &mut failed);
+    check("TIB/PIB", pid != 0 && tid == 1 && s.cmdline == unsafe { (*pib).pib_pchcmd.cast_const().cast() }, &mut failed);
 
     // DosQuerySysInfo.
     let mut v = [0u32; 2];
-    let rc = unsafe { DosQuerySysInfo(QSV_VERSION_MAJOR, QSV_VERSION_MINOR, v.as_mut_ptr(), 8) };
+    let rc = unsafe { DosQuerySysInfo(QSV_VERSION_MAJOR, QSV_VERSION_MINOR, v.as_mut_ptr().cast(), 8) };
     println!("  OS/2 version {}.{}", v[0], v[1]);
     check("DosQuerySysInfo", rc == 0 && v[0] == 20, &mut failed);
 
@@ -179,22 +179,22 @@ fn main(s: &Startup) -> u32 {
     let sum: u64 = big.iter().sum();
     check("heap", sum == 3 * (99_999 * 100_000 / 2), &mut failed);
     let mut p: *mut u8 = core::ptr::null_mut();
-    let rc = unsafe { DosAllocMem(&mut p, 65536, PAG_READ | PAG_WRITE | PAG_COMMIT) };
+    let rc = unsafe { DosAllocMem((&raw mut p).cast(), 65536, PAG_READ | PAG_WRITE | PAG_COMMIT) };
     let ok = rc == 0 && !p.is_null() && unsafe {
         p.add(65535).write(7);
         p.add(65535).read() == 7
     };
-    check("DosAllocMem", ok && unsafe { DosFreeMem(p) } == 0, &mut failed);
+    check("DosAllocMem", ok && unsafe { DosFreeMem(p.cast()) } == 0, &mut failed);
 
     // The environment.
     let mut val: *const u8 = core::ptr::null();
-    let rc = unsafe { DosScanEnv(c"PATH".as_ptr().cast(), &mut val) };
+    let rc = unsafe { DosScanEnv(c"PATH".as_ptr().cast(), (&raw mut val).cast()) };
     check("DosScanEnv", rc == 0 && !val.is_null() && unsafe { !cstr(val).is_empty() }, &mut failed);
 
     // Threads and an event semaphore.
     let mut tids = [0u32; 4];
     for t in &mut tids {
-        let rc = unsafe { DosCreateThread(t, worker, 0x1234_5678_9abc_def0, 0, 65536) };
+        let rc = unsafe { DosCreateThread(t, Some(worker), 0x1234_5678_9abc_def0, 0, 65536) };
         if rc != 0 {
             println!("  DosCreateThread: {rc}");
         }
@@ -220,13 +220,13 @@ fn main(s: &Startup) -> u32 {
     let mut n = 0;
     let wrote = unsafe {
         DosOpen(name, &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYNONE, core::ptr::null_mut()) == 0
-            && DosWrite(hf, text.as_ptr(), text.len() as u32, &mut n) == 0
+            && DosWrite(hf, text.as_ptr().cast(), text.len() as u32, &mut n) == 0
             && DosClose(hf) == 0
     };
     let mut back = [0u8; 32];
     let read = unsafe {
         DosOpen(name, &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYNONE, core::ptr::null_mut()) == 0
-            && DosRead(hf, back.as_mut_ptr(), 32, &mut n) == 0
+            && DosRead(hf, back.as_mut_ptr().cast(), 32, &mut n) == 0
             && DosClose(hf) == 0
     };
     unsafe { DosDelete(name) };
@@ -237,7 +237,7 @@ fn main(s: &Startup) -> u32 {
     let mut pfn = 0usize;
     let ok = unsafe {
         DosQueryModuleHandle(c"DOSCALLS".as_ptr().cast(), &mut hmod) == 0
-            && DosQueryProcAddr(hmod, 229, core::ptr::null(), &mut pfn) == 0
+            && DosQueryProcAddr(hmod, 229, core::ptr::null(), (&raw mut pfn).cast()) == 0
     };
     check("DosQueryProcAddr", ok && pfn != 0, &mut failed);
     // Calling the gate stub DosQueryProcAddr returned: DosSleep(1).
@@ -261,7 +261,7 @@ const ERROR_INVALID_ADDRESS: u32 = 487;
 /// DosQueryMem: (size, flags) of the run of pages at `p`, up to `max`.
 fn query(p: *mut u8, max: u32) -> (u32, u32, u32) {
     let (mut cb, mut fl) = (max, 0);
-    let rc = unsafe { DosQueryMem(p, &mut cb, &mut fl) };
+    let rc = unsafe { DosQueryMem(p.cast(), &mut cb, &mut fl) };
     (rc, cb, fl)
 }
 
@@ -270,7 +270,7 @@ fn query(p: *mut u8, max: u32) -> (u32, u32, u32) {
 /// refuses such buffers, the heap growing there, DosFreeMem.
 fn high_memory(failed: &mut u32) {
     let mut p: *mut u8 = core::ptr::null_mut();
-    let rc = unsafe { DosAllocMem(&mut p, 2 * GB as u32, PAG_READ | PAG_WRITE | OBJ_ANY) };
+    let rc = unsafe { DosAllocMem((&raw mut p).cast(), 2 * GB as u32, PAG_READ | PAG_WRITE | OBJ_ANY) };
     println!("  2 GB with OBJ_ANY at {:#x} (rc {rc})", p as usize);
     check("DosAllocMem above 4 GB", rc == 0 && p as usize >= 1 << 32, failed);
     if rc != 0 {
@@ -281,7 +281,7 @@ fn high_memory(failed: &mut u32) {
     check("DosQueryMem (reserved)", rc == 0 && cb == 2 * GB as u32 && fl & PAG_COMMIT == 0 && fl & PAG_BASE != 0, failed);
 
     // Commit 1 GB and touch every page of it.
-    let rc = unsafe { DosSetMem(p, GB as u32, PAG_COMMIT | PAG_READ | PAG_WRITE) };
+    let rc = unsafe { DosSetMem(p.cast(), GB as u32, PAG_COMMIT | PAG_READ | PAG_WRITE) };
     check("DosSetMem commit 1 GB", rc == 0, failed);
     let pages = GB / 4096;
     for i in 0..pages {
@@ -309,7 +309,7 @@ fn high_memory(failed: &mut u32) {
     // A guard page: the first touch commits it, the page below becomes
     // the guard page.
     let g = unsafe { p.add(GB + 64 * 4096) };
-    let rc = unsafe { DosSetMem(g, 4096, PAG_COMMIT | PAG_GUARD | PAG_READ | PAG_WRITE) };
+    let rc = unsafe { DosSetMem(g.cast(), 4096, PAG_COMMIT | PAG_GUARD | PAG_READ | PAG_WRITE) };
     let (_, _, before) = query(g, 4096);
     unsafe { g.write_volatile(42) };
     let (_, _, after) = query(g, 4096);
@@ -325,7 +325,7 @@ fn high_memory(failed: &mut u32) {
     let buf = unsafe { p.add(GB / 2 + 123) };
     let pn = unsafe { p.add(GB / 2 + 8192) } as *mut u32;
     unsafe { core::ptr::copy_nonoverlapping(msg.as_ptr(), buf, msg.len()) };
-    let rc = unsafe { DosWrite(1, buf, msg.len() as u32, pn) };
+    let rc = unsafe { DosWrite(1, buf.cast(), msg.len() as u32, pn) };
     if rc != 0 || unsafe { *pn } != msg.len() as u32 {
         check("DosWrite from above 4 GB", false, failed);
     }
@@ -339,9 +339,9 @@ fn high_memory(failed: &mut u32) {
     let (mut hf, mut action, mut n, mut m) = (0, 0, 0, 0);
     let ok = unsafe {
         DosOpen(name, &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYNONE, core::ptr::null_mut()) == 0
-            && DosWrite(hf, src, 1 << 20, &mut n) == 0
+            && DosWrite(hf, src.cast(), 1 << 20, &mut n) == 0
             && DosSetFilePtr(hf, 0, FILE_BEGIN, &mut m) == 0
-            && DosRead(hf, dst, 1 << 20, &mut m) == 0
+            && DosRead(hf, dst.cast(), 1 << 20, &mut m) == 0
             && DosClose(hf) == 0
     };
     unsafe { DosDelete(name) };
@@ -354,10 +354,10 @@ fn high_memory(failed: &mut u32) {
     check("other calls refuse buffers above 4 GB", rc == ERROR_INVALID_ADDRESS, failed);
 
     // Decommit, then free.
-    let rc = unsafe { DosSetMem(p, GB as u32, PAG_DECOMMIT) };
+    let rc = unsafe { DosSetMem(p.cast(), GB as u32, PAG_DECOMMIT) };
     let (_, _, fl) = query(p, 4096);
     check("DosSetMem decommit", rc == 0 && fl & PAG_COMMIT == 0, failed);
-    let rc = unsafe { DosFreeMem(p) };
+    let rc = unsafe { DosFreeMem(p.cast()) };
     let (qrc, _, fl) = query(p, 4096);
     check("DosFreeMem above 4 GB", rc == 0 && qrc == 0 && fl & PAG_FREE != 0, failed);
 

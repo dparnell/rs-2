@@ -1,0 +1,18 @@
+/* CPMHELLO.EXE resources. */
+#define ID_MAIN 1
+#define IDM_FILE 10
+#define IDM_EXIT 12
+#define IDS_TITLE 20
+
+MENU ID_MAIN
+BEGIN
+    SUBMENU "~File", IDM_FILE
+    BEGIN
+        MENUITEM "E~xit", IDM_EXIT
+    END
+END
+
+STRINGTABLE
+BEGIN
+    IDS_TITLE "C on 64-bit PM"
+END

@@ -16,7 +16,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-use os2::pm::*;
+
 use os2::*;
 
 os2::entry!(main);
@@ -42,7 +42,7 @@ fn hello() -> String {
     b[..n].iter().map(|&c| c as char).collect()
 }
 
-unsafe extern "C" fn about_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
+unsafe extern "C" fn about_proc(hwnd: HWND, msg: ULONG, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
     if msg == WM_INITDLG {
         INITDLG.store(true, Ordering::Relaxed);
     }
@@ -61,10 +61,10 @@ static OLD_FRAME: AtomicU64 = AtomicU64::new(0);
 
 fn text_at(hps: HPS, x: i32, y: i32, s: &str) -> i32 {
     let p = POINTL { x, y };
-    unsafe { GpiCharStringAt(hps, &p, s.len() as i32, s.as_ptr()) }
+    unsafe { GpiCharStringAt(hps, &p as *const _ as PPOINTL, s.len() as i32, s.as_ptr() as PCH) }
 }
 
-unsafe extern "C" fn client_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
+unsafe extern "C" fn client_proc(hwnd: HWND, msg: ULONG, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
     match msg {
         WM_CREATE => {
             // mp2 is the 64-bit CREATESTRUCT.
@@ -78,7 +78,7 @@ unsafe extern "C" fn client_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM)
             let hps = unsafe { WinBeginPaint(hwnd, 0, core::ptr::null_mut()) };
             unsafe {
                 WinQueryWindowRect(hwnd, &mut r);
-                WinFillRect(hps, &r, CLR_WHITE);
+                WinFillRect(hps, &mut r, CLR_WHITE);
             }
             let top = r.yTop;
             let mut ok = 1;
@@ -94,56 +94,59 @@ unsafe extern "C" fn client_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM)
                 let x = 20 + i as i32 * 70;
                 unsafe {
                     GpiSetColor(hps, c);
-                    GpiMove(hps, &POINTL { x, y: 20 });
-                    GpiBox(hps, DRO_FILL, &POINTL { x: x + 60, y: 80 }, 0, 0);
+                    GpiMove(hps, &mut POINTL { x, y: 20 });
+                    GpiBox(hps, DRO_FILL as LONG, &mut POINTL { x: x + 60, y: 80 }, 0, 0);
                     GpiSetColor(hps, CLR_BLACK);
-                    GpiBox(hps, DRO_OUTLINE, &POINTL { x: x + 60, y: 80 }, 0, 0);
+                    GpiBox(hps, DRO_OUTLINE as LONG, &mut POINTL { x: x + 60, y: 80 }, 0, 0);
                 }
             }
             unsafe {
                 GpiSetColor(hps, CLR_DARKBLUE);
-                GpiMove(hps, &POINTL { x: 420, y: 50 });
-                GpiFullArc(hps, DRO_OUTLINEFILL, 30 << 16);
+                GpiMove(hps, &mut POINTL { x: 420, y: 50 });
+                GpiFullArc(hps, DRO_OUTLINEFILL as LONG, makefixed(30, 0));
                 WinEndPaint(hps);
             }
             if ok == 1 {
                 PAINTED.fetch_add(1, Ordering::Relaxed);
             }
-            0
+            MRVOID
         }
         WM_TIMER => {
             let n = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
-            unsafe { WinInvalidateRect(hwnd, core::ptr::null(), 0) };
+            unsafe { WinInvalidateRect(hwnd, core::ptr::null_mut(), 0) };
             if SELFTEST.load(Ordering::Relaxed) && n >= 3 && PAINTED.load(Ordering::Relaxed) > 0 {
-                unsafe { WinPostMsg(hwnd, WM_CLOSE, 0, 0) };
+                unsafe { WinPostMsg(hwnd, WM_CLOSE, MPVOID, MPVOID) };
             }
-            0
+            MRVOID
         }
         WM_COMMAND => {
             match short1frommp(mp1) {
                 IDM_ABOUT => unsafe {
-                    WinDlgBox(HWND_DESKTOP, hwnd, about_proc, 0, IDD_ABOUT, core::ptr::null_mut());
+                    WinDlgBox(HWND_DESKTOP, hwnd, Some(about_proc), 0, IDD_ABOUT, core::ptr::null_mut());
                 },
                 IDM_EXIT => unsafe {
-                    WinPostMsg(hwnd, WM_CLOSE, 0, 0);
+                    WinPostMsg(hwnd, WM_CLOSE, MPVOID, MPVOID);
                 },
                 _ => {}
             }
-            0
+            MRVOID
         }
         // Answers with a value from all 64 bits of what it was sent (the
         // 32-bit PMWIN keeps the low halves).
-        WM_USER => mp1.wrapping_mul(3).wrapping_add(mp2),
+        WM_USER => (mp1 as usize).wrapping_mul(3).wrapping_add(mp2 as usize) as MRESULT,
         _ => unsafe { WinDefWindowProc(hwnd, msg, mp1, mp2) },
     }
 }
 
 /// Subclasses the frame: counts its messages, then the frame's own (32-bit)
 /// procedure handles them.
-unsafe extern "C" fn frame_proc(hwnd: HWND, msg: u32, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
+unsafe extern "C" fn frame_proc(hwnd: HWND, msg: ULONG, mp1: MPARAM, mp2: MPARAM) -> MRESULT {
     FRAME_MSGS.fetch_add(1, Ordering::Relaxed);
     let old: PFNWP = unsafe { core::mem::transmute(OLD_FRAME.load(Ordering::Relaxed)) };
-    unsafe { old(hwnd, msg, mp1, mp2) }
+    match old {
+        Some(old) => unsafe { old(hwnd, msg, mp1, mp2) },
+        None => MRVOID,
+    }
 }
 
 fn main(s: &Startup) -> u32 {
@@ -156,7 +159,7 @@ fn main(s: &Startup) -> u32 {
     HAB_.store(hab, Ordering::Relaxed);
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     check("WinInitialize and WinCreateMsgQueue", hab != 0 && hmq != 0);
-    let ok = unsafe { WinRegisterClass(hab, CLASS.as_ptr().cast(), client_proc, CS_SIZEREDRAW, 0) };
+    let ok = unsafe { WinRegisterClass(hab, CLASS.as_ptr().cast(), Some(client_proc), CS_SIZEREDRAW, 0) };
     check("WinRegisterClass", ok != 0);
     let mut ci = CLASSINFO { flClassStyle: 0, pfnWindowProc: None, cbWindowData: 99 };
     let ok = unsafe { WinQueryClassInfo(hab, CLASS.as_ptr().cast(), &mut ci) } != 0;
@@ -189,31 +192,31 @@ fn main(s: &Startup) -> u32 {
     check("WM_CREATE's CREATESTRUCT (64-bit)", CREATE_OK.load(Ordering::Relaxed));
     let p = unsafe { WinQueryWindowPtr(client, QWP_PFNWP) };
     check("WinQueryWindowPtr(QWP_PFNWP) gives the 64-bit procedure", p as usize == client_proc as *const () as usize);
-    let old = unsafe { WinSubclassWindow(frame, frame_proc) };
+    let old = unsafe { WinSubclassWindow(frame, Some(frame_proc)) };
     OLD_FRAME.store(old.map_or(0, |p| p as usize as u64), Ordering::Relaxed);
     check("WinSubclassWindow returns the frame's procedure", old.is_some());
-    let r = unsafe { WinSendMsg(client, WM_USER, 0x1000, 7) };
-    check("WinSendMsg to a 64-bit window procedure", r == 0x3007);
+    let r = unsafe { WinSendMsg(client, WM_USER, mpfromlong(0x1000), mpfromlong(7)) };
+    check("WinSendMsg to a 64-bit window procedure", r as usize == 0x3007);
     check("the frame's menu (a 64-bit module's resource)", unsafe { WinWindowFromID(frame, FID_MENU) } != 0);
-    let dlg = unsafe { WinLoadDlg(HWND_DESKTOP, frame, about_proc, 0, IDD_ABOUT, core::ptr::null_mut()) };
+    let dlg = unsafe { WinLoadDlg(HWND_DESKTOP, frame, Some(about_proc), 0, IDD_ABOUT, core::ptr::null_mut()) };
     check("WinLoadDlg (dialog template resource, 64-bit dialog procedure)", dlg != 0 && INITDLG.load(Ordering::Relaxed));
     let ok_button = unsafe { WinWindowFromID(dlg, DID_OK) };
     check("the dialog's OK button", ok_button != 0);
     unsafe { WinDestroyWindow(dlg) };
     let mut title = [0u8; 32];
-    let n = unsafe { WinQueryWindowText(frame, 32, title.as_mut_ptr()) };
+    let n = unsafe { WinQueryWindowText(frame, 32, title.as_mut_ptr().cast()) };
     check("WinQueryWindowText", &title[..n as usize] == b"64-bit PM");
     // Memory above 4 GB is out of the 32-bit PMWIN's reach: the call is
     // refused (the title stays), a pointer is never truncated.
     let mut high: *mut u8 = core::ptr::null_mut();
     let refused = unsafe {
-        DosAllocMem(&mut high, 4096, PAG_READ | PAG_WRITE | PAG_COMMIT | OBJ_ANY) == 0 && {
+        DosAllocMem((&raw mut high).cast(), 4096, PAG_READ | PAG_WRITE | PAG_COMMIT | OBJ_ANY) == 0 && {
             core::ptr::copy_nonoverlapping(c"high".as_ptr().cast(), high, 5);
             let r = WinSetWindowText(frame, high);
-            let n = WinQueryWindowText(frame, 32, title.as_mut_ptr());
-            let mp = WinSendMsg(client, WM_USER, 0x1000, high as usize as MPARAM);
-            DosFreeMem(high);
-            high as usize >= 1 << 32 && r == 0 && &title[..n as usize] == b"64-bit PM" && mp == 0
+            let n = WinQueryWindowText(frame, 32, title.as_mut_ptr().cast());
+            let mp = WinSendMsg(client, WM_USER, mpfromlong(0x1000), high as MPARAM);
+            DosFreeMem(high.cast());
+            high as usize >= 1 << 32 && r == 0 && &title[..n as usize] == b"64-bit PM" && mp.is_null()
         }
     };
     check("pointers above 4 GB refused, not truncated", refused);
@@ -226,7 +229,7 @@ fn main(s: &Startup) -> u32 {
     let mut got = 0u32;
     while unsafe { WinGetMsg(hab, &mut q, 0, 0, 0) } != 0 {
         got += 1;
-        unsafe { WinDispatchMsg(hab, &q) };
+        unsafe { WinDispatchMsg(hab, &mut q) };
     }
     check("message loop (WinGetMsg, WinDispatchMsg)", got > 0 && q.msg == WM_QUIT);
     check("timer ticks", TICKS.load(Ordering::Relaxed) >= 3 || !selftest);

@@ -1,0 +1,186 @@
+# Basic types of rs2's 64-bit OS/2 API (docs/API64.md): ULONG and the
+# handles are 32 bits, pointers, MPARAM and MRESULT 64.
+
+c
+#include <stddef.h>
+#include <stdint.h>
+
+#define APIENTRY
+#define EXPENTRY
+/* Exported from a 64-bit DLL (cc64.sh builds with hidden visibility). */
+#define RS2_EXPORT __attribute__((visibility("default")))
+#define NULLHANDLE 0
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+#ifndef TRUE
+#define TRUE 1
+#define FALSE 0
+#endif
+end
+
+prim CHAR "char" i8
+prim UCHAR "unsigned char" u8
+prim BYTE "unsigned char" u8
+prim SHORT "short" i16
+prim USHORT "unsigned short" u16
+prim LONG "int" i32
+prim ULONG "unsigned int" u32
+prim LONGLONG "long long" i64
+prim ULONGLONG "unsigned long long" u64
+prim ULONG_PTR "uintptr_t" usize
+prim LONG_PTR "intptr_t" isize
+prim BOOL "unsigned int" u32
+prim VOID "void" c_void
+prim FIXED "int" i32
+prim COLOR "int" i32
+
+ptr PVOID VOID
+ptr PPVOID PVOID
+cptr PCVOID VOID
+ptr PCHAR CHAR
+ptr PCH CHAR
+ptr PSZ UCHAR
+cptr PCSZ UCHAR
+ptr PUCHAR UCHAR
+ptr PBYTE BYTE
+ptr PSHORT SHORT
+ptr PUSHORT USHORT
+ptr PLONG LONG
+ptr PULONG ULONG
+ptr PBOOL BOOL
+ptr PLONGLONG LONGLONG
+ptr PULONGLONG ULONGLONG
+ptr PULONG_PTR ULONG_PTR
+
+type APIRET ULONG
+type LHANDLE ULONG
+type SHANDLE USHORT
+type HFILE LHANDLE
+type HMODULE LHANDLE
+type HDIR LHANDLE
+type HPIPE LHANDLE
+type HQUEUE LHANDLE
+type HEV LHANDLE
+type HMTX LHANDLE
+type HMUX LHANDLE
+type HSEM PVOID
+type HTIMER LHANDLE
+type PID ULONG
+type TID ULONG
+type HAB LHANDLE
+type HMQ LHANDLE
+type HWND LHANDLE
+type HPS LHANDLE
+type HDC LHANDLE
+type HRGN LHANDLE
+type HBITMAP LHANDLE
+type HPOINTER LHANDLE
+type HACCEL LHANDLE
+type HPAL LHANDLE
+type HATOMTBL LHANDLE
+type ATOM ULONG
+type ERRORID ULONG
+type MPARAM PVOID
+type MRESULT PVOID
+ptr PHFILE HFILE
+ptr PHMODULE HMODULE
+ptr PHDIR HDIR
+ptr PHPIPE HPIPE
+ptr PHQUEUE HQUEUE
+ptr PHEV HEV
+ptr PHMTX HMTX
+ptr PHTIMER HTIMER
+ptr PPID PID
+ptr PTID TID
+ptr PHWND HWND
+ptr PHRGN HRGN
+
+const NO_ERROR 0
+
+struct POINTL
+  LONG x
+  LONG y
+end
+
+struct POINTS
+  SHORT x
+  SHORT y
+end
+
+struct RECTL
+  LONG xLeft
+  LONG yBottom
+  LONG xRight
+  LONG yTop
+end
+
+struct SIZEL
+  LONG cx
+  LONG cy
+end
+
+# Messages carry 64-bit MPARAMs (the 32-bit PMWIN keeps 32 bits of each:
+# a value that does not fit makes the call fail, docs/API64.md).
+c
+#define MPVOID ((MPARAM)0)
+#define MPFROMP(p) ((MPARAM)(p))
+#define MPFROMHWND(h) ((MPARAM)(ULONG_PTR)(HWND)(h))
+#define MPFROMCHAR(c) ((MPARAM)(ULONG_PTR)(USHORT)(c))
+#define MPFROMSHORT(s) ((MPARAM)(ULONG_PTR)(USHORT)(s))
+#define MPFROM2SHORT(a, b) ((MPARAM)(ULONG_PTR)((ULONG)(USHORT)(a) | ((ULONG)(USHORT)(b) << 16)))
+#define MPFROMSH2CH(s, a, b) ((MPARAM)(ULONG_PTR)((ULONG)(USHORT)(s) | ((ULONG)(UCHAR)(a) << 16) | ((ULONG)(UCHAR)(b) << 24)))
+#define MPFROMLONG(l) ((MPARAM)(ULONG_PTR)(ULONG)(l))
+#define PVOIDFROMMP(mp) ((PVOID)(mp))
+#define HWNDFROMMP(mp) ((HWND)(ULONG_PTR)(mp))
+#define CHAR1FROMMP(mp) ((UCHAR)(ULONG_PTR)(mp))
+#define CHAR2FROMMP(mp) ((UCHAR)((ULONG_PTR)(mp) >> 8))
+#define CHAR3FROMMP(mp) ((UCHAR)((ULONG_PTR)(mp) >> 16))
+#define CHAR4FROMMP(mp) ((UCHAR)((ULONG_PTR)(mp) >> 24))
+#define SHORT1FROMMP(mp) ((USHORT)(ULONG_PTR)(mp))
+#define SHORT2FROMMP(mp) ((USHORT)((ULONG_PTR)(mp) >> 16))
+#define LONGFROMMP(mp) ((ULONG)(ULONG_PTR)(mp))
+#define MRFROMP(p) ((MRESULT)(p))
+#define MRFROMSHORT(s) ((MRESULT)(ULONG_PTR)(USHORT)(s))
+#define MRFROM2SHORT(a, b) ((MRESULT)(ULONG_PTR)((ULONG)(USHORT)(a) | ((ULONG)(USHORT)(b) << 16)))
+#define MRFROMLONG(l) ((MRESULT)(ULONG_PTR)(ULONG)(l))
+#define PVOIDFROMMR(mr) ((PVOID)(mr))
+#define SHORT1FROMMR(mr) ((USHORT)(ULONG_PTR)(mr))
+#define SHORT2FROMMR(mr) ((USHORT)((ULONG_PTR)(mr) >> 16))
+#define LONGFROMMR(mr) ((ULONG)(ULONG_PTR)(mr))
+#define MAKEULONG(l, h) ((ULONG)(((USHORT)(l)) | ((ULONG)((USHORT)(h))) << 16))
+#define MAKELONG(l, h) ((LONG)MAKEULONG(l, h))
+#define MAKEUSHORT(l, h) ((USHORT)(((UCHAR)(l)) | ((USHORT)((UCHAR)(h))) << 8))
+#define LOUCHAR(w) ((UCHAR)(w))
+#define HIUCHAR(w) ((UCHAR)((USHORT)(w) >> 8))
+#define LOUSHORT(l) ((USHORT)(ULONG)(l))
+#define HIUSHORT(l) ((USHORT)((ULONG)(l) >> 16))
+#define MAKEFIXED(i, f) MAKELONG(f, i)
+end
+
+rust
+/// A null MPARAM (MPVOID) and MRESULT.
+pub const MPVOID: MPARAM = core::ptr::null_mut();
+pub const MRVOID: MRESULT = core::ptr::null_mut();
+/// MPARAM and MRESULT helpers (the C headers' MPFROM2SHORT etc.).
+pub const fn mpfromshort(s: u16) -> MPARAM { s as usize as MPARAM }
+pub const fn mpfrom2short(a: u16, b: u16) -> MPARAM { (a as u32 | (b as u32) << 16) as usize as MPARAM }
+pub const fn mpfromsh2ch(s: u16, a: u8, b: u8) -> MPARAM { (s as u32 | (a as u32) << 16 | (b as u32) << 24) as usize as MPARAM }
+pub const fn mpfromlong(l: u32) -> MPARAM { l as usize as MPARAM }
+pub fn mpfromp<T>(p: *const T) -> MPARAM { p as MPARAM }
+pub const fn mpfromhwnd(h: HWND) -> MPARAM { h as usize as MPARAM }
+pub fn short1frommp(mp: MPARAM) -> u16 { mp as usize as u16 }
+pub fn short2frommp(mp: MPARAM) -> u16 { (mp as usize >> 16) as u16 }
+pub fn char1frommp(mp: MPARAM) -> u8 { mp as usize as u8 }
+pub fn char2frommp(mp: MPARAM) -> u8 { (mp as usize >> 8) as u8 }
+pub fn char3frommp(mp: MPARAM) -> u8 { (mp as usize >> 16) as u8 }
+pub fn char4frommp(mp: MPARAM) -> u8 { (mp as usize >> 24) as u8 }
+pub fn longfrommp(mp: MPARAM) -> u32 { mp as usize as u32 }
+pub fn hwndfrommp(mp: MPARAM) -> HWND { mp as usize as HWND }
+pub const fn mrfromshort(s: u16) -> MRESULT { s as usize as MRESULT }
+pub const fn mrfrom2short(a: u16, b: u16) -> MRESULT { (a as u32 | (b as u32) << 16) as usize as MRESULT }
+pub const fn mrfromlong(l: u32) -> MRESULT { l as usize as MRESULT }
+pub fn longfrommr(mr: MRESULT) -> u32 { mr as usize as u32 }
+pub fn short1frommr(mr: MRESULT) -> u16 { mr as usize as u16 }
+pub const fn makefixed(i: i16, f: u16) -> FIXED { ((i as i32) << 16) | f as i32 }
+end
