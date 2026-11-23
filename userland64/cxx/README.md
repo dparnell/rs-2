@@ -15,4 +15,5 @@ paths with drive letters and backslashes (`__filesystem/path.h`,
 `path_parser.h`, `path.cpp`, `operations.cpp`, `posix_compat.h`),
 `atomic::wait` on `__rs2_wait` (`atomic.cpp`), `getentropy` for
 `random_device` (`__config`) and the "C" locale functions
-(`locale_base_api.h`).
+(`locale_base_api.h`), type comparison (`typeinfo`) and finding unwind
+tables (libunwind's `AddressSpace.hpp`).

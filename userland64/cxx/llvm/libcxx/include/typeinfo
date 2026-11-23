@@ -219,10 +219,21 @@ struct __type_info_implementations {
       return __hash;
     }
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_ALWAYS_INLINE static bool __eq(__type_name_t __lhs, __type_name_t __rhs) _NOEXCEPT {
+#if defined(__RS2__)
+      // A type in an unnamed namespace is the one type with its address;
+      // others are the same type if modules have their own copies.
+      return __lhs == __rhs || (__builtin_strcmp(__lhs, __rhs) == 0 && !__builtin_strstr(__lhs, "12_GLOBAL__N_1"));
+#else
       return __lhs == __rhs || __builtin_strcmp(__lhs, __rhs) == 0;
+#endif
     }
     _LIBCPP_HIDE_FROM_ABI _LIBCPP_ALWAYS_INLINE static bool __lt(__type_name_t __lhs, __type_name_t __rhs) _NOEXCEPT {
+#if defined(__RS2__)
+      int __c = __builtin_strcmp(__lhs, __rhs);
+      return __c < 0 || (__c == 0 && __lhs < __rhs && __builtin_strstr(__lhs, "12_GLOBAL__N_1"));
+#else
       return __builtin_strcmp(__lhs, __rhs) < 0;
+#endif
     }
   };
 

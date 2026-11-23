@@ -13,8 +13,13 @@
 #define _LIBCPP_HAS_THREAD_API_EXTERNAL 0
 #define _LIBCPP_HAS_THREAD_API_WIN32 0
 #define _LIBCPP_HAS_THREAD_API_C11 0
-// Linked into each module: nothing of it is exported.
+// In LIBCXX64.DLL the library's interface is exported; linked into a
+// module (cc64.sh --static), nothing of it is.
+#ifndef _RS2_LIBC_DLL
 #define _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS
+#endif
+// Modules have their own copies of types' descriptions: compare names.
+#define _LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION 2
 #define _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS 0
 #define _LIBCPP_HAS_FILESYSTEM 1
 #define _LIBCPP_HAS_RANDOM_DEVICE 1

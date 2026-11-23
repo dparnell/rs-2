@@ -38,6 +38,10 @@ either format.
   modules are 64-bit DLLs. Relocations: `R_X86_64_RELATIVE`, `_64`,
   `_GLOB_DAT`, `_JUMP_SLOT` (bound at load time; there is no lazy
   binding).
+- **Needed DLLs**: a module may instead be linked against a DLL the ELF
+  way (`DT_NEEDED` holds the DLL's module name). Its undefined symbols
+  without a module name are then looked up, by exact name, in the needed
+  DLLs in order. C++ uses this (CXX64.md).
 - **Exports** are the module's defined dynamic symbols, by name.
 - **Resources**: a data symbol `RS2_RESOURCES` holds the module's
   resource table (`os2_rc::bind::table64`: "RS2RES", a count, then type,
@@ -63,7 +67,7 @@ either format.
   using the DLL: before the program's entry point for DLLs it imports,
   imports first, or inside DosLoadModule before that returns. Flag 1
   comes when the process stops using it: at DosFreeModule's last
-  reference, or after the exit list at the end of the process. Returning
+  reference (for DLLs only that DLL imported too), or after the exit list at the end of the process. Returning
   0 from flag 0 fails the load (ERROR_INIT_ROUTINE_FAILED), as for LX
   DLLs: kernel/src/api/module.rs runs both kinds the same way, returning
   through the same gate slot. Writable data is each process's own, and a

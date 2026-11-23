@@ -9,7 +9,10 @@
 //! `MODULE.123` (by ordinal) or `MODULE.Name` (by name). Kernel API modules
 //! (DOSCALLS...) resolve to the same gate stubs 32-bit programs use; other
 //! modules are 64-bit DLLs (loader::load_global64). Exports are the
-//! module's defined dynamic symbols. A data symbol `RS2_APPTYPE` (a u32)
+//! module's defined dynamic symbols. A module linked against other DLLs
+//! the ELF way (`DT_NEEDED`, the DLL's module name) has plain undefined
+//! symbols too: those are looked up in the needed DLLs, in order (C++
+//! programs and LIBCXX64, docs/CXX64.md). A data symbol `RS2_APPTYPE` (a u32)
 //! gives a program's type (3 = PM; 2, window compatible, by default).
 //! A DLL that exports `_DLL_InitTerm` has it called as
 //! `unsigned long _DLL_InitTerm(unsigned long hmod, unsigned long flag)`
@@ -32,6 +35,7 @@ const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 
 const DT_NULL: u64 = 0;
+const DT_NEEDED: u64 = 1;
 const DT_PLTRELSZ: u64 = 2;
 const DT_HASH: u64 = 4;
 const DT_STRTAB: u64 = 5;
@@ -207,6 +211,7 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
 
     // The dynamic section.
     let mut tags: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut needed_at: Vec<u64> = Vec::new();
     if let Some(dv) = dynamic {
         let mut at = dv;
         loop {
@@ -214,6 +219,9 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
             let (tag, val) = (u64le(e, 0), u64le(e, 8));
             if tag == DT_NULL {
                 break;
+            }
+            if tag == DT_NEEDED {
+                needed_at.push(val);
             }
             tags.entry(tag).or_insert(val);
             at += 16;
@@ -262,13 +270,23 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
         names.insert(s.name.clone(), exports.len() as u16);
     }
 
-    // Imports: the modules undefined symbols name.
+    // Imports: the modules undefined symbols name, and the needed DLLs.
     let own = super::module_name(path);
+    let needed: Vec<String> = needed_at.iter().map(|&o| super::module_name(&cstr(o as u32))).collect();
     let mut import_names: Vec<String> = Vec::new();
+    for n in &needed {
+        if !import_names.contains(n) {
+            import_names.push(n.clone());
+        }
+    }
+    // (A thread_local's control block, __emutls_v.NAME, is a plain symbol.)
+    let import = |name: &str| -> Option<(String, String)> {
+        let (m, what) = name.split_once('.')?;
+        (!m.starts_with("__emutls_")).then(|| (super::module_name(m), what.to_string()))
+    };
     for s in &syms {
         if s.shndx == 0 && !s.name.is_empty() {
-            if let Some((m, _)) = s.name.split_once('.') {
-                let m = super::module_name(m);
+            if let Some((m, _)) = import(&s.name) {
                 if !import_names.contains(&m) {
                     import_names.push(m);
                 }
@@ -290,7 +308,14 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
         if s.shndx != 0 {
             return Ok(s.value.wrapping_add(delta));
         }
-        let Some((m, what)) = s.name.split_once('.') else {
+        let Some((mname, what)) = import(&s.name) else {
+            for n in &needed {
+                let Some(m) = imports.iter().find(|x| x.name.eq_ignore_ascii_case(n)) else { continue };
+                // (Exactly: mangled names differ in case alone.)
+                if let Some(Ok(t)) = m.names.get(&s.name).map(|&o| m.resolve_ordinal(o as u32, 0)) {
+                    return Ok(t.flat as u64);
+                }
+            }
             // An undefined weak symbol is 0.
             if s.bind == 2 {
                 return Ok(0);
@@ -298,11 +323,10 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
             crate::println!("{path}: unresolved symbol {}", s.name);
             return Err(err::PROC_NOT_FOUND);
         };
-        let mname = super::module_name(m);
         let module = imports.iter().find(|x| x.name.eq_ignore_ascii_case(&mname)).ok_or(err::MOD_NOT_FOUND)?;
         let t = match what.parse::<u32>() {
             Ok(o) => module.resolve_ordinal(o, 0),
-            Err(_) => module.resolve_name(what, 0),
+            Err(_) => module.resolve_name(&what, 0),
         };
         t.map(|t| t.flat as u64).map_err(|e| {
             crate::trace!("loader: {path}: import {} not found", s.name);

@@ -23,14 +23,18 @@ static void run_fini(void *arg) {
         (*--f)();
 }
 
+static struct _rs2_frames frames = RS2_FRAMES;
+
 __attribute__((visibility("default"))) unsigned long _DLL_InitTerm(unsigned long hmod, unsigned long flag) {
     if (flag == 0) {
         _rs2_dll_hmod = hmod;
+        __rs2_add_frames(&frames);
         for (void (**f)(void) = __init_array_start; f < __init_array_end; f++)
             (*f)();
         __cxa_atexit(run_fini, 0, &__dso_handle);
     } else {
         __cxa_finalize(&__dso_handle);
+        __rs2_remove_frames(&frames);
     }
     return 1;
 }

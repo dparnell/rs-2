@@ -75,6 +75,18 @@ HIDDEN int _rs2_fdflag(int fd);
 HIDDEN long _rs2_rawread(int fd, void *buf, size_t n);
 HIDDEN long _rs2_rawwrite(int fd, const void *buf, size_t n);
 
+/* A module's code and unwind tables (frames.c); link64.ld's symbols. */
+struct _rs2_frames {
+    const char *text, *text_end, *hdr, *hdr_end, *eh, *eh_end;
+    struct _rs2_frames *next;
+};
+HIDDEN extern const char __text_start[], __text_end[], __eh_frame_hdr_start[], __eh_frame_hdr_end[], __eh_frame_start[],
+    __eh_frame_end[];
+#define RS2_FRAMES {__text_start, __text_end, __eh_frame_hdr_start, __eh_frame_hdr_end, __eh_frame_start, __eh_frame_end, 0}
+void __rs2_add_frames(struct _rs2_frames *);
+void __rs2_remove_frames(struct _rs2_frames *);
+int __rs2_find_frames(const void *pc, struct _rs2_frames *out);
+
 /* Start-up (start.c, crt1.c). */
 struct _rs2_startup {
     ULONG hmod;

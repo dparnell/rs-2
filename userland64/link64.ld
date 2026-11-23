@@ -5,10 +5,15 @@ ENTRY(_start)
 SECTIONS {
     /* DLLs pass --defsym=__image_base=... to link in the shared arena. */
     . = DEFINED(__image_base) ? __image_base : 0x10000;
-    .text : { *(.text.start) *(.text .text.*) }
+    .text : {
+        PROVIDE_HIDDEN(__text_start = .);
+        *(.text.start) *(.text .text.*)
+        *(__lcxx_override)   /* libc++'s operator new and delete */
+        PROVIDE_HIDDEN(__text_end = .);
+    }
     .rodata : { *(.rodata .rodata.*) }
-    /* C++ exceptions (cc64.sh links C++ with --eh-frame-hdr; nothing else
-       has unwind tables worth keeping). */
+    /* Unwind tables, for C++ exceptions (cc64.sh links with
+       --eh-frame-hdr; userland64/libc/frames.c). */
     .gcc_except_table : { *(.gcc_except_table .gcc_except_table.*) }
     .eh_frame_hdr : { *(.eh_frame_hdr) }
     .eh_frame : {

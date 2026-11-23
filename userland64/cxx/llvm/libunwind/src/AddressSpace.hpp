@@ -94,6 +94,14 @@ namespace libunwind {
 //   __eh_frame_hdr_start = SIZEOF(.eh_frame_hdr) > 0 ? ADDR(.eh_frame_hdr) : 0;
 //   __eh_frame_hdr_end = SIZEOF(.eh_frame_hdr) > 0 ? . : 0;
 
+#if defined(__RS2__)
+// Each module of the process: the C library has the list (frames.c).
+struct __rs2_frames {
+  const char *text, *text_end, *hdr, *hdr_end, *eh, *eh_end;
+  __rs2_frames *next;
+};
+extern "C" int __rs2_find_frames(const void *pc, __rs2_frames *out);
+#endif
 extern char __eh_frame_start;
 extern char __eh_frame_end;
 
@@ -517,6 +525,16 @@ inline bool LocalAddressSpace::findUnwindSections(pint_t targetAddr,
     return true;
   }
 
+#elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) && defined(__RS2__)
+  __rs2_frames m;
+  if (!__rs2_find_frames(reinterpret_cast<const void *>(targetAddr), &m) || m.eh == m.eh_end)
+    return false;
+  info.dso_base = 0;
+  info.dwarf_section = (uintptr_t)m.eh;
+  info.dwarf_section_length = (size_t)(m.eh_end - m.eh);
+  info.dwarf_index_section = (uintptr_t)m.hdr;
+  info.dwarf_index_section_length = (size_t)(m.hdr_end - m.hdr);
+  return true;
 #elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) && defined(_LIBUNWIND_IS_BAREMETAL)
   info.dso_base = 0;
   // Bare metal is statically linked, so no need to ask the dynamic loader

@@ -56,6 +56,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <os2.h>
+#ifdef _RS2_LIBC_DLL
+#include "cxxtdl2.h"
+#endif
 
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
@@ -291,7 +294,7 @@ static void test_text() {
     auto tc = std::to_chars(buf, buf + 64, 0.1);
     check("to_chars", std::string(buf, tc.ptr) == "0.1");
     double back;
-    auto fc = std::from_chars("1.7976931348623157e308", "1.7976931348623157e308" + 22, back);
+    auto fc = std::from_chars("1.7976931348623157e308", &"1.7976931348623157e308"[22], back);
     check("from_chars", fc.ec == std::errc() && back == 1.7976931348623157e308);
     std::smatch sm;
     std::string s = "file-123.txt";
@@ -494,6 +497,57 @@ static void test_threads() {
     check("100 threads in turn", ok == 100);
 }
 
+// ---- one C++ library for the program and its DLLs ----
+
+#ifdef _RS2_LIBC_DLL
+namespace { struct Hidden {}; }
+struct Circle : shapes::Shape {
+    double area() const override { return 3; }
+    std::string name() const override { return "circle, " + shapes::Shape::name(); }
+};
+static void test_modules() {
+    int got = 0, destroyed = 0;
+    try { shapes::fail_inline(31); } catch (const shapes::InlineError &e) { got = e.code; }
+    check("DLL's exception, inline type, caught by type", got == 31);
+    got = 0;
+    try { shapes::make_square(-1); } catch (const shapes::ShapeError &e) { got = !std::strcmp(e.what(), "negative side"); }
+    check("DLL's exception, exported type", got == 1);
+    got = 0;
+    try { shapes::make_square(-1); } catch (const std::exception &) { got = 1; }
+    check("DLL's exception caught as std::exception", got == 1);
+    got = 0;
+    try { shapes::call([] { throw 77; }, &destroyed); } catch (int i) { got = i; }
+    check("exception through the DLL's frames", got == 77 && destroyed == 1);
+    check("DLL catches the program's exceptions", shapes::catch_from([] { throw shapes::InlineError(12); }) == 12 &&
+              shapes::catch_from([] { throw std::runtime_error("x"); }) == -1 && shapes::catch_from([] { throw 'c'; }) == -2);
+    got = 0;
+    try { std::rethrow_exception(shapes::caught()); } catch (const std::out_of_range &) { got = 1; }
+    check("exception_ptr from the DLL", got == 1);
+    check("uncaught_exceptions after", std::uncaught_exceptions() == 0);
+    auto sq = shapes::make_square(3);
+    check("object from the DLL", sq->area() == 9 && sq->name().size() > 40 && shapes::Shape::count == 1);
+    check("dynamic_cast of the DLL's object", dynamic_cast<shapes::Square *>(sq.get()) != nullptr);
+    check("typeid across modules", typeid(*sq) == shapes::square_type() && typeid(shapes::InlineError) == shapes::inline_error_type());
+    check("unnamed namespaces stay apart", typeid(Hidden) != shapes::hidden_type());
+    std::vector<std::shared_ptr<shapes::Shape>> v{std::make_shared<Circle>(), std::shared_ptr<shapes::Shape>(std::move(sq))};
+    check("program's class, DLL's base", shapes::total(v) == 12 && v[0]->name().starts_with("circle, shape"));
+    std::cout << "  shared cout: " << std::hex;
+    shapes::print("ok\n");
+    std::cout << std::dec;
+    check("exported thread_local", shapes::calls_here() == 11 && shapes::calls == 11);
+    std::thread([&] { got = shapes::calls_here(); }).join();
+    check("... in another thread", got == 11 && shapes::calls == 11);
+    // The C library has unwind tables too.
+    int arr[4] = {4, 3, 2, 1};
+    got = 0;
+    try { std::qsort(arr, 4, sizeof *arr, [](const void *, const void *) -> int { throw 5; }); } catch (int i) { got = i; }
+    check("exception through qsort", got == 5);
+    check("std::function from the DLL's side", [&] { int n = 0; shapes::call([&] { n = 8; }, &destroyed); return n == 8; }());
+}
+#else
+static void test_modules() {}
+#endif
+
 static void test_processes(const char *self) {
     auto run = [&](const char *what) {
         const char *argv[] = {self, what, nullptr};
@@ -547,6 +601,7 @@ int main(int argc, char **argv) {
         test_text();
         test_files();
         test_threads();
+        test_modules();
         test_processes(argv[0]);
     } catch (const std::exception &e) {
         std::cout << "unexpected exception: " << e.what() << "\n";

@@ -2,7 +2,7 @@
 # Build a 64-bit rs2 program or DLL from C or C++ (docs/API64.md, "Building
 # 64-bit programs in C"; the C library: docs/LIBC64.md; C++: docs/CXX64.md):
 #
-#   cc64.sh -o OUT.EXE [--pm] [--dll] [--static] [--rc FILE.RC] [CFLAGS...] FILE.c|.cpp|.o|.a...
+#   cc64.sh -o OUT.EXE [--pm] [--dll] [--static] [--rc FILE.RC] [CFLAGS...] FILE.c|.cpp|.o|.a|.DLL...
 #   cc64.sh -c [--static] [CFLAGS...] FILE.c|.cpp [-o FILE.o]
 #   cc64.sh --libc            (just build the C library)
 #   cc64.sh --libcxx          (just build the C++ library)
@@ -16,8 +16,10 @@
 # one way must not be linked the other way (-D_RS2_LIBC_DLL decides how
 # the headers declare the library's data).
 # C++ sources (.cpp .cc .cxx) get userland64/cxx: LLVM's libc++, libc++abi
-# and libunwind, linked into the module; --cxx links them without C++
-# sources on the command line (objects only).
+# and libunwind, in LIBCXX64.DLL (with --static, linked into the module);
+# --cxx uses them without C++ sources on the command line (objects only).
+# A 64-bit DLL on the command line is linked against: what it exports
+# resolves there (the program then needs that DLL, by its file name).
 # --pm marks a Presentation Manager program, --rc compiles an .RC script
 # into the module's resources (os2-rc's table64).
 set -e
@@ -40,7 +42,7 @@ while [ -z "$internal" ] && [ $# -gt 0 ]; do
         --cxx) cxx=1; shift ;;
         --static) static=1; shift ;;
         *.cpp|*.cc|*.cxx) cxx=1; inputs="$inputs $1"; shift ;;
-        *.c|*.o|*.a|*.s|*.S) inputs="$inputs $1"; shift ;;
+        *.c|*.o|*.a|*.s|*.S|*.dll|*.DLL) inputs="$inputs $1"; shift ;;
         *) cflags="$cflags $1"; shift ;;
     esac
 done
@@ -61,7 +63,7 @@ target=x86_64-unknown-none-elf
 common="--target=$target -D__RS2__ -D__OS2__ -nostdinc -fno-stack-protector -fPIC -fvisibility=hidden -fno-plt \
     -femulated-tls -Xclang -fstack-clash-protection -O2"
 cc() {
-    $clang $common -isystem "$ul/include" -fno-asynchronous-unwind-tables -std=gnu11 -Wall -Wno-pointer-sign "$@"
+    $clang $common -isystem "$ul/include" -fexceptions -fasynchronous-unwind-tables -std=gnu11 -Wall -Wno-pointer-sign "$@"
 }
 llvm=$ul/cxx/llvm
 cxxc() {
@@ -102,21 +104,30 @@ dllfile=$libdir/LIBC64.DLL
 LIBC64_BASE=0x18100000
 link() {
     "$lld" -flavor gnu -shared -T "$ul/link64.ld" --no-rosegment -nostdlib -z now -z norelro -Bsymbolic \
-        --hash-style=sysv --gc-sections "$@"
+        --hash-style=sysv --gc-sections --eh-frame-hdr "$@"
 }
-# Imports are named MODULE.name: anything else undefined cannot load.
+# Imports are named MODULE.name or exported by a DLL linked against
+# (check_imports FILE DLL...): anything else undefined cannot load.
 check_imports() {
-    bad=$("$nm" -D --undefined-only "$1" | awk '$2 !~ /[.]/ { print "    " $2 }')
+    f=$1
+    shift
+    bad=$( { for d in "$@"; do "$nm" -D --defined-only "$d" | awk '{ print "+", $NF }'; done
+             "$nm" -D --undefined-only "$f" | awk '$1 == "U" { print "-", $2 }'; } |
+        awk '$1 == "+" { has[$2] = 1; next } !($2 in has) && ($2 !~ /[.]/ || $2 ~ /^__emutls_/) { print "    " $2 }')
     if [ -n "$bad" ]; then
-        echo "cc64.sh: $1: undefined:" >&2
+        echo "cc64.sh: $f: undefined:" >&2
         echo "$bad" >&2
-        rm -f "$1"
+        rm -f "$f"
         exit 1
     fi
 }
+# A DLL's name for DT_NEEDED: its file name without .DLL, in upper case.
+soname() {
+    basename "$1" | sed 's/\.[dD][lL][lL]$//' | tr '[:lower:]' '[:upper:]'
+}
 build_libc() {
     if [ -f "$lib" ] && [ -f "$implib" ] && [ -f "$dllfile" ] && [ -f "$crt1" ] && [ -f "$crtdll" ] &&
-        [ -z "$(find "$ul/libc" "$ul/include" "$here/cc64.sh" -newer "$lib" -type f | head -1)" ]; then
+        [ -z "$(find "$ul/libc" "$ul/include" "$ul/link64.ld" "$here/cc64.sh" -newer "$lib" -type f | head -1)" ]; then
         return
     fi
     rm -rf "$libdir/obj" "$libdir/dll" "$libdir/stubs"
@@ -138,7 +149,7 @@ build_libc() {
     "$ar" rcs "$lib" "$libdir"/obj/*.o
     printf '.text\n.globl _start\n_start: ret\n' > "$libdir/dllstart.s"
     $clang --target=$target -c "$libdir/dllstart.s" -o "$libdir/dllstart.o"
-    link --defsym=__image_base=$LIBC64_BASE "$libdir/dllstart.o" "$libdir"/dll/*.o -o "$dllfile"
+    link -soname=LIBC64 --defsym=__image_base=$LIBC64_BASE "$libdir/dllstart.o" "$libdir"/dll/*.o -o "$dllfile"
     check_imports "$dllfile"
     # The import library: a stub for each exported function (in its own
     # member, so a program takes only what it calls). Data is imported
@@ -153,16 +164,20 @@ build_libc() {
 }
 # The C++ library, for programs that use LIBC64.DLL or (static) libc.a:
 # the two differ in how the C library's data is declared.
-#   libcxx64.a / libcxx64s.a    libc++, libc++abi and libunwind
-cxxlib=$libdir/libcxx64${static:+s}.a
+#   LIBCXX64.DLL    libc++, libc++abi and libunwind (C:\RS2\DLL64)
+#   libcxx64s.a     the same, to link in
+cxxlib=$libdir/libcxx64s.a
+[ -n "$static" ] || cxxlib=$libdir/LIBCXX64.DLL
+LIBCXX64_BASE=0x18200000
 build_libcxx() {
-    if [ -f "$cxxlib" ] && [ -z "$(find "$ul/cxx" "$ul/include" "$here/cc64.sh" -newer "$cxxlib" -type f | head -1)" ]; then
+    if [ -f "$cxxlib" ] && [ -z "$(find "$ul/cxx" "$ul/include" "$ul/link64.ld" "$here/cc64.sh" -newer "$cxxlib" -type f | head -1)" ]; then
         return
     fi
     o=$libdir/cxxobj${static:+s}
     rm -rf "$o"
     mkdir -p "$o"
-    d=
+    # In the DLL the annotated interface is exported.
+    d="-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS -D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS"
     [ -n "$static" ] || d=-D_RS2_LIBC_DLL
     cf="-ffunction-sections -fdata-sections -DNDEBUG -w $d"
     {
@@ -174,10 +189,10 @@ build_libcxx() {
         for f in "$llvm"/libcxxabi/src/*.cpp; do
             case "$f" in */cxa_noexception.cpp|*/cxa_thread_atexit.cpp) continue ;; esac
             echo "$f abi-$(basename "$f" .cpp).o $cf -std=c++23 -D_LIBCXXABI_BUILDING_LIBRARY -D_LIBCPP_BUILDING_LIBRARY" \
-                "-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS -DLIBCXXABI_USE_LLVM_UNWINDER" \
+                "-DLIBCXXABI_USE_LLVM_UNWINDER" \
                 "-I$llvm/libcxxabi/src -I$llvm/libcxx/src -I$llvm/libunwind/include"
         done
-        u="$cf -D_LIBUNWIND_IS_BAREMETAL -D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS -I$llvm/libunwind/include -I$llvm/libunwind/src"
+        u="$cf -D_LIBUNWIND_IS_BAREMETAL -I$llvm/libunwind/include -I$llvm/libunwind/src"
         echo "$llvm/libunwind/src/libunwind.cpp unw-libunwind.o $u -std=c++17 -fno-exceptions -fno-rtti"
         for f in UnwindLevel1.c UnwindLevel1-gcc-ext.c UnwindRegistersRestore.S UnwindRegistersSave.S; do
             echo "$llvm/libunwind/src/$f unw-${f%.*}.o $u -fexceptions -fasynchronous-unwind-tables"
@@ -187,7 +202,12 @@ build_libcxx() {
     # Each line of the list is one compilation.
     CC64_OBJ=$o xargs -P "$n" -L 1 "$here/cc64.sh" --internal-cxx < "$o/list"
     rm -f "$cxxlib"
-    "$ar" rcs "$cxxlib" "$o"/*.o
+    if [ -n "$static" ]; then
+        "$ar" rcs "$cxxlib" "$o"/*.o
+    else
+        link -soname=LIBCXX64 --defsym=__image_base=$LIBCXX64_BASE "$libdir/dllstart.o" "$crtdll" "$o"/*.o "$implib" -o "$cxxlib"
+        check_imports "$cxxlib"
+    fi
 }
 build_libc
 [ -n "$libc_only" ] && exit 0
@@ -210,11 +230,12 @@ fi
 [ -n "$out" ] && [ -n "$inputs" ] || usage
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cc64.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
-objs=
+objs= dlls=
 i=0
 for s in $inputs; do
     case "$s" in
         *.o|*.a) objs="$objs $s" ;;
+        *.dll|*.DLL) objs="$objs $s"; dlls="$dlls $s" ;;
         *)
             i=$((i + 1))
             compile "$s" "$tmp/$i.o"
@@ -245,16 +266,15 @@ else
     # A program's own start-up code.
     [ -n "$dll" ] || objs="$crt1 $objs"
 fi
-if [ -z "$cxx" ]; then
-    eh=
-else
-    # None of it is exported, so what is not used goes; the unwinder reads
-    # this module's own unwind tables.
+if [ -n "$cxx" ]; then
     build_libcxx
     libs="$cxxlib $libs"
-    eh="--eh-frame-hdr --exclude-libs=ALL"
+    [ -n "$static" ] || dlls="$dlls $cxxlib"
 fi
+# What is linked in from an archive is not exported.
+opts="--exclude-libs=ALL --as-needed"
+[ -n "$dll" ] && opts="$opts -soname=$(soname "$out")"
 # A DLL's: _DLL_InitTerm runs its constructors.
 [ -n "$dll" ] && objs="$crtdll $objs"
-link $eh --export-dynamic-symbol=RS2_APPTYPE --export-dynamic-symbol=RS2_RESOURCES "$tmp/meta.o" $objs $libs -o "$out"
-check_imports "$out"
+link $opts --export-dynamic-symbol=RS2_APPTYPE --export-dynamic-symbol=RS2_RESOURCES "$tmp/meta.o" $objs $libs -o "$out"
+check_imports "$out" $dlls
