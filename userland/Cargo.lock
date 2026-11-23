@@ -837,9 +837,6 @@ dependencies = [
 [[package]]
 name = "somsup"
 version = "0.1.0"
-dependencies = [
- "os2",
-]
 
 [[package]]
 name = "somtc-dll"

@@ -4,6 +4,3 @@ description = "What rs2's SOM class libraries (SOMTC, SOMU, SOMIR) share: SOM.DL
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-
-[dependencies]
-os2 = { path = "../os2" }
