@@ -179,13 +179,18 @@ pub fn handle(name: u32) -> u16 {
     // A DLL the program imports: loaded with it. (The system's list has
     // DLLs of programs that ended too: Delphi refuses to start when it
     // finds COMPLIB.DCL already loaded.)
-    let mut z = base.clone();
-    z.push(0);
-    let mut hmod = 0;
-    if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hmod) } == 0 && unsafe { crate::pm::Rs2Win16Selector(11, hmod, 0) } != 0 {
-        return register(hmod, true);
+    match here(&base) {
+        0 => 0,
+        hmod => register(hmod, true),
     }
-    0
+}
+
+/// The OS/2 handle of a DLL this process uses, or 0. (Not
+/// DosQueryModuleHandle: it loads one that only other processes use.)
+fn here(base: &[u8]) -> u32 {
+    let mut z = base.to_vec();
+    z.push(0);
+    unsafe { crate::pm::Rs2Win16Selector(11, 0, z.as_ptr() as u32) }
 }
 
 /// LoadLibrary(name): the instance handle, or an error below 32 (2: file
@@ -201,10 +206,8 @@ pub fn load_library(name: u32) -> u16 {
         return m.hinst;
     }
     // A DLL the program was loaded with: one more reference.
-    let mut z = base.clone();
-    z.push(0);
-    let mut hm = 0u32;
-    if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hm) } == 0 && unsafe { crate::pm::Rs2Win16Selector(11, hm, 0) } != 0 {
+    let hm = here(&base);
+    if hm != 0 {
         let h = register(hm, true);
         if let Some(m) = MODULES.get().iter_mut().find(|m| m.hmod == hm) {
             m.loads += 1;
