@@ -221,7 +221,7 @@ and are freed, with their destructors run, when a thread ends by
 ## Tests
 
 `C:\RS2\CLIBTEST.EXE` (userland64/c/samples/clibtest.c, with LIBC64.DLL)
-and `C:\RS2\CLIBTSTS.EXE` (the same program, `--static`) make 161 checks:
+and `C:\RS2\CLIBTSTS.EXE` (the same program, `--static`) make 175 checks:
 strings, conversions, printf (including exact float output), scanf,
 strtod round trips, the heap under a random load and in large blocks,
 sorting, math against known values, setjmp, SIGSEGV, SIGFPE and SIGINT
@@ -238,7 +238,7 @@ loads one DLL and imports the other leaves both files when it calls
 `C:\RS2\DLL64\CLIBTDLL.DLL` (clibtdll.c, a C DLL), frees a string the
 DLL malloc'd, has the DLL print into the same `stdout` buffer, and sees
 the `errno` the DLL set. It prints one line per check and
-`clibtest: N checks, M failures` (165 and 161), and exits with M:
+`clibtest: N checks, M failures` (179 and 175), and exits with M:
 
 ```text
 cargo xtask run --headless --timeout 120 --init "RS2\CLIBTEST.EXE"

@@ -604,8 +604,8 @@ static void test_posix(const char *self) {
 
     struct sigaction sa = {0}, old;
     sa.sa_handler = on_sig;
-    check("sigaction", sigaction(SIGTERM, &sa, &old) == 0 && old.sa_handler == SIG_DFL && raise(SIGTERM) == 0 && posix_sig == SIGTERM);
-    signal(SIGTERM, SIG_DFL);
+    check("sigaction", sigaction(SIGUSR1, &sa, &old) == 0 && old.sa_handler == SIG_DFL && raise(SIGUSR1) == 0 && posix_sig == SIGUSR1);
+    signal(SIGUSR1, SIG_DFL);
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
