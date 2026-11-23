@@ -1,5 +1,7 @@
 # rs2
 
+[![Build ISO](https://github.com/dparnell/rs-2/actions/workflows/build-iso.yml/badge.svg?branch=main)](https://github.com/dparnell/rs-2/actions/workflows/build-iso.yml?query=branch%3Amain)
+
 A re-implementation of IBM OS/2 Warp 4.52 in Rust that runs existing OS/2
 programs unmodified, natively, on 64-bit PCs.
 
