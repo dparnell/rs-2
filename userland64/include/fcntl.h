@@ -19,7 +19,22 @@ _RS2_BEGIN
 #define F_GETFD 1
 #define F_SETFD 2
 #define F_GETFL 3
+#define F_SETFL 4
+#define F_GETLK 5
+#define F_SETLK 6
+#define F_SETLKW 7
+#define F_RDLCK 0
+#define F_WRLCK 1
+#define F_UNLCK 2
 #define FD_CLOEXEC 1
+#define AT_FDCWD (-100)
+/* Locks are OS/2's (DosSetFileLocks): they keep other processes from
+ * reading and writing what is locked. l_whence is SEEK_SET. */
+struct flock {
+    short l_type, l_whence;
+    off_t l_start, l_len;
+    pid_t l_pid;
+};
 int open(const char *, int, ...);
 int creat(const char *, mode_t);
 int fcntl(int, int, ...);

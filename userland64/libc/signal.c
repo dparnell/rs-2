@@ -106,3 +106,31 @@ ULONG _rs2_xcpt_handler(PEXCEPTIONREPORTRECORD rep, PEXCEPTIONREGISTRATIONRECORD
     memcpy(c + CTX_RIP, &rip, 8);
     return XCPT_CONTINUE_EXECUTION;
 }
+
+int sigaction(int sig, const struct sigaction *__restrict act, struct sigaction *__restrict old) {
+    if (sig <= 0 || sig >= NSIG || sig == SIGKILL) {
+        errno = EINVAL;
+        return -1;
+    }
+    __sighandler_t was = handlers[sig];
+    if (act)
+        signal(sig, act->sa_handler);   /* sa_sigaction: no siginfo */
+    if (old) {
+        memset(old, 0, sizeof *old);
+        old->sa_handler = was;
+    }
+    return 0;
+}
+int sigemptyset(sigset_t *s) { *s = 0; return 0; }
+int sigfillset(sigset_t *s) { *s = ~0UL; return 0; }
+int sigaddset(sigset_t *s, int n) { *s |= 1UL << n; return 0; }
+int sigdelset(sigset_t *s, int n) { *s &= ~(1UL << n); return 0; }
+int sigismember(const sigset_t *s, int n) { return *s >> n & 1; }
+int sigprocmask(int how, const sigset_t *__restrict s, sigset_t *__restrict old) {
+    (void)how;
+    (void)s;
+    if (old)
+        *old = 0;
+    return 0;
+}
+int pthread_sigmask(int how, const sigset_t *__restrict s, sigset_t *__restrict old) { return sigprocmask(how, s, old); }

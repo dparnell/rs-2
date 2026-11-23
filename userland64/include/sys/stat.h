@@ -13,6 +13,7 @@ struct stat {
     dev_t st_rdev;
     off_t st_size;
     struct timespec st_atim, st_mtim, st_ctim;
+    long st_blksize, st_blocks;
     unsigned int st_attr;  /* the OS/2 attributes, FILE_* */
 };
 #define st_atime st_atim.tv_sec
@@ -45,6 +46,9 @@ struct stat {
 #define S_IROTH 0004
 #define S_IWOTH 0002
 #define S_IXOTH 0001
+#define S_ISUID 04000
+#define S_ISGID 02000
+#define S_ISVTX 01000
 #define S_IREAD S_IRUSR
 #define S_IWRITE S_IWUSR
 #define S_IEXEC S_IXUSR
@@ -55,5 +59,9 @@ int chmod(const char *, mode_t);
 int fchmod(int, mode_t);
 int mkdir(const char *, mode_t);
 mode_t umask(mode_t);
+#define UTIME_NOW ((1L << 30) - 1)
+#define UTIME_OMIT ((1L << 30) - 2)
+int futimens(int, const struct timespec[2]);
+int utimensat(int, const char *, const struct timespec[2], int);
 _RS2_END
 #endif

@@ -219,6 +219,11 @@ struct FILESTATUS3
   ULONG attrFile
 end
 
+struct FILELOCK
+  LONG lOffset
+  LONG lRange
+end
+
 struct FILEFINDBUF3
   ULONG oNextEntryOffset
   FDATE fdateCreation
@@ -258,6 +263,7 @@ fn DOSCALLS.260 APIRET DosDupHandle(HFILE hFile, PHFILE pHfile)
 fn DOSCALLS.239 APIRET DosCreatePipe(PHFILE phfRead, PHFILE phfWrite, ULONG cb)
 fn DOSCALLS.224 APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
 fn DOSCALLS.221 APIRET DosSetFHState(HFILE hFile, ULONG mode)
+fn DOSCALLS.428 APIRET DosSetFileLocks(HFILE hFile, PFILELOCK pflUnlock, PFILELOCK pflLock, ULONG timeout, ULONG flags)
 fn DOSCALLS.276 APIRET DosQueryFHState(HFILE hFile, PULONG pMode)
 fn DOSCALLS.209 APIRET DosSetMaxFH(ULONG cFH)
 fn DOSCALLS.382 APIRET DosSetRelMaxFH(PLONG pcbReqCount, PULONG pcbCurMaxFH)

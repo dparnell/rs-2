@@ -1,0 +1,220 @@
+--- a/llvm/include/llvm/Support/Path.h
++++ b/llvm/include/llvm/Support/Path.h
+@@ -39,7 +39,7 @@
+     return true;
+   if (S != Style::native)
+     return false;
+-#if defined(_WIN32)
++#if defined(_WIN32) || defined(__RS2__)
+   return false;
+ #else
+   return true;
+--- a/llvm/include/llvm/Support/Program.h
++++ b/llvm/include/llvm/Support/Program.h
+@@ -29,9 +29,9 @@
+ 
+ /// This is the OS-specific separator for PATH like environment variables:
+ // a colon on Unix or a semicolon on Windows.
+-#if defined(LLVM_ON_UNIX)
++#if defined(LLVM_ON_UNIX) && !defined(__RS2__)
+ const char EnvPathSeparator = ':';
+-#elif defined(_WIN32)
++#elif defined(_WIN32) || defined(__RS2__)
+ const char EnvPathSeparator = ';';
+ #endif
+ 
+--- a/llvm/lib/Support/LockFileManager.cpp
++++ b/llvm/lib/Support/LockFileManager.cpp
+@@ -111,7 +111,7 @@
+ }
+ 
+ bool LockFileManager::processStillExecuting(StringRef HostID, int PID) {
+-#if LLVM_ON_UNIX && !defined(__ANDROID__)
++#if LLVM_ON_UNIX && !defined(__ANDROID__) && !defined(__RS2__)
+   SmallString<256> StoredHostID;
+   if (getHostID(StoredHostID))
+     return true; // Conservatively assume it's executing on error.
+--- a/llvm/lib/Support/Path.cpp
++++ b/llvm/lib/Support/Path.cpp
+@@ -42,6 +42,9 @@
+       return style;
+     if (is_style_posix(style))
+       return Style::posix;
++#if defined(__RS2__)
++    return Style::windows_slash;
++#endif
+     return LLVM_WINDOWS_PREFER_FORWARD_SLASH ? Style::windows_slash
+                                              : Style::windows_backslash;
+   }
+@@ -177,8 +180,10 @@
+   // different name) or for the whole directory (retry would always fail).
+   // Checking which is racy, so we try a number of times, then give up.
+   std::error_code EC;
++  SmallString<128> UseModel;
++  Model.toVector(UseModel);
+   for (int Retries = 128; Retries > 0; --Retries) {
+-    sys::fs::createUniquePath(Model, ResultPath, MakeAbsolute);
++    sys::fs::createUniquePath(UseModel, ResultPath, MakeAbsolute);
+     // Try to open + create the file.
+     switch (Type) {
+     case FS_File: {
+@@ -188,7 +193,16 @@
+         // errc::permission_denied happens on Windows when we try to open a file
+         // that has been marked for deletion.
+         if (EC == errc::file_exists || EC == errc::permission_denied)
++          continue;
++#if defined(__RS2__)
++        // FAT: a name of 8 characters and an extension of 3.
++        if (EC == errc::filename_too_long &&
++            !StringRef(UseModel).ends_with(".TMP")) {
++          sys::path::remove_filename(UseModel);
++          sys::path::append(UseModel, "%%%%%%%%.TMP");
+           continue;
++        }
++#endif
+         return EC;
+       }
+ 
+@@ -1281,6 +1295,12 @@
+       remove(TmpName);
+   }
+ #else
++#if defined(__RS2__)
++  // An open file cannot be renamed.
++  if (close(FD) == -1)
++    return errorCodeToError(errnoAsErrorCode());
++  FD = -1;
++#endif
+   std::error_code RenameEC = fs::rename(TmpName, Name);
+   if (RenameEC) {
+     // If we can't rename, try to copy to work around cross-device link issues.
+@@ -1295,7 +1315,7 @@
+   if (!RenameEC)
+     TmpName = "";
+ 
+-  if (close(FD) == -1)
++  if (FD != -1 && close(FD) == -1)
+     return errorCodeToError(errnoAsErrorCode());
+   FD = -1;
+ 
+--- a/llvm/lib/Support/Unix/Path.inc
++++ b/llvm/lib/Support/Unix/Path.inc
+@@ -189,7 +189,9 @@
+ /// GetMainExecutable - Return the path to the main executable, given the
+ /// value of argv[0] from program startup.
+ std::string getMainExecutable(const char *argv0, void *MainAddr) {
+-#if defined(__APPLE__)
++#if defined(__RS2__)
++  return ::getexecname();
++#elif defined(__APPLE__)
+   // On OS X the executable path is saved to the stack by dyld. Reading it
+   // from there is much faster than calling dladdr, especially for large
+   // binaries with symbols.
+@@ -555,6 +557,8 @@
+   // The file system can have an arbitrary structure on z/OS; must go with the
+   // conservative answer.
+   return false;
++#elif defined(__RS2__)
++  return true;
+ #else
+   return !!(STATVFS_F_FLAG(Vfs) & MNT_LOCAL);
+ #endif
+@@ -683,7 +687,9 @@
+   struct passwd Pwd;
+   std::string User = Expr.str();
+   struct passwd *Entry = nullptr;
++#if !defined(__RS2__)
+   getpwnam_r(User.c_str(), &Pwd, Buf.get(), BufSize, &Entry);
++#endif
+ 
+   if (!Entry || !Entry->pw_dir) {
+     // Unable to look up the entry, just return back the original path.
+@@ -1357,7 +1363,9 @@
+     Buf = std::make_unique<char[]>(BufSize);
+     struct passwd Pwd;
+     struct passwd *pw = nullptr;
++#if !defined(__RS2__)
+     getpwuid_r(getuid(), &Pwd, Buf.get(), BufSize, &pw);
++#endif
+     if (pw && pw->pw_dir)
+       RequestedDir = pw->pw_dir;
+   }
+--- a/llvm/lib/Support/Unix/Program.inc
++++ b/llvm/lib/Support/Unix/Program.inc
+@@ -32,6 +32,9 @@
+ #include <sys/resource.h>
+ #include <signal.h>
+ #include <fcntl.h>
++#if defined(__RS2__)
++#include <io.h>
++#endif
+ #if HAVE_UNISTD_H
+ #include <unistd.h>
+ #endif
+@@ -67,11 +70,20 @@
+   // the behavior of sh(1) and friends.
+   if (Name.contains('/'))
+     return std::string(Name);
++#if defined(__RS2__)
++  if (Name.contains('\\') || Name.contains(':'))
++    return std::string(Name);
++  std::string WithExt = Name.str();
++  if (!Name.contains('.')) {
++    WithExt += ".EXE";
++    Name = WithExt;
++  }
++#endif
+ 
+   SmallVector<StringRef, 16> EnvironmentPaths;
+   if (Paths.empty())
+     if (const char *PathEnv = std::getenv("PATH")) {
+-      SplitString(PathEnv, EnvironmentPaths, ":");
++      SplitString(PathEnv, EnvironmentPaths, StringRef(&EnvPathSeparator, 1));
+       Paths = EnvironmentPaths;
+     }
+ 
+@@ -524,6 +536,9 @@
+ }
+ 
+ std::error_code llvm::sys::ChangeStdoutToBinary() {
++#if defined(__RS2__)
++  ::setmode(STDOUT_FILENO, O_BINARY);
++#endif
+   // Do nothing, as Unix doesn't differentiate between text and binary.
+   return std::error_code();
+ }
+@@ -548,6 +563,13 @@
+ 
+ bool llvm::sys::commandLineFitsWithinSystemLimits(StringRef Program,
+                                                   ArrayRef<StringRef> Args) {
++#if defined(__RS2__)
++  // DosExecPgm's arguments and the environment share 64 KB.
++  size_t Total = Program.size();
++  for (StringRef Arg : Args)
++    Total += Arg.size() + 3;
++  return Total < 30000;
++#else
+   static long ArgMax = sysconf(_SC_ARG_MAX);
+   // POSIX requires that _POSIX_ARG_MAX is 4096, which is the lowest possible
+   // value for ARG_MAX on a POSIX compliant system.
+@@ -585,4 +607,5 @@
+   }
+ 
+   return true;
++#endif
+ }
+--- a/llvm/lib/Support/raw_socket_stream.cpp
++++ b/llvm/lib/Support/raw_socket_stream.cpp
+@@ -11,6 +11,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++#ifndef __RS2__ // no Unix sockets
+ #include "llvm/Support/raw_socket_stream.h"
+ #include "llvm/Config/config.h"
+ #include "llvm/Support/Error.h"
+@@ -356,3 +357,4 @@
+   }
+   return raw_fd_stream::read(Ptr, Size);
+ }
++#endif // __RS2__

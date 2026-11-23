@@ -10,6 +10,8 @@ struct statvfs {
     fsfilcnt_t f_files, f_ffree, f_favail;
     unsigned long f_fsid, f_flag, f_namemax;
 };
+#define ST_RDONLY 1
+int fstatvfs(int, struct statvfs *);
 int statvfs(const char *__restrict, struct statvfs *__restrict);
 _RS2_END
 #endif

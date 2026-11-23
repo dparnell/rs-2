@@ -211,6 +211,12 @@ typedef struct _FILESTATUS3 {
 } FILESTATUS3;
 typedef FILESTATUS3 *PFILESTATUS3;
 
+typedef struct _FILELOCK {
+    LONG lOffset;
+    LONG lRange;
+} FILELOCK;
+typedef FILELOCK *PFILELOCK;
+
 typedef struct _FILEFINDBUF3 {
     ULONG oNextEntryOffset;
     FDATE fdateCreation;
@@ -250,6 +256,7 @@ APIRET APIENTRY DosDupHandle(HFILE hFile, PHFILE pHfile) __asm__("DOSCALLS.260")
 APIRET APIENTRY DosCreatePipe(PHFILE phfRead, PHFILE phfWrite, ULONG cb) __asm__("DOSCALLS.239");
 APIRET APIENTRY DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr) __asm__("DOSCALLS.224");
 APIRET APIENTRY DosSetFHState(HFILE hFile, ULONG mode) __asm__("DOSCALLS.221");
+APIRET APIENTRY DosSetFileLocks(HFILE hFile, PFILELOCK pflUnlock, PFILELOCK pflLock, ULONG timeout, ULONG flags) __asm__("DOSCALLS.428");
 APIRET APIENTRY DosQueryFHState(HFILE hFile, PULONG pMode) __asm__("DOSCALLS.276");
 APIRET APIENTRY DosSetMaxFH(ULONG cFH) __asm__("DOSCALLS.209");
 APIRET APIENTRY DosSetRelMaxFH(PLONG pcbReqCount, PULONG pcbCurMaxFH) __asm__("DOSCALLS.382");

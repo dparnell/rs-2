@@ -88,9 +88,15 @@ programs of rs2's own as well.
 1. Rust's std for 64-bit programs: done ([STD64.md](STD64.md)).
 2. Rust DLLs with std, C and Rust interfaces (what proc macros and
    `rustc_driver` are): done ([STD64.md](STD64.md)).
-3. LLVM's `lld`, then `clang`, cross-built with cc64.sh (C++ on
-   LIBCXX64.DLL; what LLVM's Unix support code needs of POSIX, `mmap` of
-   files first). Milestone: compile and link a C program on rs2.
+3. LLVM's `lld`: done. `userland64/llvm/build.sh` fetches LLVM 21.1.8,
+   applies `rs2.patch` (paths with drive letters, `;` in PATH, temporary
+   files on FAT, no renaming of open files) and cross-builds it through
+   `userland64/cmake/rs2.cmake`, on LIBC64.DLL and LIBCXX64.DLL. LLD.EXE on
+   rs2 links CHELLO64-like C programs and CXXTEST with the same bytes as
+   on the host (`tests/lld64/run.sh`).
+   Next `clang`, from the same tree. Milestone: compile and link a C
+   program on rs2. (Its heap: LIBC64's malloc stays below 4 GB, in the
+   low arena's 512 MB.)
 4. `rustc`: LLVM in a DLL of its own, behind the C interface of rustc's
    LLVM wrapper (each module has its own C library), `rustc_driver`, proc
    macros. Milestone: `rustc hello.rs` on rs2.
