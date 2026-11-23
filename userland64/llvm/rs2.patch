@@ -23,6 +23,28 @@
  const char EnvPathSeparator = ';';
  #endif
  
+--- a/llvm/include/llvm/TargetParser/Triple.h
++++ b/llvm/include/llvm/TargetParser/Triple.h
+@@ -243,7 +243,8 @@
+     LiteOS,
+     Serenity,
+     Vulkan, // Vulkan SPIR-V
+-    LastOSType = Vulkan
++    RS2,    // rs2, 64-bit OS/2 API
++    LastOSType = RS2
+   };
+   enum EnvironmentType {
+     UnknownEnvironment,
+@@ -1164,7 +1165,8 @@
+   /// Note: Android API level 29 (10) introduced ELF TLS.
+   bool hasDefaultEmulatedTLS() const {
+     return (isAndroid() && isAndroidVersionLT(29)) || isOSOpenBSD() ||
+-           isWindowsCygwinEnvironment() || isOHOSFamily();
++           isWindowsCygwinEnvironment() || isOHOSFamily() ||
++           getOS() == Triple::RS2;
+   }
+ 
+   /// True if the target uses TLSDESC by default.
 --- a/llvm/lib/Support/LockFileManager.cpp
 +++ b/llvm/lib/Support/LockFileManager.cpp
 @@ -111,7 +111,7 @@
@@ -58,18 +80,17 @@
      // Try to open + create the file.
      switch (Type) {
      case FS_File: {
-@@ -188,7 +193,16 @@
-         // errc::permission_denied happens on Windows when we try to open a file
+@@ -189,6 +194,15 @@
          // that has been marked for deletion.
          if (EC == errc::file_exists || EC == errc::permission_denied)
-+          continue;
+           continue;
 +#if defined(__RS2__)
 +        // FAT: a name of 8 characters and an extension of 3.
 +        if (EC == errc::filename_too_long &&
 +            !StringRef(UseModel).ends_with(".TMP")) {
 +          sys::path::remove_filename(UseModel);
 +          sys::path::append(UseModel, "%%%%%%%%.TMP");
-           continue;
++          continue;
 +        }
 +#endif
          return EC;
@@ -218,3 +239,401 @@
    return raw_fd_stream::read(Ptr, Size);
  }
 +#endif // __RS2__
+--- a/llvm/lib/TargetParser/Triple.cpp
++++ b/llvm/lib/TargetParser/Triple.cpp
+@@ -309,6 +309,7 @@
+   case OpenBSD: return "openbsd";
+   case PS4: return "ps4";
+   case PS5: return "ps5";
++  case RS2: return "rs2";
+   case RTEMS: return "rtems";
+   case Solaris: return "solaris";
+   case Serenity: return "serenity";
+@@ -717,6 +718,7 @@
+     .StartsWith("liteos", Triple::LiteOS)
+     .StartsWith("serenity", Triple::Serenity)
+     .StartsWith("vulkan", Triple::Vulkan)
++    .StartsWith("rs2", Triple::RS2)
+     .Default(Triple::UnknownOS);
+ }
+ 
+--- a/clang/lib/Basic/Targets/OSTargets.h
++++ b/clang/lib/Basic/Targets/OSTargets.h
+@@ -398,6 +398,20 @@
+   }
+ };
+ 
++// rs2 Target
++template <typename Target>
++class LLVM_LIBRARY_VISIBILITY RS2TargetInfo : public OSTargetInfo<Target> {
++protected:
++  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
++                    MacroBuilder &Builder) const override {
++    Builder.defineMacro("__RS2__");
++    Builder.defineMacro("__OS2__");
++  }
++
++public:
++  using OSTargetInfo<Target>::OSTargetInfo;
++};
++
+ // Managarm Target
+ template <typename Target>
+ class LLVM_LIBRARY_VISIBILITY ManagarmTargetInfo : public OSTargetInfo<Target> {
+--- a/clang/lib/Basic/Targets.cpp
++++ b/clang/lib/Basic/Targets.cpp
+@@ -663,6 +663,8 @@
+     case llvm::Triple::Managarm:
+       return std::make_unique<ManagarmTargetInfo<X86_64TargetInfo>>(Triple,
+                                                                     Opts);
++    case llvm::Triple::RS2:
++      return std::make_unique<RS2TargetInfo<X86_64TargetInfo>>(Triple, Opts);
+     default:
+       return std::make_unique<X86_64TargetInfo>(Triple, Opts);
+     }
+--- a/clang/lib/Driver/CMakeLists.txt
++++ b/clang/lib/Driver/CMakeLists.txt
+@@ -67,6 +67,7 @@
+   ToolChains/Hurd.cpp
+   ToolChains/Linux.cpp
+   ToolChains/Managarm.cpp
++  ToolChains/RS2.cpp
+   ToolChains/MipsLinux.cpp
+   ToolChains/MinGW.cpp
+   ToolChains/MSP430.cpp
+--- a/clang/lib/Driver/Driver.cpp
++++ b/clang/lib/Driver/Driver.cpp
+@@ -34,6 +34,7 @@
+ #include "ToolChains/MSP430.h"
+ #include "ToolChains/MSVC.h"
+ #include "ToolChains/Managarm.h"
++#include "ToolChains/RS2.h"
+ #include "ToolChains/MinGW.h"
+ #include "ToolChains/MipsLinux.h"
+ #include "ToolChains/NaCl.h"
+@@ -6109,7 +6110,7 @@
+ 
+ const char *Driver::getDefaultImageName() const {
+   llvm::Triple Target(llvm::Triple::normalize(TargetTriple));
+-  return Target.isOSWindows() ? "a.exe" : "a.out";
++  return Target.isOSWindows() || Target.getOS() == llvm::Triple::RS2 ? "a.exe" : "a.out";
+ }
+ 
+ /// Create output filename based on ArgValue, which could either be a
+@@ -6846,6 +6847,9 @@
+       break;
+     case llvm::Triple::Fuchsia:
+       TC = std::make_unique<toolchains::Fuchsia>(*this, Target, Args);
++      break;
++    case llvm::Triple::RS2:
++      TC = std::make_unique<toolchains::RS2>(*this, Target, Args);
+       break;
+     case llvm::Triple::Managarm:
+       TC = std::make_unique<toolchains::Managarm>(*this, Target, Args);
+--- a/clang/lib/Driver/ToolChains/RS2.cpp
++++ b/clang/lib/Driver/ToolChains/RS2.cpp
+@@ -0,0 +1,162 @@
++//===--- RS2.cpp - rs2 (64-bit OS/2 API) ToolChain --------------*- C++ -*-===//
++//
++// Part of rs2's LLVM patch (userland64/llvm/rs2.patch). Compiles and links
++// as rs2's userland64/c/cc64.sh does. The SDK is the directory above the
++// one clang is in, or --sysroot: include, include/c++/{config,v1,abi}, lib.
++//
++//===----------------------------------------------------------------------===//
++
++#include "RS2.h"
++#include "clang/Driver/CommonArgs.h"
++#include "clang/Driver/Compilation.h"
++#include "clang/Driver/Driver.h"
++#include "clang/Driver/Options.h"
++#include "llvm/Support/FileSystem.h"
++#include "llvm/Support/Path.h"
++
++using namespace clang::driver;
++using namespace clang::driver::tools;
++using namespace clang::driver::toolchains;
++using namespace clang;
++using namespace llvm::opt;
++
++void rs2::Linker::ConstructJob(Compilation &C, const JobAction &JA,
++                               const InputInfo &Output,
++                               const InputInfoList &Inputs,
++                               const ArgList &Args,
++                               const char *LinkingOutput) const {
++  const auto &TC = static_cast<const toolchains::RS2 &>(getToolChain());
++  const Driver &D = TC.getDriver();
++  ArgStringList CmdArgs;
++  auto Lib = [&](StringRef Name) {
++    return Args.MakeArgString(TC.sysRootPath("lib", Name));
++  };
++
++  Args.ClaimAllArgs(options::OPT_g_Group);
++  Args.ClaimAllArgs(options::OPT_emit_llvm);
++  Args.ClaimAllArgs(options::OPT_w);
++  Args.ClaimAllArgs(options::OPT_pie);
++  Args.ClaimAllArgs(options::OPT_stdlib_EQ);
++  Args.claimAllArgs(options::OPT_pthread, options::OPT_pthreads);
++
++  CmdArgs.append({"-flavor", "gnu"});
++  const char *Exec = Args.MakeArgString(TC.GetLinkerPath());
++  if (Args.hasArg(options::OPT_r)) {
++    CmdArgs.append({"-r", "-o", Output.getFilename()});
++    AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
++    C.addCommand(std::make_unique<Command>(
++        JA, *this, ResponseFileSupport::AtFileCurCP(), Exec, CmdArgs, Inputs,
++        Output));
++    return;
++  }
++
++  const bool Shared = Args.hasArg(options::OPT_shared);
++  const bool Static = Args.hasArg(options::OPT_static);
++  // Programs and DLLs are both ELF shared objects to the linker.
++  CmdArgs.push_back("-shared");
++  if (!Args.hasArg(options::OPT_T))
++    CmdArgs.append({"-T", Lib("link64.ld")});
++  CmdArgs.append({"--no-rosegment", "-nostdlib", "-z", "now", "-z", "norelro",
++                  "-Bsymbolic", "--hash-style=sysv", "--gc-sections",
++                  "--eh-frame-hdr", "--exclude-libs=ALL", "--as-needed",
++                  "--rs2-imports"});
++  CmdArgs.append({"--export-dynamic-symbol=RS2_APPTYPE",
++                  "--export-dynamic-symbol=RS2_RESOURCES"});
++  if (Shared) {
++    // What a module that needs this DLL calls it.
++    std::string Name =
++        llvm::sys::path::filename(Output.getFilename()).upper();
++    if (StringRef(Name).ends_with(".DLL"))
++      Name.resize(Name.size() - 4);
++    CmdArgs.push_back(Args.MakeArgString("-soname=" + Name));
++  }
++  CmdArgs.append({"-o", Output.getFilename()});
++
++  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
++    if (Args.hasArg(options::OPT_mwindows))
++      CmdArgs.push_back(Lib("pmapp.o"));
++    if (Shared)
++      CmdArgs.append({Lib("dllstart.o"), Lib("crtdll.o")});
++    else if (!Static)
++      CmdArgs.push_back(Lib("crt1.o"));
++  } else {
++    Args.ClaimAllArgs(options::OPT_mwindows);
++  }
++
++  Args.addAllArgs(CmdArgs, {options::OPT_L, options::OPT_T_Group,
++                            options::OPT_s, options::OPT_t});
++  CmdArgs.push_back(Args.MakeArgString("-L" + TC.sysRootPath("lib")));
++  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
++
++  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
++    if (D.CCCIsCXX() && TC.ShouldLinkCXXStdlib(Args))
++      CmdArgs.push_back(Lib(Static ? "libcxx64s.a" : "LIBCXX64.DLL"));
++    if (!Args.hasArg(options::OPT_nolibc))
++      CmdArgs.push_back(Lib(Static ? "libc.a" : "libc64.a"));
++  }
++
++  C.addCommand(std::make_unique<Command>(JA, *this,
++                                         ResponseFileSupport::AtFileCurCP(),
++                                         Exec, CmdArgs, Inputs, Output));
++}
++
++RS2::RS2(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
++    : ToolChain(D, Triple, Args) {
++  getProgramPaths().push_back(D.Dir);
++  getFilePaths().push_back(sysRootPath("lib"));
++}
++
++std::string RS2::computeSysRoot() const {
++  if (!getDriver().SysRoot.empty())
++    return getDriver().SysRoot;
++  return llvm::sys::path::parent_path(getDriver().Dir).str();
++}
++
++std::string RS2::sysRootPath(StringRef A, StringRef B, StringRef C) const {
++  SmallString<128> P(computeSysRoot());
++  llvm::sys::path::append(P, A, B, C);
++  return std::string(P);
++}
++
++void RS2::addClangTargetOptions(const ArgList &DriverArgs,
++                                ArgStringList &CC1Args,
++                                Action::OffloadKind) const {
++  if (!DriverArgs.hasArg(options::OPT_fvisibility_EQ))
++    CC1Args.push_back("-fvisibility=hidden");
++  if (!DriverArgs.hasArg(options::OPT_fvisibility_inlines_hidden,
++                         options::OPT_fno_visibility_inlines_hidden))
++    CC1Args.push_back("-fvisibility-inlines-hidden");
++  if (!DriverArgs.hasArg(options::OPT_fplt, options::OPT_fno_plt))
++    CC1Args.push_back("-fno-plt");
++  // Stacks grow over a guard page.
++  if (!DriverArgs.hasArg(options::OPT_fstack_clash_protection,
++                         options::OPT_fno_stack_clash_protection))
++    CC1Args.push_back("-fstack-clash-protection");
++  if (!DriverArgs.hasArg(options::OPT_static))
++    CC1Args.push_back("-D_RS2_LIBC_DLL");
++}
++
++void RS2::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
++                                    ArgStringList &CC1Args) const {
++  if (DriverArgs.hasArg(options::OPT_nostdinc))
++    return;
++  // rs2's C headers come before clang's.
++  if (!DriverArgs.hasArg(options::OPT_nostdlibinc))
++    addSystemInclude(DriverArgs, CC1Args, sysRootPath("include"));
++  if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
++    SmallString<128> P(getDriver().ResourceDir);
++    llvm::sys::path::append(P, "include");
++    addSystemInclude(DriverArgs, CC1Args, P);
++  }
++}
++
++void RS2::AddClangCXXStdlibIncludeArgs(const ArgList &DriverArgs,
++                                       ArgStringList &CC1Args) const {
++  if (DriverArgs.hasArg(options::OPT_nostdinc, options::OPT_nostdlibinc,
++                        options::OPT_nostdincxx))
++    return;
++  for (const char *Dir : {"config", "v1", "abi"})
++    addSystemInclude(DriverArgs, CC1Args, sysRootPath("include", "c++", Dir));
++}
++
++Tool *RS2::buildLinker() const { return new tools::rs2::Linker(*this); }
+--- a/clang/lib/Driver/ToolChains/RS2.h
++++ b/clang/lib/Driver/ToolChains/RS2.h
+@@ -0,0 +1,84 @@
++//===--- RS2.h - rs2 (64-bit OS/2 API) ToolChain ----------------*- C++ -*-===//
++//
++// Part of rs2's LLVM patch (userland64/llvm/rs2.patch).
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_RS2_H
++#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_RS2_H
++
++#include "clang/Driver/Tool.h"
++#include "clang/Driver/ToolChain.h"
++
++namespace clang {
++namespace driver {
++namespace tools {
++namespace rs2 {
++class LLVM_LIBRARY_VISIBILITY Linker final : public Tool {
++public:
++  Linker(const ToolChain &TC) : Tool("rs2::Linker", "lld", TC) {}
++  bool hasIntegratedCPP() const override { return false; }
++  bool isLinkJob() const override { return true; }
++  void ConstructJob(Compilation &C, const JobAction &JA,
++                    const InputInfo &Output, const InputInfoList &Inputs,
++                    const llvm::opt::ArgList &TCArgs,
++                    const char *LinkingOutput) const override;
++};
++} // end namespace rs2
++} // end namespace tools
++
++namespace toolchains {
++
++class LLVM_LIBRARY_VISIBILITY RS2 : public ToolChain {
++public:
++  RS2(const Driver &D, const llvm::Triple &Triple,
++      const llvm::opt::ArgList &Args);
++
++  bool HasNativeLLVMSupport() const override { return true; }
++  bool IsIntegratedAssemblerDefault() const override { return true; }
++  bool IsMathErrnoDefault() const override { return true; }
++  bool isPICDefault() const override { return true; }
++  bool isPIEDefault(const llvm::opt::ArgList &Args) const override {
++    return false;
++  }
++  bool isPICDefaultForced() const override { return false; }
++  UnwindTableLevel
++  getDefaultUnwindTableLevel(const llvm::opt::ArgList &Args) const override {
++    return UnwindTableLevel::Asynchronous;
++  }
++  RuntimeLibType GetDefaultRuntimeLibType() const override {
++    return ToolChain::RLT_CompilerRT;
++  }
++  CXXStdlibType GetDefaultCXXStdlibType() const override {
++    return ToolChain::CST_Libcxx;
++  }
++
++  void
++  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
++                        llvm::opt::ArgStringList &CC1Args,
++                        Action::OffloadKind DeviceOffloadKind) const override;
++  void
++  AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                            llvm::opt::ArgStringList &CC1Args) const override;
++  void
++  AddClangCXXStdlibIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                               llvm::opt::ArgStringList &CC1Args) const override;
++
++#if defined(__RS2__)
++  const char *getDefaultLinker() const override { return "lld.exe"; }
++#else
++  const char *getDefaultLinker() const override { return "lld"; }
++#endif
++
++  std::string computeSysRoot() const override;
++  std::string sysRootPath(StringRef A, StringRef B = "", StringRef C = "") const;
++
++protected:
++  Tool *buildLinker() const override;
++};
++
++} // end namespace toolchains
++} // end namespace driver
++} // end namespace clang
++
++#endif // LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_RS2_H
+--- a/clang/lib/Lex/InitHeaderSearch.cpp
++++ b/clang/lib/Lex/InitHeaderSearch.cpp
+@@ -227,6 +227,7 @@
+   case llvm::Triple::OpenBSD:
+   case llvm::Triple::PS4:
+   case llvm::Triple::PS5:
++  case llvm::Triple::RS2:
+   case llvm::Triple::RTEMS:
+   case llvm::Triple::Solaris:
+   case llvm::Triple::UEFI:
+--- a/lld/ELF/Config.h
++++ b/lld/ELF/Config.h
+@@ -364,6 +364,7 @@
+   std::optional<uint64_t> randomizeSectionPadding;
+   bool rejectMismatch;
+   bool relax;
++  bool rs2Imports;
+   bool relaxGP;
+   bool relocatable;
+   bool resolveGroups;
+--- a/lld/ELF/Driver.cpp
++++ b/lld/ELF/Driver.cpp
+@@ -1481,6 +1481,7 @@
+   ctx.arg.mmapOutputFile =
+       args.hasFlag(OPT_mmap_output_file, OPT_no_mmap_output_file, false);
+   ctx.arg.nmagic = args.hasFlag(OPT_nmagic, OPT_no_nmagic, false);
++  ctx.arg.rs2Imports = args.hasArg(OPT_rs2_imports);
+   ctx.arg.noinhibitExec = args.hasArg(OPT_noinhibit_exec);
+   ctx.arg.nostdlib = args.hasArg(OPT_nostdlib);
+   ctx.arg.oFormatBinary = isOutputFormatBinary(ctx, args);
+--- a/lld/ELF/Options.td
++++ b/lld/ELF/Options.td
+@@ -567,6 +567,9 @@
+     "Warn about problems with the symbol ordering file (default)",
+     "Do not warn about problems with the symbol ordering file">;
+ 
++def rs2_imports: F<"rs2-imports">,
++  HelpText<"rs2: only MODULE.name symbols may be undefined">;
++
+ def warn_unresolved_symbols: F<"warn-unresolved-symbols">,
+   HelpText<"Report unresolved symbols as warnings">;
+ 
+--- a/lld/ELF/Relocations.cpp
++++ b/lld/ELF/Relocations.cpp
+@@ -801,7 +801,9 @@
+     return false;
+ 
+   bool canBeExternal = !sym.isLocal() && sym.visibility() == STV_DEFAULT;
+-  if (ctx.arg.unresolvedSymbols == UnresolvedPolicy::Ignore && canBeExternal)
++  if (ctx.arg.unresolvedSymbols == UnresolvedPolicy::Ignore && canBeExternal &&
++      // --rs2-imports: MODULE.name is for rs2's loader to find.
++      (!ctx.arg.rs2Imports || sym.getName().contains('.')))
+     return false;
+ 
+   // clang (as of 2019-06-12) / gcc (as of 8.2.1) PPC64 may emit a .rela.toc

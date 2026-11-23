@@ -12,7 +12,7 @@ char *_rs2_build_args(const char *prog, char *const argv[]) {
     size_t len = strlen(prog) + 4;
     for (int i = 1; argv && argv[i]; i++)
         len += strlen(argv[i]) * 2 + 3;
-    char *b = malloc(len), *p = b;
+    char *b = _rs2_low_alloc(len), *p = b;
     if (!b)
         return 0;
     p = stpcpy(p, prog) + 1;
@@ -47,7 +47,7 @@ static int run_env(int mode, const char *path, char *const argv[], char *env) {
     char failed[260];
     RESULTCODES rc;
     APIRET r = DosExecPgm((PCHAR)failed, sizeof failed, mode == P_WAIT ? EXEC_SYNC : EXEC_ASYNCRESULT, (PCSZ)args,
-                          (PCSZ)env, &rc, (PCSZ)path);
+                          (PCSZ)env, &rc, LOW(path));
     free(args);
     free(env);
     if (r)
@@ -85,7 +85,7 @@ static int search(const char *file, char *out, size_t n) {
         strlcpy(out, name, n);
         return 0;
     }
-    APIRET rc = DosSearchPath(2 /* SEARCH_ENVIRONMENT */ | 1 /* SEARCH_CUR_DIRECTORY */, (PCSZ) "PATH", (PCSZ)name,
+    APIRET rc = DosSearchPath(2 /* SEARCH_ENVIRONMENT */ | 1 /* SEARCH_CUR_DIRECTORY */, (PCSZ) "PATH", LOW(name),
                               (PBYTE)out, (ULONG)n);
     return rc ? _rs2_oserr(rc) : 0;
 }
@@ -146,7 +146,7 @@ int system(const char *cmd) {
     if (!cmd)
         return access(shell, F_OK) == 0 || 1;
     size_t n = strlen(shell), c = strlen(cmd);
-    char *args = malloc(n + c + 8);
+    char *args = _rs2_low_alloc(n + c + 8);
     char *env = _rs2_env_block();
     if (!args || !env) {
         free(args);
@@ -160,7 +160,7 @@ int system(const char *cmd) {
     *p = 0;
     char failed[260];
     RESULTCODES rc;
-    APIRET r = DosExecPgm((PCHAR)failed, sizeof failed, EXEC_SYNC, (PCSZ)args, (PCSZ)env, &rc, (PCSZ)shell);
+    APIRET r = DosExecPgm((PCHAR)failed, sizeof failed, EXEC_SYNC, (PCSZ)args, (PCSZ)env, &rc, LOW(shell));
     free(args);
     free(env);
     if (r)

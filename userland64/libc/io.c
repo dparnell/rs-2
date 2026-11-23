@@ -189,11 +189,11 @@ int open(const char *path, int flags, ...) {
         omode |= OPEN_FLAGS_NOINHERIT;
     ULONG attr = (flags & O_CREAT) && !(mode & S_IWUSR) ? FILE_READONLY : FILE_NORMAL;
     HFILE h = 0;
-    APIRET rc = DosOpenL((PCSZ)path, &h, &act, 0, attr, oflag, omode, 0);
+    APIRET rc = DosOpenL(LOW(path), &h, &act, 0, attr, oflag, omode, 0);
     if (rc) {
         if (rc == ERROR_ACCESS_DENIED) {
             FILESTATUS3 st;
-            if (DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY)) {
+            if (DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY)) {
                 errno = EISDIR;
                 return -1;
             }
@@ -397,7 +397,7 @@ int isatty(int fd) {
 
 int access(const char *path, int mode) {
     FILESTATUS3 st;
-    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    APIRET rc = DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st);
     if (rc) {
         /* The root of a drive has no directory entry. */
         if (path[0] && path[1] == ':' && (!path[2] || ((path[2] == '\\' || path[2] == '/') && !path[3]))) {
@@ -413,10 +413,10 @@ int access(const char *path, int mode) {
 }
 
 int unlink(const char *path) {
-    APIRET rc = DosDelete((PCSZ)path);
+    APIRET rc = DosDelete(LOW(path));
     if (rc == ERROR_ACCESS_DENIED) {
         FILESTATUS3 st;
-        if (DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY)) {
+        if (DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY)) {
             errno = EISDIR;
             return -1;
         }
@@ -426,26 +426,26 @@ int unlink(const char *path) {
 
 int remove(const char *path) {
     FILESTATUS3 st;
-    if (DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY))
+    if (DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st) == 0 && (st.attrFile & FILE_DIRECTORY))
         return rmdir(path);
     return unlink(path);
 }
 
 int rename(const char *from, const char *to) {
-    APIRET rc = DosMove((PCSZ)from, (PCSZ)to);
+    APIRET rc = DosMove(LOW(from), LOW(to));
     if (rc == ERROR_ACCESS_DENIED || rc == ERROR_FILE_EXISTS) {
         /* C lets rename replace a file; OS/2 does not. */
         FILESTATUS3 st;
-        if (DosQueryPathInfo((PCSZ)to, FIL_STANDARD, &st, sizeof st) == 0 && !(st.attrFile & FILE_DIRECTORY) &&
-            DosDelete((PCSZ)to) == 0)
-            rc = DosMove((PCSZ)from, (PCSZ)to);
+        if (DosQueryPathInfo(LOW(to), FIL_STANDARD, &st, sizeof st) == 0 && !(st.attrFile & FILE_DIRECTORY) &&
+            DosDelete(LOW(to)) == 0)
+            rc = DosMove(LOW(from), LOW(to));
     }
     return rc ? _rs2_oserr(rc) : 0;
 }
 
 int mkdir(const char *path, mode_t mode) {
     (void)mode;
-    APIRET rc = DosCreateDir((PCSZ)path, 0);
+    APIRET rc = DosCreateDir(LOW(path), 0);
     if (rc == ERROR_ACCESS_DENIED && access(path, F_OK) == 0) {
         errno = EEXIST;
         return -1;
@@ -454,7 +454,7 @@ int mkdir(const char *path, mode_t mode) {
 }
 
 int rmdir(const char *path) {
-    APIRET rc = DosDeleteDir((PCSZ)path);
+    APIRET rc = DosDeleteDir(LOW(path));
     return rc ? _rs2_oserr(rc) : 0;
 }
 
@@ -477,7 +477,7 @@ int chdir(const char *path) {
         if (!path[2])
             return 0;
     }
-    APIRET rc = DosSetCurrentDir((PCSZ)path);
+    APIRET rc = DosSetCurrentDir(LOW(path));
     return rc ? _rs2_oserr(rc) : 0;
 }
 
@@ -542,7 +542,7 @@ static void fill_stat(struct stat *s, const FILESTATUS3 *st, int drive) {
 int stat(const char *path, struct stat *s) {
     FILESTATUS3 st;
     int drive = path_drive(path);
-    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    APIRET rc = DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st);
     if (rc) {
         if (path[0] && path[1] == ':' && (!path[2] || ((path[2] == '\\' || path[2] == '/') && !path[3]))) {
             memset(s, 0, sizeof *s);
@@ -589,12 +589,12 @@ int fstat(int fd, struct stat *s) {
 
 int chmod(const char *path, mode_t mode) {
     FILESTATUS3 st;
-    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    APIRET rc = DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st);
     if (rc)
         return _rs2_oserr(rc);
     st.attrFile = mode & S_IWUSR ? st.attrFile & ~FILE_READONLY : st.attrFile | FILE_READONLY;
     st.attrFile &= FILE_READONLY | FILE_HIDDEN | FILE_SYSTEM | FILE_ARCHIVED;
-    rc = DosSetPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st, 0);
+    rc = DosSetPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st, 0);
     return rc ? _rs2_oserr(rc) : 0;
 }
 
@@ -643,7 +643,7 @@ DIR *opendir(const char *path) {
         errno = ENOTDIR;
         return 0;
     }
-    DIR *d = calloc(1, sizeof *d);
+    DIR *d = _rs2_low_alloc(sizeof *d);   /* zeroed */
     if (!d)
         return 0;
     memcpy(d->pattern, path, n);

@@ -26,7 +26,7 @@ char *getenv(const char *name) {
     if (!environ) {
         /* In a DLL, or before start-up: ask the system. */
         PSZ v = 0;
-        return DosScanEnv((PCSZ)name, (PPVOID)&v) == 0 ? (char *)v : 0;
+        return DosScanEnv(LOW(name), (PPVOID)&v) == 0 ? (char *)v : 0;
     }
     char **e = find(name, strlen(name));
     return e ? *e + strlen(name) + 1 : 0;
@@ -108,7 +108,7 @@ char *_rs2_env_block(void) {
     if (environ)
         for (char **e = environ; *e; e++)
             len += strlen(*e) + 1;
-    char *b = malloc(len + 1), *p = b;
+    char *b = _rs2_low_alloc(len + 1), *p = b;
     if (!b)
         return 0;
     if (environ)

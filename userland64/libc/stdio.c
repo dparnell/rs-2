@@ -772,7 +772,7 @@ FILE *popen(const char *cmd, const char *mode) {
     char *argv[] = {(char *)shell, "/c", (char *)cmd, 0};
     /* The command goes to the shell as one string, unquoted. */
     size_t n = strlen(shell), c = strlen(cmd);
-    char *args = malloc(n + c + 8), *p = args;
+    char *args = _rs2_low_alloc(n + c + 8), *p = args;
     char *env = _rs2_env_block();
     int pid = -1;
     (void)argv;
@@ -783,7 +783,7 @@ FILE *popen(const char *cmd, const char *mode) {
         *p = 0;
         char failed[260];
         RESULTCODES rc;
-        APIRET r = DosExecPgm((PCHAR)failed, sizeof failed, EXEC_ASYNCRESULT, (PCSZ)args, (PCSZ)env, &rc, (PCSZ)shell);
+        APIRET r = DosExecPgm((PCHAR)failed, sizeof failed, EXEC_ASYNCRESULT, (PCSZ)args, (PCSZ)env, &rc, LOW(shell));
         if (r)
             _rs2_oserr(r);
         else
