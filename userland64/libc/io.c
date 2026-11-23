@@ -17,6 +17,26 @@
 unsigned char _rs2_fdflags[_RS2_FD_MAX] = {_RS2_FD_TEXT, _RS2_FD_TEXT, _RS2_FD_TEXT};
 static unsigned char peek[_RS2_FD_MAX];
 
+/* A file's identity (st_ino): its full path, without case. OS/2 does not
+ * say which file a handle has: open remembers. */
+static ino_t fdino[_RS2_FD_MAX];
+static unsigned char fddev[_RS2_FD_MAX];
+
+static int path_drive(const char *path) {
+    return path[0] && path[1] == ':' ? (path[0] | 0x20) - 'a' : _getdrive() - 1;
+}
+
+static ino_t path_ino(const char *path) {
+    extern char *_fullpath(char *, const char *, size_t);
+    char full[300];
+    if (!_fullpath(full, path, sizeof full))
+        return 0;
+    ino_t h = 0xcbf29ce484222325UL;
+    for (const char *p = full; *p; p++)
+        h = (h ^ (unsigned char)(*p >= 'a' && *p <= 'z' ? *p - 32 : *p)) * 0x100000001b3UL;
+    return h;
+}
+
 int _rs2_fdflag(int fd) {
     return fd >= 0 && fd < _RS2_FD_MAX ? _rs2_fdflags[fd] : 0;
 }
@@ -198,6 +218,10 @@ int open(const char *path, int flags, ...) {
     if (flags & O_NOINHERIT)
         f |= _RS2_FD_NOINHERIT;
     setflags((int)h, f);
+    if (h < _RS2_FD_MAX) {
+        fdino[h] = path_ino(path);
+        fddev[h] = (unsigned char)path_drive(path);
+    }
     return (int)h;
 }
 
@@ -269,6 +293,8 @@ int dup(int fd) {
     if (rc)
         return _rs2_oserr(rc);
     setflags((int)h, _rs2_fdflag(fd) & (_RS2_FD_TEXT | _RS2_FD_APPEND));
+    if (h < _RS2_FD_MAX && fd >= 0 && fd < _RS2_FD_MAX)
+        fdino[h] = fdino[fd], fddev[h] = fddev[fd];
     return (int)h;
 }
 
@@ -324,6 +350,33 @@ int fcntl(int fd, int cmd, ...) {
             f |= O_APPEND;
         f |= _rs2_fdflag(fd) & _RS2_FD_TEXT ? O_TEXT : O_BINARY;
         return f;
+    }
+    case F_SETFL:
+        return 0;
+    case F_SETLK:
+    case F_SETLKW: {
+        va_list ap;
+        va_start(ap, cmd);
+        struct flock *l = va_arg(ap, struct flock *);
+        va_end(ap);
+        FILELOCK none = {0, 0};
+        FILELOCK r = {(LONG)l->l_start, l->l_len ? (LONG)l->l_len : 0x7fffffff};
+        if (l->l_type == F_UNLCK) {
+            APIRET rc = DosSetFileLocks((HFILE)fd, &r, &none, 0, 0);
+            return rc && rc != 33 ? _rs2_oserr(rc) : 0;
+        }
+        for (;;) {
+            APIRET rc = DosSetFileLocks((HFILE)fd, &none, &r, cmd == F_SETLK ? 0 : 1000, l->l_type == F_RDLCK);
+            if (!rc)
+                return 0;
+            if (rc != 33 && rc != 232 && rc != 640)
+                return _rs2_oserr(rc);
+            if (cmd == F_SETLK) {
+                errno = EACCES;
+                return -1;
+            }
+            DosSleep(10);
+        }
     }
     }
     errno = EINVAL;
@@ -479,6 +532,8 @@ static void fill_stat(struct stat *s, const FILESTATUS3 *st, int drive) {
     if (st->attrFile & FILE_READONLY)
         s->st_mode &= ~0222;
     s->st_size = st->cbFile;
+    s->st_blksize = 4096;
+    s->st_blocks = (st->cbFileAlloc + 511) / 512;
     s->st_mtime = file_time(st->fdateLastWrite, st->ftimeLastWrite);
     s->st_atime = st->fdateLastAccess.date ? file_time(st->fdateLastAccess, st->ftimeLastAccess) : s->st_mtime;
     s->st_ctime = st->fdateCreation.date ? file_time(st->fdateCreation, st->ftimeCreation) : s->st_mtime;
@@ -486,7 +541,7 @@ static void fill_stat(struct stat *s, const FILESTATUS3 *st, int drive) {
 
 int stat(const char *path, struct stat *s) {
     FILESTATUS3 st;
-    int drive = path[0] && path[1] == ':' ? (path[0] | 0x20) - 'a' : _getdrive() - 1;
+    int drive = path_drive(path);
     APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
     if (rc) {
         if (path[0] && path[1] == ':' && (!path[2] || ((path[2] == '\\' || path[2] == '/') && !path[3]))) {
@@ -500,6 +555,7 @@ int stat(const char *path, struct stat *s) {
         return _rs2_oserr(rc);
     }
     fill_stat(s, &st, drive);
+    s->st_ino = path_ino(path);
     return 0;
 }
 
@@ -522,7 +578,9 @@ int fstat(int fd, struct stat *s) {
     rc = DosQueryFileInfo((HFILE)fd, FIL_STANDARD, &st, sizeof st);
     if (rc)
         return _rs2_oserr(rc);
-    fill_stat(s, &st, _getdrive() - 1);
+    fill_stat(s, &st, fd < _RS2_FD_MAX ? fddev[fd] : 0);
+    if (fd < _RS2_FD_MAX)
+        s->st_ino = fdino[fd];
     off_t len = filelength(fd);
     if (len >= 0)
         s->st_size = len;

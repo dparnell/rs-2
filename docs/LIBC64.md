@@ -89,6 +89,7 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
 | --- | --- |
 | `assert.h`, `ctype.h`, `errno.h`, `float.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`, `fenv.h`, `wchar.h`, `wctype.h`, `uchar.h` | C11 (no threads.h, complex.h yet) |
 | `strings.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/stat.h`, `sys/time.h`, `sys/statvfs.h`, `sys/random.h`, `dirent.h`, `alloca.h`, `pthread.h`, `sched.h` | the POSIX subset that portable programs use most |
+| `sys/mman.h`, `sys/resource.h`, `sys/wait.h`, `sys/ioctl.h`, `sys/utsname.h`, `sys/statvfs.h`, `spawn.h`, `dlfcn.h`, `pwd.h`, `sysexits.h`, `endian.h` | more of POSIX, what LLVM uses (below) |
 | `io.h`, `direct.h`, `process.h`, `malloc.h` | what OS/2 and DOS C compilers provide: `setmode`, `filelength`, drives, `_beginthread`, `spawnv`/`spawnvp`, `cwait` |
 
 ## How it maps onto OS/2
@@ -163,6 +164,15 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
   is used if it is set, and local time is UTC otherwise. `clock` counts
   milliseconds from QSV_MS_COUNT since start-up.
 
+- **More of POSIX.** `mmap` gives memory above 4 GB; a file is read into
+  it whole, and a shared writable mapping is written back by `msync` and
+  `munmap` (which takes whole mappings). `posix_spawn` does the file
+  actions in the parent around DosExecPgm, and `waitpid` gives its status
+  in Unix's form; `exec*` runs the program and ends with its result;
+  `fork` fails. `st_ino` is a hash of the full path, kept for open handles.
+  `sigaction` is `signal`; signals cannot be blocked. `fcntl` locks are
+  DosSetFileLocks, which keep others from reading too.
+
 ## Numbers
 
 - **printf** converts floating point exactly: the decimal expansion of a
@@ -205,8 +215,7 @@ and are freed, with their destructors run, when a thread ends by
   functions is safe, but changing a structure's layout (`FILE` is opaque;
   `struct stat`, `struct tm` and `jmp_buf` are not) means rebuilding
   programs.
-- `fork`, `exec*`, `select`, sockets, `mmap`, `uid`/`gid` (there are
-  none on OS/2).
+- `select`, sockets; `fork` and users (there are none on OS/2).
 - `long double` functions in full precision.
 
 ## Tests

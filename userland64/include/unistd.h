@@ -35,7 +35,10 @@ int link(const char *, const char *);
 int symlink(const char *, const char *);
 ssize_t readlink(const char *__restrict, char *__restrict, size_t);
 int getentropy(void *, size_t);
+#define _SC_ARG_MAX 0
+#define _SC_OPEN_MAX 4
 #define _SC_PAGESIZE 30
+#define _SC_GETPW_R_SIZE_MAX 70
 #define _SC_NPROCESSORS_ONLN 84
 long sysconf(int);
 unsigned sleep(unsigned);
@@ -48,6 +51,24 @@ extern int optind _RS2_DATA(optind);
 extern int opterr _RS2_DATA(opterr);
 extern int optopt _RS2_DATA(optopt);
 extern char **environ _RS2_DATA(environ);
+ssize_t pread(int, void *, size_t, off_t);
+ssize_t pwrite(int, const void *, size_t, off_t);
+int getpagesize(void);
+uid_t getuid(void);
+uid_t geteuid(void);
+gid_t getgid(void);
+gid_t getegid(void);
+int gethostname(char *, size_t);
+/* The program's full path. */
+const char *getexecname(void);
+unsigned alarm(unsigned);   /* never raises SIGALRM */
+pid_t fork(void);           /* ENOSYS: use posix_spawn */
+pid_t setsid(void);
+int chown(const char *, uid_t, gid_t);
+int fchown(int, uid_t, gid_t);
+int execv(const char *, char *const[]);
+int execve(const char *, char *const[], char *const[]);
+int execvp(const char *, char *const[]);
 int getopt(int, char *const[], const char *);
 _RS2_END
 #endif

@@ -23,6 +23,11 @@
 #include <dirent.h>
 #include <process.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
+#include <spawn.h>
+#include <dlfcn.h>
 #include <os2.h>
 
 static int failures, checks;
@@ -565,6 +570,63 @@ static void worker(void *arg) {
     __atomic_add_fetch(&counter, 1, __ATOMIC_SEQ_CST);
 }
 
+static volatile int posix_sig;
+static void on_sig(int s) { posix_sig = s; }
+
+static void test_posix(const char *self) {
+    static const char name[] = "CLIBPOS.TMP";
+    char buf[32] = "";
+    int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    write(fd, "0123456789", 10);
+    check("pwrite", pwrite(fd, "ab", 2, 4) == 2 && lseek(fd, 0, SEEK_CUR) == 10);
+    check("pread", pread(fd, buf, 4, 3) == 4 && !strcmp(buf, "3ab6") && lseek(fd, 0, SEEK_CUR) == 10);
+    struct stat a, b, c;
+    check("st_ino by path and handle", stat(name, &a) == 0 && fstat(fd, &b) == 0 && a.st_ino && a.st_ino == b.st_ino && a.st_dev == b.st_dev);
+    check("st_ino differs", stat("C:\\CONFIG.SYS", &c) != 0 || c.st_ino != a.st_ino);
+    struct timespec ts[2] = {{1500000000, 0}, {1500000000, 0}};
+    check("futimens", futimens(fd, ts) == 0);
+    /* Private, shared and anonymous mappings. */
+    char *m = mmap(0, 10, PROT_READ, MAP_PRIVATE, fd, 0);
+    check("mmap private", m != MAP_FAILED && !memcmp(m, "0123ab6789", 10) && munmap(m, 10) == 0);
+    ftruncate(fd, 100000);
+    m = mmap(0, 100000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    int ok = m != MAP_FAILED;
+    if (ok) {
+        memset(m + 10, 'x', 99990);
+        m[99999] = 'y';
+        ok = munmap(m, 100000) == 0;
+    }
+    check("mmap shared, written back", ok && pread(fd, buf, 2, 99998) == 2 && buf[0] == 'x' && buf[1] == 'y');
+    close(fd);
+    m = mmap(0, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    check("mmap anonymous", m != MAP_FAILED && m[12345] == 0 && (m[12345] = 1) && munmap(m, 1 << 20) == 0);
+    remove(name);
+
+    struct sigaction sa = {0}, old;
+    sa.sa_handler = on_sig;
+    check("sigaction", sigaction(SIGTERM, &sa, &old) == 0 && old.sa_handler == SIG_DFL && raise(SIGTERM) == 0 && posix_sig == SIGTERM);
+    signal(SIGTERM, SIG_DFL);
+
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    char *argv[] = {(char *)self, "child-out", 0};
+    pid_t pid = 0;
+    int st = 0, r = posix_spawn(&pid, self, &fa, 0, argv, 0);
+    posix_spawn_file_actions_destroy(&fa);
+    check("posix_spawn", r == 0 && waitpid(pid, &st, 0) == pid && WIFEXITED(st));
+    memset(buf, 0, sizeof buf);
+    FILE *f = fopen(name, "r");
+    check("posix_spawn output", f && fgets(buf, sizeof buf, f) && !strcmp(buf, "hello from the child\n"));
+    if (f)
+        fclose(f);
+    remove(name);
+    check("posix_spawn missing", posix_spawn(&pid, "NOSUCH.EXE", 0, 0, argv, 0) == ENOENT);
+    void *h = dlopen("CLIBTDLL", RTLD_NOW);
+    check("dlopen and dlsym", h && dlsym(h, "dll_ctor_count") && !dlsym(h, "nothing") && dlclose(h) == 0);
+    check("getexecname", strstr(getexecname(), "CLIBT") != 0);
+}
+
 static int ctor_ran;
 __attribute__((constructor)) static void ctor(void) {
     ctor_ran = 1;
@@ -720,6 +782,7 @@ int main(int argc, char **argv) {
     test_time();
     test_files();
     test_env_threads(argv[0]);
+    test_posix(argv[0]);
     test_shared_dll();
     test_dll_ctors(argv[0]);
     test_cxx_dll();

@@ -81,6 +81,18 @@ freed on either side, classes derived from and caught across, and
 example. A DLL with a C interface can be loaded by any 64-bit program,
 C or Rust, with DosLoadModule: LIBCXX64.DLL is loaded, and ended, with it.
 
+## CMake
+
+`userland64/cmake/rs2.cmake` is a toolchain file: CMake projects build
+with clang and cc64.sh's flags (`cc64.sh --flags C|CXX`), and cc64.sh
+links. Build the libraries first (`cc64.sh --libcxx`):
+
+```text
+cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE=.../userland64/cmake/rs2.cmake ...
+```
+
+LLVM's lld is built this way ([SELF-HOSTING.md](SELF-HOSTING.md)).
+
 ## Limits
 
 - With `--static` each module has its own copy of the C++ library, so

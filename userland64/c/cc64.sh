@@ -6,6 +6,7 @@
 #   cc64.sh -c [--static] [CFLAGS...] FILE.c|.cpp [-o FILE.o]
 #   cc64.sh --libc            (just build the C library)
 #   cc64.sh --libcxx          (just build the C++ library)
+#   cc64.sh --flags C|CXX     (print clang's flags: userland64/cmake)
 #
 # clang (any recent one: Apple's will do) compiles for x86-64 System V
 # with userland64/include as the only system headers; rust-lld links with
@@ -26,7 +27,7 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 ul=$(dirname "$here")
 root=$(dirname "$ul")
-out= pm= dll= rc= compile_only= libc_only= libcxx_only= static= cxx=
+flags= out= pm= dll= rc= compile_only= libc_only= libcxx_only= static= cxx=
 cflags= inputs=
 internal=
 [ "$1" = --internal-cxx ] && { internal=1; shift; }
@@ -37,6 +38,7 @@ while [ -z "$internal" ] && [ $# -gt 0 ]; do
         --pm) pm=1; shift ;;
         --dll) dll=1; shift ;;
         --rc) rc=$2; shift 2 ;;
+        --flags) flags=$2; shift 2 ;;
         --libc) libc_only=1; shift ;;
         --libcxx) libcxx_only=1; shift ;;
         --cxx) cxx=1; shift ;;
@@ -66,6 +68,11 @@ cc() {
     $clang $common -isystem "$ul/include" -fexceptions -fasynchronous-unwind-tables -std=gnu11 -Wall -Wno-pointer-sign "$@"
 }
 llvm=$ul/cxx/llvm
+case "$flags" in
+    C) echo "$common -isystem $ul/include -D_RS2_LIBC_DLL -fexceptions -fasynchronous-unwind-tables"; exit ;;
+    CXX) echo "$common -nostdinc++ -isystem $ul/cxx/config -isystem $llvm/libcxx/include -isystem $llvm/libcxxabi/include" \
+        "-isystem $ul/include -D_RS2_LIBC_DLL -fexceptions -fasynchronous-unwind-tables -fvisibility-inlines-hidden"; exit ;;
+esac
 cxxc() {
     $clang --driver-mode=g++ $common -nostdinc++ -isystem "$ul/cxx/config" -isystem "$llvm/libcxx/include" \
         -isystem "$llvm/libcxxabi/include" -isystem "$ul/include" \
@@ -155,9 +162,12 @@ build_libc() {
     # member, so a program takes only what it calls). Data is imported
     # through the headers' asm labels instead.
     "$nm" -D --defined-only "$dllfile" | awk '$2 == "T" && $3 !~ /^_rs2_/ && $3 != "_start" { print $3 }' > "$libdir/exports.txt"
+    # (Numbered: _exit and _Exit are one file to some file systems.)
+    n=0
     while read -r f; do
+        n=$((n + 1))
         printf '.section .text.%s,"ax",@progbits\n.globl %s\n.hidden %s\n.type %s,@function\n%s:\n    jmp *"LIBC64.%s"@GOTPCREL(%%rip)\n' \
-            "$f" "$f" "$f" "$f" "$f" "$f" > "$libdir/stubs/$f.s"
+            "$f" "$f" "$f" "$f" "$f" "$f" > "$libdir/stubs/$n.s"
     done < "$libdir/exports.txt"
     (cd "$libdir/stubs" && $clang --target=$target -c ./*.s)
     "$ar" rcs "$implib" "$libdir"/stubs/*.o

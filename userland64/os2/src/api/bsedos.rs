@@ -215,6 +215,19 @@ pub type PFILESTATUS3 = *mut FILESTATUS3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct FILELOCK {
+    pub lOffset: LONG,
+    pub lRange: LONG,
+}
+impl Default for FILELOCK {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+pub type PFILELOCK = *mut FILELOCK;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct FILEFINDBUF3 {
     pub oNextEntryOffset: ULONG,
     pub fdateCreation: FDATE,
@@ -491,6 +504,8 @@ unsafe extern "C" {
     pub fn DosQueryHType(hFile: HFILE, pType: PULONG, pAttr: PULONG) -> APIRET;
     #[link_name = "DOSCALLS.221"]
     pub fn DosSetFHState(hFile: HFILE, mode: ULONG) -> APIRET;
+    #[link_name = "DOSCALLS.428"]
+    pub fn DosSetFileLocks(hFile: HFILE, pflUnlock: PFILELOCK, pflLock: PFILELOCK, timeout: ULONG, flags: ULONG) -> APIRET;
     #[link_name = "DOSCALLS.276"]
     pub fn DosQueryFHState(hFile: HFILE, pMode: PULONG) -> APIRET;
     #[link_name = "DOSCALLS.209"]

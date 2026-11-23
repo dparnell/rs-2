@@ -8,6 +8,12 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/ioctl.h>
+#include <stdarg.h>
+#include <pwd.h>
+#include <sys/utsname.h>
+#include <dlfcn.h>
 
 /* One locale, "C". */
 struct _rs2_locale { int unused; };
@@ -149,6 +155,143 @@ int utimes(const char *path, const struct timeval tv[2]) {
     rc = DosSetPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st, 0);
     return rc ? _rs2_oserr(rc) : 0;
 }
+
+static ssize_t at(int fd, off_t off, void *buf, size_t n, int wr) {
+    /* The handle's pointer moves: one at a time. */
+    static _rs2_lock_t lock;
+    _rs2_lock(&lock);
+    off_t old = lseek(fd, 0, SEEK_CUR);
+    ssize_t r = -1;
+    if (old >= 0 && lseek(fd, off, SEEK_SET) >= 0) {
+        if (n > 1u << 30)
+            n = 1u << 30;
+        r = wr ? _rs2_rawwrite(fd, buf, n) : _rs2_rawread(fd, buf, n);
+        lseek(fd, old, SEEK_SET);
+    }
+    _rs2_unlock(&lock);
+    return r;
+}
+ssize_t pread(int fd, void *buf, size_t n, off_t off) { return at(fd, off, buf, n, 0); }
+ssize_t pwrite(int fd, const void *buf, size_t n, off_t off) { return at(fd, off, (void *)buf, n, 1); }
+
+static int set_times(FILESTATUS3 *st, const struct timespec ts[2]) {
+    for (int i = 0; i < 2; i++) {
+        struct tm tm;
+        if (ts && ts[i].tv_nsec == UTIME_OMIT)
+            continue;
+        time_t t = ts && ts[i].tv_nsec != UTIME_NOW ? ts[i].tv_sec : time(0);
+        localtime_r(&t, &tm);
+        if (tm.tm_year < 80 || tm.tm_year > 207)
+            return none(EINVAL);
+        FDATE d = {(USHORT)((tm.tm_year - 80) << 9 | (tm.tm_mon + 1) << 5 | tm.tm_mday)};
+        FTIME m = {(USHORT)(tm.tm_hour << 11 | tm.tm_min << 5 | tm.tm_sec / 2)};
+        if (i == 0)
+            st->fdateLastAccess = d, st->ftimeLastAccess = m;
+        else
+            st->fdateLastWrite = d, st->ftimeLastWrite = m;
+    }
+    st->attrFile &= FILE_READONLY | FILE_HIDDEN | FILE_SYSTEM | FILE_ARCHIVED;
+    return 0;
+}
+int futimens(int fd, const struct timespec ts[2]) {
+    FILESTATUS3 st;
+    APIRET rc = DosQueryFileInfo((HFILE)fd, FIL_STANDARD, &st, sizeof st);
+    if (!rc) {
+        if (set_times(&st, ts))
+            return -1;
+        rc = DosSetFileInfo((HFILE)fd, FIL_STANDARD, &st, sizeof st);
+    }
+    return rc ? _rs2_oserr(rc) : 0;
+}
+int utimensat(int dir, const char *path, const struct timespec ts[2], int flags) {
+    (void)dir;
+    (void)flags;
+    FILESTATUS3 st;
+    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    if (!rc) {
+        if (set_times(&st, ts))
+            return -1;
+        rc = DosSetPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st, 0);
+    }
+    return rc ? _rs2_oserr(rc) : 0;
+}
+
+int fstatvfs(int fd, struct statvfs *s) { (void)fd; return statvfs(".", s); }
+int getpagesize(void) { return 4096; }
+uid_t getuid(void) { return 0; }
+uid_t geteuid(void) { return 0; }
+gid_t getgid(void) { return 0; }
+gid_t getegid(void) { return 0; }
+unsigned alarm(unsigned s) { (void)s; return 0; }
+pid_t setsid(void) { return none(EPERM); }
+int chown(const char *p, uid_t u, gid_t g) { (void)p; (void)u; (void)g; return 0; }
+int fchown(int fd, uid_t u, gid_t g) { (void)fd; (void)u; (void)g; return 0; }
+int gethostname(char *b, size_t n) {
+    const char *h = getenv("HOSTNAME");
+    strlcpy(b, h ? h : "rs2", n);
+    return 0;
+}
+
+int uname(struct utsname *u) {
+    memset(u, 0, sizeof *u);
+    strcpy(u->sysname, "OS/2");
+    gethostname(u->nodename, sizeof u->nodename);
+    strcpy(u->release, "4.52");
+    strcpy(u->version, "rs2");
+    strcpy(u->machine, "x86_64");
+    return 0;
+}
+
+struct passwd *getpwuid(uid_t u) { (void)u; errno = ENOENT; return 0; }
+struct passwd *getpwnam(const char *n) { (void)n; errno = ENOENT; return 0; }
+
+int getrlimit(int what, struct rlimit *r) {
+    r->rlim_cur = r->rlim_max = what == RLIMIT_STACK ? 4 << 20 : what == RLIMIT_NOFILE ? 4096 : RLIM_INFINITY;
+    if (what == RLIMIT_CORE)
+        r->rlim_cur = 0;
+    return 0;
+}
+int setrlimit(int what, const struct rlimit *r) { (void)what; (void)r; return 0; }
+int getrusage(int who, struct rusage *r) {
+    (void)who;
+    memset(r, 0, sizeof *r);
+    ULONG ms = 0;
+    DosQuerySysInfo(QSV_MS_COUNT, QSV_MS_COUNT, &ms, sizeof ms);
+    ms -= _rs2_start_ms;
+    r->ru_utime.tv_sec = ms / 1000;
+    r->ru_utime.tv_usec = ms % 1000 * 1000;
+    return 0;
+}
+int ioctl(int fd, unsigned long req, ...) {
+    va_list ap;
+    va_start(ap, req);
+    struct winsize *w = va_arg(ap, struct winsize *);
+    va_end(ap);
+    if (req == TIOCGWINSZ && isatty(fd)) {
+        memset(w, 0, sizeof *w);
+        w->ws_row = 25;
+        w->ws_col = 80;
+        return 0;
+    }
+    return none(ENOTTY);
+}
+
+void *dlopen(const char *name, int flags) {
+    (void)flags;
+    char fail[260];
+    HMODULE h;
+    if (!name || DosLoadModule((PSZ)fail, sizeof fail, (PCSZ)name, &h))
+        return 0;
+    return (void *)(unsigned long)h;
+}
+void *dlsym(void *__restrict h, const char *__restrict name) {
+    PVOID p = 0;
+    if (!h || DosQueryProcAddr((HMODULE)(unsigned long)h, 0, (PCSZ)name, &p))
+        return 0;
+    return p;
+}
+int dlclose(void *h) { return DosFreeModule((HMODULE)(unsigned long)h) != 0; }
+char *dlerror(void) { return "not found"; }
 
 int statvfs(const char *__restrict path, struct statvfs *__restrict s) {
     ULONG drive = path[0] && path[1] == ':' ? (ULONG)((path[0] | 0x20) - 'a' + 1) : 0;
