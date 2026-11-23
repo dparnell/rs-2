@@ -4,6 +4,7 @@ description = "NAMPIPES.DLL: OS/2 1.x named pipe module, forwarders to the kerne
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "nampipes"

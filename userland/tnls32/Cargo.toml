@@ -4,6 +4,7 @@ description = "TNLS32.DLL: the code page helper IBM's TCP/IP applications import
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "tnls32"

@@ -4,6 +4,7 @@ description = "WINCFG.DLL: IBM's WIN-OS/2 Setup class library, whose class rs2 h
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "wincfg"

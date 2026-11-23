@@ -4,6 +4,7 @@ description = "RXSOCK.DLL: the REXX functions for TCP/IP sockets"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rxsock"

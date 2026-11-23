@@ -15,7 +15,6 @@ use crate::Global;
 
 const ERROR_SUCCESS: u32 = 0;
 const ERROR_BADKEY: u32 = 2;
-const ERROR_CANTOPEN: u32 = 3;
 const ERROR_CANTWRITE: u32 = 5;
 const ERROR_INVALID_PARAMETER: u32 = 7;
 const HKEY_CLASSES_ROOT: u32 = 1;

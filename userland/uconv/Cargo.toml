@@ -4,6 +4,7 @@ description = "UCONV.DLL: conversion between code pages and UCS-2 (rs2's single-
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "uconv"

@@ -4,6 +4,7 @@ description = "NETAPI32.DLL: the 32-bit LAN Server API (Net32*) on rs2's LAN req
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "netapi32"

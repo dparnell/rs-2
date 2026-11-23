@@ -84,7 +84,7 @@ use alloc::vec::Vec;
 
 unsafe extern "C" {
     #[link_name = "PMSHAPI.109"]
-    fn PrfAddProgram(hini: u32, details: *const u32, group: u32) -> u32;
+    fn PrfAddProgram(hini: u32, details: *const u8, group: u32) -> u32;
     #[link_name = "PMSHAPI.117"]
     fn PrfQueryProfileData(hini: u32, app: *const u8, key: *const u8, buf: *mut u8, len: *mut u32) -> u32;
 }
@@ -99,7 +99,8 @@ pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
 
 macro_rules! forward {
     ($($name:ident = $ord:literal;)*) => {$(
-        #[allow(non_snake_case)]
+        // Only jumped to: declared with its real signature elsewhere.
+        #[allow(non_snake_case, clashing_extern_declarations)]
         mod $name {
             unsafe extern "C" {
                 #[link_name = concat!("PMWIN.", stringify!($ord))]
@@ -197,5 +198,5 @@ pub extern "C" fn WinCreateObject(class: *const u8, title: *const u8, setup: *co
     d[5] = ptr(&params);
     d[6] = ptr(&dir);
     d[7] = ptr(&icon);
-    unsafe { PrfAddProgram(HINI_USERPROFILE, d.as_ptr(), group) }
+    unsafe { PrfAddProgram(HINI_USERPROFILE, d.as_ptr().cast(), group) }
 }

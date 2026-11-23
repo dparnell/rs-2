@@ -4,6 +4,7 @@ description = "PMWIN.DLL: Presentation Manager windows, messages and input (and 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmwin"

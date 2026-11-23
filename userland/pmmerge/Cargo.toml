@@ -4,6 +4,7 @@ description = "PMMERGE.DLL: the PMMERGE-only entry points programs import direct
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmmerge"

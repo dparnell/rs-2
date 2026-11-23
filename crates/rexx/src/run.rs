@@ -86,24 +86,6 @@ impl Interp<'_> {
                     mode = Mode::Leave;
                     pc = t;
                 }
-                Ok(Next::Flow(Flow::Leave(name))) => match find_loop(&ctl, code, &name) {
-                    Some((k, idx)) => {
-                        ctl.truncate(k + 1);
-                        mode = Mode::Leave;
-                        pc = idx;
-                    }
-                    None if !main => return Ok(Flow::Leave(name)),
-                    None => return Err(self.fatal(f, code, pc, lvl, 28)),
-                },
-                Ok(Next::Flow(Flow::Iterate(name))) => match find_loop(&ctl, code, &name) {
-                    Some((k, idx)) => {
-                        ctl.truncate(k + 1);
-                        mode = Mode::Again;
-                        pc = idx;
-                    }
-                    None if !main => return Ok(Flow::Iterate(name)),
-                    None => return Err(self.fatal(f, code, pc, lvl, 28)),
-                },
                 Ok(Next::Flow(fl)) => return Ok(fl),
                 Err(Err::Syntax(no)) => {
                     let mut t = cond_index(Cond::Syntax);

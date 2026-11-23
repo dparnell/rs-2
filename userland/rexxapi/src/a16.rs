@@ -63,7 +63,7 @@ pub fn call_subcom16(addr: u32, cmd: *const RxString, flags: *mut u16, ret: *mut
     let mut fl: u16 = 0;
     put_rx16(c16.0.as_mut_ptr(), unsafe { &*cmd });
     put_rx16(r16.0.as_mut_ptr(), unsafe { &*ret });
-    let r = PascalCall::new().l(far(c16.0.as_ptr())).l(far(&fl as *const u16 as *const u8)).l(far(r16.0.as_ptr())).call(addr);
+    let r = PascalCall::new().l(far(c16.0.as_ptr())).l(far(&raw mut fl as *const u8)).l(far(r16.0.as_ptr())).call(addr);
     unsafe {
         *ret = rx16(r16.0.as_ptr());
         if !flags.is_null() {

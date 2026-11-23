@@ -694,7 +694,7 @@ fn system_bitmap(id: u16) -> u16 {
         32759 => (56, 42),
         // The scroll arrows and the combo box button: a scroll bar's
         // width.
-        32734..=32743 | 32750..=32753 | 32738 => (sm(2), sm(20)),
+        32734..=32743 | 32750..=32753 => (sm(2), sm(20)),
         // OBM_REDUCE...OBM_RESTORED: title bar buttons.
         32744..=32749 => (sm(30), sm(31)),
         // OBM_CLOSE: the system menu boxes of a window and of an MDI
@@ -732,7 +732,7 @@ fn system_bitmap(id: u16) -> u16 {
         }
         // The arrows (D: pressed, I: inactive) and OBM_COMBO: a framed
         // button with a triangle.
-        32734..=32743 | 32750..=32753 | 32738 => {
+        32734..=32738 | 32740..=32743 | 32750..=32753 => {
             let dir = match id {
                 32753 | 32743 | 32737 => b'u',
                 32752 | 32742 | 32736 | 32738 => b'd',

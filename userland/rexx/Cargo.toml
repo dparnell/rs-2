@@ -4,6 +4,7 @@ description = "REXX.DLL: the REXX interpreter (RexxStart, RexxVariablePool, Rexx
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexx"

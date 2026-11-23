@@ -4,6 +4,7 @@ description = "SOM.DLL: the System Object Model runtime (SOM 2.1) the Workplace 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "som"

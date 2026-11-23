@@ -4,6 +4,7 @@ description = "SOMIR.DLL: SOM 2.1's interface repository (Repository, Contained,
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "somir"

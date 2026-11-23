@@ -4,6 +4,7 @@ description = "PMSHAPI.DLL: profile (INI file) calls, the program list and task 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmshapi"

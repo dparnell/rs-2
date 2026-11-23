@@ -237,7 +237,6 @@ pub fn trace(args: core::fmt::Arguments) {
     unsafe { Rs2DebugTrace(s.as_ptr()) };
 }
 
-/// The whole file, read with DosOpen/DosRead.
 unsafe extern "C" {
     #[link_name = "MMIO.27"]
     fn mmioOpen(name: *const u8, info: *mut u8, flags: u32) -> u32;

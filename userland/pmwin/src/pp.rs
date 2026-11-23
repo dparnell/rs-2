@@ -24,14 +24,11 @@ pub const PP_HILITEFOREGROUNDCOLOR: u32 = 5;
 pub const PP_HILITEBACKGROUNDCOLOR: u32 = 7;
 pub const PP_DISABLEDFOREGROUNDCOLOR: u32 = 9;
 pub const PP_DISABLEDBACKGROUNDCOLOR: u32 = 11;
-pub const PP_BORDERCOLOR: u32 = 13;
 pub const PP_FONTNAMESIZE: u32 = 15;
 pub const PP_ACTIVECOLOR: u32 = 18;
 pub const PP_INACTIVECOLOR: u32 = 20;
 pub const PP_ACTIVETEXTFGNDCOLOR: u32 = 22;
-pub const PP_ACTIVETEXTBGNDCOLOR: u32 = 24;
 pub const PP_INACTIVETEXTFGNDCOLOR: u32 = 26;
-pub const PP_INACTIVETEXTBGNDCOLOR: u32 = 28;
 pub const PP_MENUFOREGROUNDCOLOR: u32 = 31;
 pub const PP_MENUBACKGROUNDCOLOR: u32 = 33;
 pub const PP_MENUHILITEFGNDCOLOR: u32 = 35;
@@ -40,8 +37,6 @@ pub const PP_MENUDISABLEDFGNDCOLOR: u32 = 39;
 pub const PP_BORDERLIGHTCOLOR: u32 = 51;
 pub const PP_BORDERDARKCOLOR: u32 = 52;
 pub const PP_BORDERDEFAULTCOLOR: u32 = 56;
-pub const PP_FIELDBACKGROUNDCOLOR: u32 = 57;
-pub const PP_PAGEFOREGROUNDCOLOR: u32 = 68;
 pub const PP_PAGEBACKGROUNDCOLOR: u32 = 69;
 pub const PP_MAJORTABFOREGROUNDCOLOR: u32 = 70;
 pub const PP_MAJORTABBACKGROUNDCOLOR: u32 = 71;
@@ -86,20 +81,6 @@ pub fn find(h: u32, id1: u32, id2: u32, own: bool) -> Option<(u32, u32, Vec<u8>)
         };
     }
     None
-}
-
-/// The colour a control draws with: the RGB parameter `id`, its index
-/// form (id + 1, for ids below 0x32), inherited; else `default` (a
-/// SYSCLR_* index, or an RGB value when not negative).
-pub fn color(h: u32, id: u32, default: i32) -> u32 {
-    let idx = if id < 0x32 { id + 1 } else { 0 };
-    if let Some((_, found, b)) = find(h, id, idx, false) {
-        if b.len() >= 4 {
-            let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-            return if found == idx { crate::color::resolve(v as i32) } else { v & 0xff_ffff };
-        }
-    }
-    if default < 0 { crate::color::resolve(default) } else { default as u32 & 0xff_ffff }
 }
 
 /// A colour parameter of the window or its owners, if there is one.

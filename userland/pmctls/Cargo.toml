@@ -4,6 +4,7 @@ description = "PMCTLS.DLL: standard file and font dialogs"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmctls"

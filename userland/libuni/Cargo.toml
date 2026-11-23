@@ -4,6 +4,7 @@ description = "LIBUNI.DLL: Unicode locales (rs2's own locale tables, user locale
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "libuni"

@@ -69,7 +69,7 @@ unsafe extern "C" {
 }
 
 fn stubs() -> u32 {
-    unsafe { &raw const w16_cb_stubs as u32 }
+    &raw const w16_cb_stubs as u32
 }
 
 /// The stub index of a 32-bit address that is one of the stubs.
@@ -83,11 +83,6 @@ fn stub_index(p: u32) -> Option<usize> {
 pub fn is_stub(p: u32) -> bool {
     let b = stubs();
     p >= b && p < b + 16 * N32 as u32
-}
-
-/// The 16-bit procedure behind a stub (0 if `p` is not one).
-pub fn target16(p: u32) -> u32 {
-    stub_index(p).map_or(0, |i| CB_FAR[i].load(Ordering::Relaxed))
 }
 
 /// A 32-bit procedure for the 16:16 procedure `far16` (0 stays 0; one of

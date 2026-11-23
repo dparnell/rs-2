@@ -434,17 +434,6 @@ pub fn close(sm: &Seamless, i: usize) {
     sm.request(sf::REQ_CLOSE, sm.wins[i].hwnd, 0);
 }
 
-/// Start a program in the session (`cmd` without the NUL).
-pub fn run(sm: &Seamless, view: &View, cmd: &[u8]) {
-    let n = cmd.len().min(sf::HOST_CMD_LEN - 1);
-    unsafe {
-        let b = view.s.bytes(sf::HOST_CMD, sf::HOST_CMD_LEN);
-        b[..n].copy_from_slice(&cmd[..n]);
-        b[n] = 0;
-    }
-    sm.request(sf::REQ_RUN, n as u16, 0);
-}
-
 pub fn is_timer(id: u32) -> bool {
     id == TID_SEAMLESS
 }

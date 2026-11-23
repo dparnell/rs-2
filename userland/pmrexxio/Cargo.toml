@@ -4,6 +4,7 @@ description = "PMREXXIO.DLL: the Presentation Manager input/output window for RE
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmrexxio"

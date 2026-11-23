@@ -49,7 +49,6 @@ const WM_DONE: u32 = WM_USER + 2;
 const SYSCLR_DIALOGBACKGROUND: i32 = -34;
 
 pub struct App {
-    hab: u32,
     frame: u32,
     client: u32,
     pub cats: Vec<Category>,
@@ -102,7 +101,6 @@ fn main(s: &os2::Startup) -> u32 {
     let sizes: Vec<usize> = cats.iter().map(|c| c.apps.len()).collect();
     unsafe {
         *core::ptr::addr_of_mut!(APP) = Some(App {
-            hab,
             frame: 0,
             client: 0,
             cats,

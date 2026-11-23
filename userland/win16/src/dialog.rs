@@ -22,7 +22,6 @@ use crate::{far_str, gdi, read_rect, write_rect};
 
 pub const DLGWINDOWEXTRA: u16 = 30;
 const DWL_MSGRESULT: i32 = 0;
-const DWL_DLGPROC: i32 = 4;
 
 const DS_ABSALIGN: u32 = 0x01;
 const DS_SETFONT: u32 = 0x40;
@@ -51,7 +50,6 @@ pub struct Dlg {
     pub proc_: u32,
     pub result: i16,
     pub ended: bool,
-    pub font: u16,
     pub focus: u16,
     pub def_id: u16,
     /// Dialog base units: the font's average width and height.
@@ -174,7 +172,7 @@ pub fn create_dialog(hinst: u16, t: &[u8], owner: u16, proc_: u32, param: u32) -
         move_to(h, [wr[0], wr[1], wr[2] + cx - ccx, wr[3] + cy - ccy]);
     }
     if let Some(wd) = wnd(h) {
-        wd.data = Some(alloc::boxed::Box::new(Dlg { proc_, result: 0, ended: false, font: 0, focus: 0, def_id: IDOK, base: (bx, by) }));
+        wd.data = Some(alloc::boxed::Box::new(Dlg { proc_, result: 0, ended: false, focus: 0, def_id: IDOK, base: (bx, by) }));
         let pv = proc_.to_le_bytes();
         if wd.extra.len() >= 8 {
             wd.extra[4..8].copy_from_slice(&pv);

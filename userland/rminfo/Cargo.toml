@@ -4,6 +4,7 @@ description = "RMINFO.DLL: the resource manager's information calls (RMEnumNodes
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rminfo"

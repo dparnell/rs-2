@@ -377,7 +377,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         }
         // GetDCEx(hwnd, hrgnClip, flags): the client area's DC.
         2359 => {
-            let (hw, _r, fl) = (a.w(), a.w(), a.l());
+            let (hw, _r, _fl) = (a.w(), a.w(), a.l());
             crate::user::get_dc(hw) as u32
         }
         // BeginDeferWindowPos(n), DeferWindowPos(hdwp, hwnd, after, x, y,

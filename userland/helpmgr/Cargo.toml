@@ -4,6 +4,7 @@ description = "HELPMGR.DLL: the help manager (help instances, help tables, the h
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "helpmgr"

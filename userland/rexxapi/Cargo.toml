@@ -4,6 +4,7 @@ description = "REXXAPI.DLL: the REXX API (queues, registrations of subcommand ha
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexxapi"

@@ -2,8 +2,6 @@
 //! file: SOMIR in the environment naming IBM's SOM.IR (the facts below are
 //! that file's). Without SOMIR set the checks are skipped.
 
-use alloc::vec::Vec;
-
 use os2::println;
 
 use crate::libs::{Env, load, proc_addr};
@@ -27,12 +25,6 @@ struct Description {
 unsafe extern "C" {
     #[link_name = "SOM.10"]
     static SOMFree: extern "C" fn(*mut u8);
-}
-
-fn z(s: &[u8]) -> Vec<u8> {
-    let mut v = s.to_vec();
-    v.push(0);
-    v
 }
 
 pub fn run() {

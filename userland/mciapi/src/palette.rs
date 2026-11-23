@@ -316,7 +316,7 @@ pub extern "C" fn mciCreatePlayFilePalette(
     unsafe {
         let hab = WinQueryAnchorBlock(1);
         if !REGISTERED {
-            REGISTERED = WinRegisterClass(hab, CLASS.as_ptr(), crate::exports::__pfpal_client_proc as usize, 4, 4) != 0;
+            REGISTERED = WinRegisterClass(hab, CLASS.as_ptr(), crate::exports::__pfpal_client_proc as *const () as usize, 4, 4) != 0;
         }
         let mut fl = 0x200u32; // FCF_BORDER
         let mut client = 0u32;
@@ -332,7 +332,7 @@ pub extern "C" fn mciCreatePlayFilePalette(
             frame, client, old_proc: 0, file: Vec::new(), title: t[..t.len() - 1].to_vec(), alias, open: false,
             playing: false, observer, user, slider: 0, stop_button: 0, position: 0,
         });
-        let old = WinSubclassWindow(frame, crate::exports::__pfpal_frame_proc as usize);
+        let old = WinSubclassWindow(frame, crate::exports::__pfpal_frame_proc as *const () as usize);
         if let Some(p) = find(frame) {
             p.old_proc = old;
         }

@@ -4,6 +4,7 @@ description = "A DLL for testing the loader (imports, init, DosLoadModule)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "testdll"

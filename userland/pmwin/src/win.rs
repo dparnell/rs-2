@@ -229,7 +229,6 @@ pub fn destroy(h: u32) {
             set_focus(if p == HWND_DESKTOP { 0 } else { p });
         }
     }
-    let s = st();
     let mut all = Vec::new();
     collect(h, &mut all);
     for &w in &all {
@@ -937,10 +936,6 @@ pub extern "C" fn WinSetActiveWindow(_desk: u32, h: u32) -> u32 {
 /// that had it last or its client (IBM's frame does this on
 /// WM_ADJUSTWINDOWPOS, FrameSetFocus), and so its top-level frame
 /// becomes active.
-pub fn activate_window(h: u32) {
-    activate_window_ex(h, true);
-}
-
 fn activate_window_ex(h: u32, raise: bool) {
     let top = top_level(h);
     if top == h || !st().frames.contains_key(&h) {

@@ -4,6 +4,7 @@ description = "REXXSOM.DLL (OREXXSOM.DLL): SOM classes from Object REXX (.SOM~im
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexxsom"

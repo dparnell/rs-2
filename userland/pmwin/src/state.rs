@@ -145,6 +145,8 @@ pub struct Sent {
     /// The copy of mp1's SWPs (WM_ADJUSTWINDOWPOS, WM_WINDOWPOSCHANGED)
     /// in the shared heap that the message owns: a sender that does not
     /// wait has no stack left for the receiver to read.
+    /// Only held, until the message is gone.
+    #[allow(dead_code)]
     pub own: Option<alloc::vec::Vec<u32>>,
 }
 
@@ -283,9 +285,6 @@ pub struct State {
     /// such program takes the lock; see `gpiobj::own_palette`).
     pub emul8: Option<Box<gpi::palette::Physical>>,
 }
-
-/// No presentation parameter colour.
-pub const NO_COLOR: u32 = u32::MAX;
 
 /// A hook set with WinSetHook: for one queue (or all, 0), of one kind
 /// (HK_*), in a process.

@@ -4,6 +4,7 @@ description = "REXXUTIL.DLL: the REXX utility functions (SysFileTree, SysIni, ..
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexxutil"

@@ -4,6 +4,7 @@ description = "WPCONFIG.DLL: IBM's System Setup class library, whose classes rs2
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "wpconfig"

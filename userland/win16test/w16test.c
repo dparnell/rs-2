@@ -3565,7 +3565,7 @@ static void font2_tests(HWND hwnd)
     EnumFontFamilies(dc, NULL, fp, 0);
     check(fonts_seen >= 6, "EnumFontFamilies of all families");
     fp = (FONTENUMPROC)MakeProcInstance((FARPROC)EnumStyleProc, GetWindowWord(hwnd, GWW_HINSTANCE));
-    EnumFontFamilies(dc, "Times New Roman", fp, 1);
+    EnumFontFamilies(dc, "Times New Roman", fp, (LPSTR)1);
     wsprintf(line, "EnumFontFamilies of a TrueType family: its four styles (%d, \"%s\")", styles_seen, (LPSTR)full_name);
     check(styles_seen == 4 && last_type == TRUETYPE_FONTTYPE && lstrcmp(full_name, "Times New Roman Bold") == 0, line);
     styles_seen = 0;

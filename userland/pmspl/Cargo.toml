@@ -4,6 +4,7 @@ description = "PMSPL.DLL: the spooler API of a system without printers"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmspl"

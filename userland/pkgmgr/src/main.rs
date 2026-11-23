@@ -31,6 +31,8 @@
 
 extern crate alloc;
 
+// Shared with PMCHKDSK, which uses more of it.
+#[allow(dead_code)]
 #[path = "../../pmchkdsk/src/child.rs"]
 mod child;
 

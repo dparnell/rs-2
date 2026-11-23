@@ -4,6 +4,7 @@ description = "THAILIB.DLL: the Thai keyboard layer calls of a system without Th
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "thailib"

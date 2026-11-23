@@ -4,6 +4,7 @@ description = "PMDRAG.DLL: direct manipulation (drag and drop)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmdrag"

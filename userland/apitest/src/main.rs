@@ -1249,7 +1249,7 @@ fn dlls() {
         } else {
             (0, 0)
         };
-        check("DLL marked without internal fixups moved off taken bases", ok && pa != TestAdd as usize && sum == 42 && inits == 1);
+        check("DLL marked without internal fixups moved off taken bases", ok && pa != TestAdd as *const () as usize && sum == 42 && inits == 1);
         if rc == 0 {
             DosFreeModule(hb);
             // Let go everywhere, loaded again: its shared data starts over
@@ -1719,7 +1719,7 @@ fn debug_running_thread() {
     }
     let bp = b.addr;
     check("spinning thread: the breakpoint", n == DBG_N_EXCEPTION && b.buffer == XCPT_BREAKPOINT && b.tid == 1);
-    let code = spinner as usize as u32;
+    let code = spinner as *const () as u32;
     let in_spinner = |b: &UDb| b.eip >= code && b.eip < code + 64;
     let mut s = UDb { pid, tid: 2, ..Default::default() };
     let ok = dbg(&mut s, DBG_C_READ_REG) == 0 && in_spinner(&s) && s.eax == 1;
@@ -1793,7 +1793,7 @@ fn debugging() {
     check("stopped at the entry", dbg(&mut b, DBG_C_READ_REG) == 0 && b.eip == entry);
     b.mte = hmte;
     b.value = 1;
-    let f = debug_child as usize as u32;
+    let f = debug_child as *const () as u32;
     check("DBG_C_NumToAddr", dbg(&mut b, DBG_C_NUM_TO_ADDR) == 0 && b.addr != 0 && b.addr <= f && f - b.addr < 0x10_0000);
     // Run to the breakpoint (module loads on the way).
     let mut n;
@@ -1823,7 +1823,8 @@ fn debugging() {
     b.buffer = &raw mut v as u32;
     b.len = 4;
     check("DBG_C_ReadMemBuf data", dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && v == 0x1234);
-    v = 0x5600;
+    // Read through b.buffer.
+    unsafe { (&raw mut v).write_volatile(0x5600) };
     check("DBG_C_WriteMemBuf", dbg(&mut b, DBG_C_WRITE_MEM_BUF) == 0);
     b.addr = var;
     check("DBG_C_ReadMem (word)", dbg(&mut b, DBG_C_READ_MEM) == 0 && b.value == 0x5600);

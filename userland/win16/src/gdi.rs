@@ -142,7 +142,6 @@ pub const TRANSPARENT: u16 = 1;
 pub const SYSTEM_FONT: u16 = OBJ_BASE + 2 * 13;
 /// The stock DEFAULT_PALETTE.
 pub const STOCK_PALETTE: u16 = OBJ_BASE + 2 * 15;
-pub const ANSI_FIXED_FONT: u16 = OBJ_BASE + 2 * 11;
 const STOCK: usize = 17;
 
 fn sys_font() -> Font {
@@ -1277,7 +1276,6 @@ pub const DT_BOTTOM: u16 = 0x08;
 pub const DT_WORDBREAK: u16 = 0x10;
 pub const DT_SINGLELINE: u16 = 0x20;
 pub const DT_EXPANDTABS: u16 = 0x40;
-pub const DT_NOCLIP: u16 = 0x100;
 pub const DT_CALCRECT: u16 = 0x400;
 pub const DT_NOPREFIX: u16 = 0x800;
 
@@ -2085,4 +2083,3 @@ pub const COLOR_BTNFACE: u16 = 15;
 pub const COLOR_BTNSHADOW: u16 = 16;
 pub const COLOR_GRAYTEXT: u16 = 17;
 pub const COLOR_BTNTEXT: u16 = 18;
-pub const COLOR_BTNHIGHLIGHT: u16 = 20;

@@ -128,11 +128,6 @@ pub fn register(hab: u32) {
     }
 }
 
-/// Is `h` (or a window it is in) a help window?
-pub fn is_help_window(h: u32) -> bool {
-    help_window_instance(h).is_some()
-}
-
 /// The instance whose help (or footnote) window `h` is in.
 pub fn help_window_instance(h: u32) -> Option<&'static mut Instance> {
     crate::instances().iter().copied().find(|&p| {

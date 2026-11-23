@@ -4,6 +4,7 @@ description = "SOMU.DLL: SOM 2.1's utility classes and metaclasses (SOMMBeforeAf
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "somu"

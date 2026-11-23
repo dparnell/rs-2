@@ -30,15 +30,12 @@ unsafe extern "C" {
 pub const LIBRARY: &[u8] = b"WPHELP.HLP";
 
 pub const HM_DISPLAY_HELP: u32 = 0x0222;
-pub const HM_EXT_HELP: u32 = 0x0223;
 pub const HM_HELP_INDEX: u32 = 0x022a;
-pub const HM_KEYS_HELP: u32 = 0x022c;
 pub const HM_ERROR: u32 = 0x022e;
 pub const HMERR_HELPTABLE_UNDEFINE: u32 = 0x1009;
 const HM_RESOURCEID: u32 = 0;
 
 /// Panels of WPHELP.HLP.
-pub const PANEL_HELP: u32 = 0x3e8;
 pub const PANEL_KEYS: u32 = 0x9003;
 const PANEL_OBJECT: u32 = 0x7d7d;
 

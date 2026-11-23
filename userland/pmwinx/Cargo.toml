@@ -4,6 +4,7 @@ description = "PMWINX.DLL: Open32's registry calls (forwarded to REGISTRY.DLL, a
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmwinx"

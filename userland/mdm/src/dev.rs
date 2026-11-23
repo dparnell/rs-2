@@ -44,7 +44,6 @@ pub struct Device {
     /// Opened by a string command on a file name: closed when the command
     /// has run.
     pub auto_close: bool,
-    pub shareable: bool,
     pub time_format: u32,
     pub mode: u32,
     /// The pending PLAY (or other asynchronous) command's notification.
@@ -180,7 +179,6 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
         alias: r.text.clone(),
         element: if playlist.is_some() { None } else { r.element.clone() },
         auto_close: false,
-        shareable: r.flags & MCI_OPEN_SHAREABLE != 0,
         time_format,
         mode: MCI_MODE_STOP,
         pending: None,

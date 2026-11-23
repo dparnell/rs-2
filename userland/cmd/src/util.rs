@@ -219,18 +219,3 @@ pub fn read_line() -> Option<String> {
     let s: String = buf[..n as usize].iter().map(|&b| b as char).collect();
     Some(String::from(s.trim_end_matches(['\r', '\n'])))
 }
-
-/// Group digits with commas.
-pub fn commas(mut v: u64) -> String {
-    let mut parts = Vec::new();
-    loop {
-        if v < 1000 {
-            parts.push(alloc::format!("{v}"));
-            break;
-        }
-        parts.push(alloc::format!("{:03}", v % 1000));
-        v /= 1000;
-    }
-    parts.reverse();
-    parts.join(",")
-}

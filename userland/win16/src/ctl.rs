@@ -128,7 +128,6 @@ pub fn draw_item(h: u16, kind: u16, item: u16, action: u16, state: u16, hdc: u16
 
 const BS_PUSHBUTTON: u32 = 0;
 const BS_DEFPUSHBUTTON: u32 = 1;
-const BS_CHECKBOX: u32 = 2;
 const BS_AUTOCHECKBOX: u32 = 3;
 const BS_RADIOBUTTON: u32 = 4;
 const BS_3STATE: u32 = 5;

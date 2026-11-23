@@ -527,7 +527,8 @@ static void test_modules() {
     auto sq = shapes::make_square(3);
     check("object from the DLL", sq->area() == 9 && sq->name().size() > 40 && shapes::Shape::count == 1);
     check("dynamic_cast of the DLL's object", dynamic_cast<shapes::Square *>(sq.get()) != nullptr);
-    check("typeid across modules", typeid(*sq) == shapes::square_type() && typeid(shapes::InlineError) == shapes::inline_error_type());
+    auto &sq_ref = *sq;
+    check("typeid across modules", typeid(sq_ref) == shapes::square_type() && typeid(shapes::InlineError) == shapes::inline_error_type());
     check("unnamed namespaces stay apart", typeid(Hidden) != shapes::hidden_type());
     std::vector<std::shared_ptr<shapes::Shape>> v{std::make_shared<Circle>(), std::shared_ptr<shapes::Shape>(std::move(sq))};
     check("program's class, DLL's base", shapes::total(v) == 12 && v[0]->name().starts_with("circle, shape"));
@@ -589,7 +590,10 @@ int main(int argc, char **argv) {
         if (!std::strcmp(argv[1], "child-throw"))
             throw MyError(99);
         if (!std::strcmp(argv[1], "child-noexcept"))
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wexceptions" // on purpose: std::terminate
             []() noexcept { throw 1; }();
+#pragma clang diagnostic pop
         std::exit(9);
     }
     std::cout << "cxxtest: C++ on rs2, libc++ " << _LIBCPP_VERSION << "\n";

@@ -4,6 +4,7 @@ description = "TCP32DLL.DLL: the OS/2 TCP/IP 4.0 network database, resolver and 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "tcp32dll"

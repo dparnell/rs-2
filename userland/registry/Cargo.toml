@@ -4,6 +4,7 @@ description = "REGISTRY.DLL: the OS/2 registry (Win32 registry calls, for Open32
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "registry"

@@ -400,7 +400,6 @@ fn recording(sc: usize) {
     let mut id = 0usize;
     let r1 = osa(36, &[sc, e, &mut id as *mut usize as usize]);
     // the user's action: an event the program sends itself
-    let mut pid = 0u32;
     let mut target = Desc::default();
     let mut ev1 = Desc::default();
     let mut reply = Desc::default();
@@ -408,7 +407,7 @@ fn recording(sc: usize) {
         let mut tib = core::ptr::null_mut();
         let mut pib: *mut os2::Pib = core::ptr::null_mut();
         DosGetInfoBlocks(&mut tib, &mut pib);
-        pid = (*pib).pid;
+        let pid = (*pib).pid;
         AECreateDesc(c(b"PID "), &pid as *const u32 as *const u8, 4, &mut target);
         AECreateAppleEvent(c(b"RS2T"), c(b"hllo"), &target, -1, 0, &mut ev1);
         AESend(&ev1, &mut reply, 0x23, 0, -1, 0, 0);

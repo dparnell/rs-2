@@ -4,6 +4,7 @@ description = "SO32DLL.DLL: the OS/2 TCP/IP 4.0 socket calls"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "so32dll"

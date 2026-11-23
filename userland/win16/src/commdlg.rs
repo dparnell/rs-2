@@ -73,7 +73,6 @@ const LB_ADDSTRING: u16 = W_USER + 1;
 const LB_RESETCONTENT: u16 = W_USER + 5;
 const LB_SETCURSEL: u16 = W_USER + 7;
 const LB_GETCURSEL: u16 = W_USER + 9;
-const LB_GETTEXT: u16 = W_USER + 10;
 const CB_ADDSTRING: u16 = W_USER + 3;
 const CB_GETCURSEL: u16 = W_USER + 7;
 const CB_GETLBTEXT: u16 = W_USER + 8;

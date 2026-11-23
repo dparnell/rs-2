@@ -4,6 +4,7 @@ description = "A DLL of system hooks for PMXTEST (input, send message, journal r
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmxhook"

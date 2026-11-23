@@ -4,6 +4,7 @@ description = "PMGPI.DLL: forwards the GPI entry points to PMWIN, which implemen
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmgpi"

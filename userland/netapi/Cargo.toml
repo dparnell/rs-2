@@ -4,6 +4,7 @@ description = "NETAPI.DLL: the 16-bit LAN Server API (_pascal far) on rs2's LAN 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "netapi"

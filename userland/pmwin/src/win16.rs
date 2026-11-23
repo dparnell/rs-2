@@ -190,7 +190,7 @@ unsafe extern "C" {
 }
 
 fn pool() -> u32 {
-    unsafe { &raw const w16_proc_pool as u32 }
+    &raw const w16_proc_pool as u32
 }
 
 /// The 32-bit procedure a 16:16 pointer to one of the pool stubs stands for.

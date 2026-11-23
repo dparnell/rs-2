@@ -4,6 +4,7 @@ description = "MDM.DLL: the media device manager (mciSendCommand, mciSendString)
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "mdm"

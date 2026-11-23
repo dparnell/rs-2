@@ -25,7 +25,7 @@ unsafe extern "C" {
     #[link_name = "PMWIN.926"]
     fn WinRegisterClass(hab: u32, name: *const u8, proc_: WndProc, style: u32, words: u32) -> u32;
     #[link_name = "PMWIN.909"]
-    fn WinCreateWindow(parent: u32, class: *const u8, name: *const u8, style: u32, x: i32, y: i32, cx: i32, cy: i32, owner: u32, behind: u32, id: u32, ctl: *const u8, pres: u32) -> u32;
+    fn WinCreateWindow(parent: u32, class: u32, name: *const u8, style: u32, x: i32, y: i32, cx: i32, cy: i32, owner: u32, behind: u32, id: u32, ctl: *const u8, pres: u32) -> u32;
     #[link_name = "PMWIN.728"]
     fn WinDestroyWindow(h: u32) -> u32;
     #[link_name = "PMWIN.899"]
@@ -172,10 +172,10 @@ fn forward_checks(hab: u32) {
             #[link_name = "PMWIN.911"]
             fn WinDefWindowProc(h: u32, m: u32, a: u32, b: u32) -> u32;
         }
-        DEF_PROC.store(WinDefWindowProc as usize as u32, Ordering::Relaxed);
+        DEF_PROC.store(WinDefWindowProc as *const () as u32, Ordering::Relaxed);
         WinRegisterClass(hab, b"CtlFwdClient\0".as_ptr(), forward_client, 0, 0);
-        let f = WinCreateWindow(1, 0xffff_0001 as *const u8, null(), 0, 0, 0, 100, 100, 0, 3, 78, null(), 0);
-        let c = WinCreateWindow(f, b"CtlFwdClient\0".as_ptr(), null(), 0, 0, 0, 0, 0, f, 3, FID_CLIENT, null(), 0);
+        let f = WinCreateWindow(1, 0xffff_0001, null(), 0, 0, 0, 100, 100, 0, 3, 78, null(), 0);
+        let c = WinCreateWindow(f, b"CtlFwdClient\0".as_ptr() as u32, null(), 0, 0, 0, 0, 0, f, 3, FID_CLIENT, null(), 0);
         let r = [0x213u32, 0x557, 0x1001, 0x413].map(|m| WinSendMsg(f, m, 0, 0));
         check("a frame passes messages from 0x213 on to its client (0x557: MINSTALL)", c != 0 && r[..3] == [0x10213, 0x10557, 0x11001]);
         check("a frame keeps the mouse messages 0x410-0x428", r[3] == 0);
@@ -200,17 +200,17 @@ fn frame_checks(hab: u32) -> u32 {
         let mut fcd = [0u8; 12];
         fcd[0] = 12;
         fcd[2] = 3;
-        let f = WinCreateWindow(1, b"CtlDerivedFrame\0".as_ptr(), b"Derived\0".as_ptr(), 0, 10, 20, 300, 200, 0, 3, 77, fcd.as_ptr(), 0);
+        let f = WinCreateWindow(1, b"CtlDerivedFrame\0".as_ptr() as u32, b"Derived\0".as_ptr(), 0, 10, 20, 300, 200, 0, 3, 77, fcd.as_ptr(), 0);
         check("a frame of a class derived from WC_FRAME gets its controls", f != 0 && WinWindowFromID(f, FID_TITLEBAR) != 0);
-        let client = WinCreateWindow(f, b"CtlTest\0".as_ptr(), null(), 0x8000_0000, 0, 0, 0, 0, f, 3, FID_CLIENT, null(), 0);
+        let client = WinCreateWindow(f, b"CtlTest\0".as_ptr() as u32, null(), 0x8000_0000, 0, 0, 0, 0, f, 3, FID_CLIENT, null(), 0);
         let mut swps = [0i32; 9 * 8];
         let n = WinSendMsg(f, WM_FORMATFRAME, swps.as_mut_ptr() as u32, 0) as usize;
         let has = (0..n.min(8)).any(|i| swps[i * 9 + 6] as u32 == client);
         check("WM_FORMATFRAME places a client made with WinCreateWindow", client != 0 && has);
 
         // WinSetMultWindowPos: two windows at once.
-        let a = WinCreateWindow(client, b"CtlTest\0".as_ptr(), null(), 0, 0, 0, 1, 1, client, 3, 1, null(), 0);
-        let b = WinCreateWindow(client, b"CtlTest\0".as_ptr(), null(), 0, 0, 0, 1, 1, client, 3, 2, null(), 0);
+        let a = WinCreateWindow(client, b"CtlTest\0".as_ptr() as u32, null(), 0, 0, 0, 1, 1, client, 3, 1, null(), 0);
+        let b = WinCreateWindow(client, b"CtlTest\0".as_ptr() as u32, null(), 0, 0, 0, 1, 1, client, 3, 2, null(), 0);
         let set = [3i32, 30, 40, 5, 6, 3, a as i32, 0, 0, 3, 31, 41, 7, 8, 3, b as i32, 0, 0];
         let mut pa = [0i32; 9];
         let mut pb = [0i32; 9];

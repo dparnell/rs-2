@@ -30,8 +30,6 @@ os2::entry!(main);
 unsafe extern "C" {
     #[link_name = "VIOCALLS.1"]
     fn VIOENDPOPUP();
-    #[link_name = "VIOCALLS.7"]
-    fn VIOSCROLLUP();
     #[link_name = "VIOCALLS.11"]
     fn VIOPOPUP();
     #[link_name = "VIOCALLS.13"]

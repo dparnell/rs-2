@@ -61,7 +61,6 @@ pub unsafe fn put_count(abi: Abi, p: *mut u8, v: u32) {
 /// Fills a caller's buffer: records from the front, strings from the back.
 struct Packer {
     buf: *mut u8,
-    len: usize,
     front: usize,
     back: usize,
     abi: Abi,
@@ -72,7 +71,7 @@ struct Packer {
 
 impl Packer {
     fn new(buf: *mut u8, len: usize, abi: Abi) -> Packer {
-        Packer { buf, len, front: 0, back: len, abi, need: 0, overflow: false }
+        Packer { buf, front: 0, back: len, abi, need: 0, overflow: false }
     }
 
     /// Room for a record of `fixed` bytes with these strings?

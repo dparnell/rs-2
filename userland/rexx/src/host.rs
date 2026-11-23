@@ -19,7 +19,6 @@ pub const RXCMD: usize = 3;
 pub const RXMSQ: usize = 4;
 pub const RXSIO: usize = 5;
 pub const RXHLT: usize = 7;
-pub const RXTRC: usize = 8;
 pub const RXINI: usize = 9;
 pub const RXTER: usize = 10;
 

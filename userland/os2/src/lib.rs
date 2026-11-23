@@ -174,7 +174,7 @@ pub unsafe extern "C" fn bcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
+pub unsafe extern "C" fn strlen(s: *const core::ffi::c_char) -> usize {
     let mut n = 0;
     while unsafe { s.add(n).read_volatile() } != 0 {
         n += 1;

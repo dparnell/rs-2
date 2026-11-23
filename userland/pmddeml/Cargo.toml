@@ -4,6 +4,7 @@ description = "PMDDEML.DLL: the DDE management library (WinDde* calls) on PM's D
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmddeml"

@@ -4,6 +4,7 @@ description = "PMBIDI.DLL: the bidirectional language support calls (layout obje
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmbidi"

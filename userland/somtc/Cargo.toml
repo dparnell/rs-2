@@ -4,6 +4,7 @@ description = "SOMTC.DLL: SOM 2.1's TypeCodes (tcNew, tcKind, tcSize, tcEqual, t
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "somtc"

@@ -4,6 +4,7 @@ description = "REXXINIT.DLL: keeps the REXX API state (queues, registrations) al
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexxinit"

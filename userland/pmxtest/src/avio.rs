@@ -51,7 +51,7 @@ unsafe extern "C" {
     #[link_name = "PMVIOP.30"]
     fn WIN16DEFAVIOWINDOWPROC();
     #[link_name = "PMWIN.743"]
-    fn WinFillRect(hps: u32, rcl: *const i32, clr: i32) -> u32;
+    fn WinFillRect(hps: u32, rcl: *const RectL, clr: i32) -> u32;
     #[link_name = "PMWIN.765"]
     fn WinInvalidateRect(h: u32, rcl: *const i32, children: u32) -> u32;
     #[link_name = "PMWIN.831"]
@@ -111,7 +111,7 @@ pub fn avio_checks(hab: u32, client: u32) {
     // WM_PAINT and validates the window.
     let hps = unsafe { WinGetPS(win) };
     let all = [0, 0, COLS as i32 * 8, ROWS as i32 * 16];
-    unsafe { WinFillRect(hps, all.as_ptr(), CLR_BLUE) };
+    unsafe { WinFillRect(hps, all.as_ptr().cast(), CLR_BLUE) };
     unsafe { WinReleasePS(hps) };
     let over = pel(win, 0, 0) == CLR_BLUE && pel(win, 3, 19) == CLR_BLUE;
     unsafe { WinInvalidateRect(win, null(), 0) };

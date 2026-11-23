@@ -34,7 +34,7 @@ unsafe extern "C" {
     #[link_name = "PMGPI.351"]
     fn GpiAssociate(hps: u32, hdc: u32) -> u32;
     #[link_name = "PMGPI.359"]
-    fn GpiCharStringAt(hps: u32, p: *const i32, n: i32, s: *const u8) -> i32;
+    fn GpiCharStringAt(hps: u32, p: *const PointL, n: i32, s: *const u8) -> i32;
     #[link_name = "PMGPI.368"]
     fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32;
     #[link_name = "PMGPI.513"]
@@ -42,7 +42,7 @@ unsafe extern "C" {
     #[link_name = "PMGPI.510"]
     fn GpiSetCharBox(hps: u32, p: *const i32) -> u32;
     #[link_name = "PMGPI.489"]
-    fn GpiQueryTextBox(hps: u32, n: i32, s: *const u8, npts: i32, pts: *mut i32) -> u32;
+    fn GpiQueryTextBox(hps: u32, n: i32, s: *const u8, npts: i32, pts: *mut PointL) -> u32;
     #[link_name = "PMSHAPI.115"]
     fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, len: u32) -> u32;
     #[link_name = "PMSPL.397"]
@@ -204,7 +204,7 @@ impl Page {
 
     fn width(&self, t: &[u8]) -> i32 {
         let mut pts = [0i32; 10];
-        unsafe { GpiQueryTextBox(self.hps, t.len() as i32, t.as_ptr(), 5, pts.as_mut_ptr()) };
+        unsafe { GpiQueryTextBox(self.hps, t.len() as i32, t.as_ptr(), 5, pts.as_mut_ptr().cast()) };
         pts[8]
     }
 
@@ -221,7 +221,7 @@ impl Page {
         self.y -= lh;
         if !t.is_empty() {
             let at = [self.margin, self.y + lh / 4];
-            unsafe { GpiCharStringAt(self.hps, at.as_ptr(), t.len() as i32, t.as_ptr()) };
+            unsafe { GpiCharStringAt(self.hps, at.as_ptr().cast(), t.len() as i32, t.as_ptr()) };
         }
     }
 

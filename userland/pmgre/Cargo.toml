@@ -4,6 +4,7 @@ description = "PMGRE.DLL: the graphics engine's entry points (Gre32Entry2..10) a
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmgre"

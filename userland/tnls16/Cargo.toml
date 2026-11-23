@@ -4,6 +4,7 @@ description = "TNLS16.DLL: the 16-bit code page and message catalog helper of IB
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "tnls16"

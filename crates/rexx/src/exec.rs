@@ -348,8 +348,6 @@ impl Frame {
 pub(crate) enum Flow {
     Normal,
     Return(Option<Value>),
-    Leave(Option<Name>),
-    Iterate(Option<Name>),
 }
 
 #[derive(Clone)]

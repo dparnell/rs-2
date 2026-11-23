@@ -234,7 +234,6 @@ impl Interp<'_> {
                 }
                 Some(b'\n') => return Some(line),
                 Some(b'\r') => {
-                    any = true;
                     match self.getc(i) {
                         Some(b'\n') | None => return Some(line),
                         Some(c) => {

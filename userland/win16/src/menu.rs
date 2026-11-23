@@ -245,11 +245,6 @@ pub fn create_popup() -> u16 {
     create(false)
 }
 
-/// The PM menu window of an HMENU.
-pub fn pm_menu(h: u16) -> u32 {
-    pm_of(h)
-}
-
 /// An owner-drawn item WIN16 draws itself (the MDI items of a frame's
 /// menu bar while a child is maximized): `id`, with the pop-up `sub`
 /// (0: none), at `pos` (-1: the end).
@@ -288,12 +283,6 @@ pub fn draw_bar(h: u16) {
             WinInvalidateRect(pm, core::ptr::null(), 0);
         }
     }
-}
-
-/// Is `id` an item of the menu (at its top level)?
-pub fn has_item(menu: u16, id: u16) -> bool {
-    let pm = pm_of(menu);
-    pm != 0 && send(pm, MM_ITEMPOSITIONFROMID, mp(id as u32, 0), 0) != MIT_NONE
 }
 
 /// A window's system menu (the pop-up of its frame's FID_SYSMENU).
@@ -381,11 +370,6 @@ fn set_attr(menu: u16, which: u16, flags: u16, mask: u16, on: bool) -> u32 {
         MIA_DISABLED => if old != 0 { (MF_GRAYED | MF_DISABLED) as u32 } else { 0 },
         _ => if old != 0 { MF_CHECKED as u32 } else { 0 },
     }
-}
-
-/// The number of items of a menu.
-pub fn item_count(menu: u16) -> u32 {
-    send(pm_of(menu), MM_QUERYITEMCOUNT, 0, 0)
 }
 
 pub fn remove(menu: u16, which: u16, flags: u16, destroy: bool) -> bool {

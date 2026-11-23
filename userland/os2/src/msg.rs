@@ -57,7 +57,7 @@ pub unsafe fn DosGetMessageSeg(
     msgseg: *const u8,
 ) -> APIRET {
     let args = [table as u32, count, buf as u32, cb, msgnum, file as u32, pcb as u32];
-    unsafe { rs2_call_msgseg(DosTrueGetMessage as usize, args.as_ptr(), 7, msgseg as u32) }
+    unsafe { rs2_call_msgseg(DosTrueGetMessage as *const () as usize, args.as_ptr(), 7, msgseg as u32) }
 }
 
 /// DosGetMessage: a message from a message file.

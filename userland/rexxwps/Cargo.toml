@@ -4,6 +4,7 @@ description = "REXXWPS.DLL (OREXXWPS.DLL): Object REXX scripting the Workplace S
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "rexxwps"

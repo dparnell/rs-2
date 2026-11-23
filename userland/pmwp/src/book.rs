@@ -10,14 +10,13 @@ use crate::classes_gen::m;
 use crate::methods;
 use crate::obj;
 use crate::pm::*;
-use crate::{abs, som, wps};
+use crate::{som, wps};
 
 unsafe extern "C" {
     #[link_name = "PMWIN.924"]
     fn WinLoadDlg(parent: u32, owner: u32, proc_: u32, hmod: u32, id: u32, params: u32) -> u32;
 }
 
-const BKA_LAST: u16 = 0x0002;
 const BKA_FIRST: u16 = 0x0004;
 const BKA_MAJOR: u16 = 0x0040;
 const BKA_AUTOPAGESIZE: u16 = 0x0100;
@@ -416,9 +415,4 @@ pub fn program_methods() -> Vec<(&'static str, usize)> {
 
 pub fn program_overrides() -> Vec<(&'static str, usize)> {
     alloc::vec![("wpAddSettingsPages", __m_program_add_pages as usize)]
-}
-
-pub fn _unused() -> u16 {
-    let _ = abs::fill_prog_details;
-    BKA_LAST
 }

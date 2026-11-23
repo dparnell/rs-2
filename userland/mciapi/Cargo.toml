@@ -4,6 +4,7 @@ description = "MCIAPI.DLL: MMPM/2's REXX functions (mciRxSendString and friends)
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "mciapi"

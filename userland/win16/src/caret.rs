@@ -13,7 +13,6 @@ use crate::Global;
 
 struct Caret {
     hwnd: u16,
-    cx: i32,
     cy: i32,
     x: i32,
     y: i32,
@@ -37,7 +36,7 @@ pub fn create(h: u16, gray: bool, cx: i32, cy: i32) {
     // CURSOR_FLASH; CURSOR_HALFTONE for a gray caret.
     let fs = 0x0004 | if gray { 0x0001 } else { 0 };
     unsafe { WinCreateCursor(c, 0, pm_y(h, 0, cy), cx, cy, fs, core::ptr::null()) };
-    *CARET.get() = Some(Caret { hwnd: h, cx, cy, x: 0, y: 0, hidden: 1 });
+    *CARET.get() = Some(Caret { hwnd: h, cy, x: 0, y: 0, hidden: 1 });
 }
 
 pub fn destroy() {

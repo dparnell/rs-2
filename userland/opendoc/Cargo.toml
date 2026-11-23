@@ -4,6 +4,7 @@ description = "OPENDOC.DLL: rs2's OpenDoc for OS/2 runtime (IBM's ordinals, SOM 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "opendoc"

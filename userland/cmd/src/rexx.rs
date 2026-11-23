@@ -186,7 +186,7 @@ pub fn run(sh: &mut Shell, path: &str, args: &str) -> bool {
     };
     let start: RexxStart = unsafe { core::mem::transmute(start) };
     let reg: RegisterSubcomExe = unsafe { core::mem::transmute(reg) };
-    unsafe { reg(b"CMD\0".as_ptr(), subcom as usize, null_mut()) };
+    unsafe { reg(b"CMD\0".as_ptr(), subcom as *const () as usize, null_mut()) };
     let mut a: Vec<u8> = args.trim().bytes().collect();
     let mut arg = RxString { len: a.len() as u32, ptr: a.as_mut_ptr() };
     let name = cstr(path);

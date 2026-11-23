@@ -4,6 +4,7 @@ description = "TCPIP32.DLL: the OS/2 TCP/IP 4.1+ socket, resolver and network da
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "tcpip32"

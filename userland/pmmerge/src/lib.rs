@@ -17,7 +17,8 @@ mod exports;
 /// `name = "MODULE.ordinal";`: an entry that jumps to that import.
 macro_rules! forward {
     ($($name:ident = $target:literal;)*) => {$(
-        #[allow(non_snake_case)]
+        // Only jumped to: declared with its real signature elsewhere.
+        #[allow(non_snake_case, clashing_extern_declarations)]
         mod $name {
             unsafe extern "C" {
                 #[link_name = $target]
@@ -59,6 +60,7 @@ pub extern "C" fn WinQueryCpType(_hmq: u32) -> u32 {
 
 unsafe extern "C" {
     #[link_name = "PMWIN.977"]
+    #[allow(clashing_extern_declarations)]
     fn WinSetErrorInfo(e: u32, fs: u32) -> u32;
 }
 

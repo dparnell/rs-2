@@ -4,6 +4,7 @@ description = "MMIO.DLL: MMPM/2 multimedia file I/O (buffered and memory files, 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "mmio"

@@ -4,6 +4,7 @@ description = "PMVIOP.DLL: WinDefAVioWindowProc (the AVIO window procedure) at I
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pmviop"

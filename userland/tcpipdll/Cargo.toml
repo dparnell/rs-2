@@ -4,6 +4,7 @@ description = "TCPIPDLL.DLL: the 16-bit OS/2 TCP/IP socket and network database 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "tcpipdll"

@@ -4,6 +4,7 @@ description = "SOMUC.DLL: SOM's utility classes (somf_MCollectible and the somf_
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "somuc"

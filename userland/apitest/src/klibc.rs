@@ -114,7 +114,7 @@ pub fn run() {
 
         // The tiled selector of an address in a 32-bit code object is a
         // code selector (kLIBC's 16-bit thunk RETFs through it).
-        let sel = ((run as usize as u32) >> 13) | 7;
+        let sel = ((run as *const () as u32) >> 13) | 7;
         let ar: u32;
         let zf: u8;
         core::arch::asm!("lar {0:e}, {1:e}", "setz {2}", out(reg) ar, in(reg) sel, out(reg_byte) zf);

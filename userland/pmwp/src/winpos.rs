@@ -9,7 +9,7 @@ use pmwin::winpos::WinPos;
 
 unsafe extern "C" {
     #[link_name = "PMWIN.837"]
-    fn WinQueryWindowPos(h: u32, swp: *mut u32) -> u32;
+    fn WinQueryWindowPos(h: u32, swp: *mut crate::pm::Swp) -> u32;
     #[link_name = "PMWIN.844"]
     fn WinQueryWindowUShort(h: u32, index: i32) -> u16;
     #[link_name = "PMWIN.843"]
@@ -77,7 +77,7 @@ fn is_frame(h: u32) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinStoreWindowPos(app: *const u8, key: *const u8, h: u32) -> u32 {
     let mut swp = [0u32; 9];
-    if unsafe { WinQueryWindowPos(h, swp.as_mut_ptr()) } == 0 || !named(app) || !named(key) {
+    if unsafe { WinQueryWindowPos(h, swp.as_mut_ptr().cast()) } == 0 || !named(app) || !named(key) {
         return 0;
     }
     let fl = swp[0];

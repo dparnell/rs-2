@@ -4,6 +4,7 @@ description = "PNP.DLL: IBM's Hardware Manager class library, whose classes rs2 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "pnp"

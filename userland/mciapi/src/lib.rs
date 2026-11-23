@@ -30,8 +30,6 @@ pub use palette::mciCreatePlayFilePalette;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use os2::*;
-
 unsafe extern "C" {
     #[link_name = "MDM.2"]
     pub(crate) fn mciSendString(cmd: *const u8, ret: *mut u8, cb: u32, hwnd: u32, user: u32) -> u32;

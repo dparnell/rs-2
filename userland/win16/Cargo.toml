@@ -4,6 +4,7 @@ description = "WIN16.DLL: KERNEL, USER and GDI for Windows 3.x programs, on PM a
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autolib = false
 
 [[bin]]
 name = "win16"

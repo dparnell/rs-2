@@ -399,7 +399,6 @@ extern "C" fn pf_query_prog_details(obj: usize, buf: *mut u8, cb: *mut u32) -> u
 // ---- WPFolder ----
 
 pub const QC_FIRST: u32 = 0;
-pub const QC_NEXT: u32 = 1;
 pub const QC_LAST: u32 = 2;
 
 #[repr(C)]

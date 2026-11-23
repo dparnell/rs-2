@@ -85,7 +85,6 @@ pub const WM_DDE_EXECUTE: u16 = 0x03e8;
 const PROXY_BASE: u16 = 0x1004;
 
 // PM's DDE messages and DDESTRUCT status bits.
-const PM_DDE_INITIATE: u32 = 0xa0;
 const PM_DDE_REQUEST: u32 = 0xa1;
 const PM_DDE_ACK: u32 = 0xa2;
 const PM_DDE_DATA: u32 = 0xa3;
