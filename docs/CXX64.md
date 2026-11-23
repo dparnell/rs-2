@@ -91,7 +91,7 @@ links. Build the libraries first (`cc64.sh --libcxx`):
 cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE=.../userland64/cmake/rs2.cmake ...
 ```
 
-LLVM's lld is built this way ([SELF-HOSTING.md](SELF-HOSTING.md)).
+LLVM's clang and lld are built this way ([SELF-HOSTING.md](SELF-HOSTING.md)).
 
 ## Limits
 

@@ -1,7 +1,9 @@
 /* The heap: boundary-tagged chunks in regions from DosAllocMem, free
  * chunks in size-class bins, neighbours merged on free. Large blocks get
- * regions of their own. All memory is below 4 GB, so any pointer from
- * malloc may be passed to any OS/2 call. One lock for all threads. */
+ * regions of their own. The first LOW_MAX bytes of regions are below
+ * 4 GB, so that a program of ordinary size can pass any pointer from
+ * malloc to any OS/2 call; after that, and for blocks of HIGH_MIN bytes
+ * and more, memory comes from above 4 GB. One lock for all threads. */
 #include "libc.h"
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,9 @@
 #define MIN_CHUNK 32UL
 #define REGION (4UL << 20)
 #define DIRECT_MIN (1UL << 20)
+#define LOW_MAX (96UL << 20)
+#define HIGH_REGION (16UL << 20)
+#define HIGH_MIN (16UL << 20)
 #define NBINS 64
 
 typedef struct chunk {
@@ -75,11 +80,27 @@ static void set_free(chunk *c, size_t sz) {
     n->size &= ~PREV_INUSE;
 }
 
-static int grow(size_t need) {
-    size_t sz = need + 64 > REGION ? (need + 64 + 0xffff) & ~0xffffUL : REGION;
+/* Memory from the system, where it is preferred or else on the other side
+ * of 4 GB (a system with little memory has no 64-bit arena). */
+static void *system_alloc(size_t sz, int high) {
     PVOID p = 0;
-    if (DosAllocMem(&p, (ULONG)sz, PAG_COMMIT | PAG_READ | PAG_WRITE) != 0)
+    if (sz > 0xffff0000UL)
         return 0;
+    for (int i = 0; i < 2; i++, high = !high)
+        if (DosAllocMem(&p, (ULONG)sz, PAG_COMMIT | PAG_READ | PAG_WRITE | (high ? OBJ_ANY : 0)) == 0)
+            return p;
+    return 0;
+}
+
+static int grow(void) {   /* a request is below DIRECT_MIN */
+    static size_t low;
+    int high = low >= LOW_MAX;
+    size_t sz = high ? HIGH_REGION : REGION;
+    char *p = system_alloc(sz, high);
+    if (!p)
+        return 0;
+    if (!((uintptr_t)p >> 32))
+        low += sz;
     /* The region: one free chunk, then a 16-byte end marker in use. */
     chunk *c = (chunk *)p;
     c->size = PREV_INUSE;
@@ -131,11 +152,22 @@ static size_t request(size_t n) {
 
 static void *direct(size_t sz) {
     size_t total = (sz + 0xfff) & ~0xfffUL;
-    PVOID p = 0;
-    if (DosAllocMem(&p, (ULONG)total, PAG_COMMIT | PAG_READ | PAG_WRITE) != 0)
+    chunk *c = system_alloc(total, sz >= HIGH_MIN);
+    if (!c)
         return 0;
-    chunk *c = (chunk *)p;
     c->prev_size = 0;
+    c->size = total | INUSE | DIRECT;
+    return MEM(c);
+}
+
+void *_rs2_low_alloc(size_t n) {
+    size_t total = (n + HDR + 0xfff) & ~0xfffUL;
+    PVOID p = 0;
+    if (n > 0xffff0000UL || DosAllocMem(&p, (ULONG)total, PAG_COMMIT | PAG_READ | PAG_WRITE) != 0) {
+        errno = ENOMEM;
+        return 0;
+    }
+    chunk *c = p;
     c->size = total | INUSE | DIRECT;
     return MEM(c);
 }
@@ -156,7 +188,7 @@ void *malloc(size_t n) {
     if (!heap_ready)
         init();
     chunk *c = take(sz);
-    if (!c && grow(sz))
+    if (!c && grow())
         c = take(sz);
     if (!c) {
         _rs2_spin_unlock(&heap_lock);

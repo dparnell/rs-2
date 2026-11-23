@@ -764,6 +764,73 @@ static int child(int argc, char **argv) {
     return ok ? 77 : 1;
 }
 
+/* ---- the heap above 4 GB ---- */
+
+/* A copy of s above 4 GB (after test_high's filling, where malloc's small
+ * blocks come from). */
+static char *high(const char *s) {
+    char *p = 0;
+    for (int i = 0; i < 200 && (uintptr_t)p <= 0xffffffff; i++)
+        p = malloc(300000);   /* (uses up what is free below) */
+    return p ? strcpy(p, s) : 0;
+}
+
+static void test_high(const char *self) {
+    char *p = 0;
+    int n = 0;
+    while (n < 400 && (uintptr_t)p < 0x100000000ULL && (p = malloc(512 * 1024)))
+        n++;
+    printf("    %d blocks of 512 KB, then %p\n", n, (void *)p);
+    if ((uintptr_t)p < 0x100000000ULL) {
+        printf("  (no memory above 4 GB here: skipped)\n");
+        return;
+    }
+    char *name = high("highmem.tmp"), *to = high("highmem2.tmp"), *dir = high("highdir");
+    check("strings above 4 GB", name && to && dir && (uintptr_t)name > 0xffffffff && (uintptr_t)dir > 0xffffffff);
+    unlink(name);
+    unlink(to);
+    rmdir(dir);
+    FILE *f = fopen(name, high("w"));
+    check("fopen", f != 0);
+    if (!f)
+        return;
+    memset(p, 'x', 512 * 1024);
+    check("fwrite", fwrite(p, 1, 512 * 1024, f) == 512 * 1024 && fclose(f) == 0);
+    struct stat *st = malloc(512 * 1024);
+    check("stat", stat(name, st) == 0 && st->st_size == 512 * 1024);
+    check("access, chmod", access(name, F_OK) == 0 && chmod(name, 0600) == 0);
+    int fd = open(name, O_RDONLY);
+    memset(p, 0, 512 * 1024);
+    check("read", read(fd, p, 512 * 1024) == 512 * 1024 && p[512 * 1024 - 1] == 'x');
+    close(fd);
+    check("rename", rename(name, to) == 0);
+    check("unlink", unlink(to) == 0);
+    check("mkdir", mkdir(dir, 0777) == 0);
+    DIR *d = opendir(dir);
+    check("opendir", d && readdir(d));
+    if (d)
+        closedir(d);
+    check("rmdir", rmdir(dir) == 0);
+    check("getenv", getenv(high("PATH")) != 0);
+    char *args[] = {high(self), high("child"), high("two words"), high("quote\"inside"), high("back\\slash"), 0};
+    setenv(high("CLIBVAR"), high("inherited"), 1);
+    check("spawnv", spawnv(P_WAIT, args[0], args) == 77);
+    int before = counter;
+    _beginthread(worker, 0, 0, (void *)(intptr_t)1);
+    for (int i = 0; i < 500 && counter == before; i++)
+        DosSleep(10);
+    check("thread", counter == before + 1);
+    char *big = malloc(1UL << 30);
+    check("malloc 1 GB", big != 0);
+    if (big) {
+        big[0] = big[(1UL << 30) - 1] = 5;
+        free(big);
+    }
+    errno = 0;
+    void *volatile tera = malloc((1UL << 40) - 64);
+    check("malloc 1 TB fails", !tera && errno == ENOMEM);
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && !strncmp(argv[1], "child", 5))
         return child(argc, argv);
@@ -786,6 +853,7 @@ int main(int argc, char **argv) {
     test_shared_dll();
     test_dll_ctors(argv[0]);
     test_cxx_dll();
+    test_high(argv[0]);
     printf("clibtest: %d checks, %d failures\n", checks, failures);
     return failures;
 }

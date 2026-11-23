@@ -52,6 +52,14 @@ HIDDEN void _rs2_thread_exit(void);
 HIDDEN int _rs2_oserr(APIRET rc);
 HIDDEN int _rs2_errno_of(APIRET rc);
 
+/* malloc may give memory above 4 GB, which most OS/2 calls do not take:
+ * LOW is a string's copy on the stack if it is there, and _rs2_low_alloc
+ * zeroed memory below 4 GB (free it with free). */
+#define LOW(p) \
+    ((PCSZ)((uintptr_t)(p) >> 32 ? __builtin_strcpy(__builtin_alloca(__builtin_strlen((const char *)(p)) + 1), (const char *)(p)) \
+                                 : (const char *)(p)))
+HIDDEN void *_rs2_low_alloc(size_t n);
+
 /* A lock: spins, then yields. Recursive locks belong to one thread. */
 typedef struct {
     volatile int locked;

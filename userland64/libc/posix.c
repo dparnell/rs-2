@@ -135,7 +135,7 @@ int fchmod(int fd, mode_t mode) {
 
 int utimes(const char *path, const struct timeval tv[2]) {
     FILESTATUS3 st;
-    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    APIRET rc = DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st);
     if (rc)
         return _rs2_oserr(rc);
     for (int i = 0; i < 2; i++) {
@@ -152,7 +152,7 @@ int utimes(const char *path, const struct timeval tv[2]) {
             st.fdateLastWrite = d, st.ftimeLastWrite = m;
     }
     st.attrFile &= FILE_READONLY | FILE_HIDDEN | FILE_SYSTEM | FILE_ARCHIVED;
-    rc = DosSetPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st, 0);
+    rc = DosSetPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st, 0);
     return rc ? _rs2_oserr(rc) : 0;
 }
 
@@ -207,11 +207,11 @@ int utimensat(int dir, const char *path, const struct timespec ts[2], int flags)
     (void)dir;
     (void)flags;
     FILESTATUS3 st;
-    APIRET rc = DosQueryPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st);
+    APIRET rc = DosQueryPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st);
     if (!rc) {
         if (set_times(&st, ts))
             return -1;
-        rc = DosSetPathInfo((PCSZ)path, FIL_STANDARD, &st, sizeof st, 0);
+        rc = DosSetPathInfo(LOW(path), FIL_STANDARD, &st, sizeof st, 0);
     }
     return rc ? _rs2_oserr(rc) : 0;
 }
@@ -280,13 +280,13 @@ void *dlopen(const char *name, int flags) {
     (void)flags;
     char fail[260];
     HMODULE h;
-    if (!name || DosLoadModule((PSZ)fail, sizeof fail, (PCSZ)name, &h))
+    if (!name || DosLoadModule((PSZ)fail, sizeof fail, LOW(name), &h))
         return 0;
     return (void *)(unsigned long)h;
 }
 void *dlsym(void *__restrict h, const char *__restrict name) {
     PVOID p = 0;
-    if (!h || DosQueryProcAddr((HMODULE)(unsigned long)h, 0, (PCSZ)name, &p))
+    if (!h || DosQueryProcAddr((HMODULE)(unsigned long)h, 0, LOW(name), &p))
         return 0;
     return p;
 }
