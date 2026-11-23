@@ -5,7 +5,8 @@ itself, i.e. `cargo xtask iso` running on rs2. The first step is done:
 rs2 runs 64-bit programs (ELF64, long mode) with a native 64-bit OS/2
 API, including PM: see [API64.md](API64.md). They can use memory above
 4 GB (API64.md, "Memory"), and C programs have a C library of their own
-([LIBC64.md](LIBC64.md)), which is the base route B needs.
+([LIBC64.md](LIBC64.md)) and C++ with libc++ ([CXX64.md](CXX64.md)),
+the base route B needs.
 
 ## What the build needs
 

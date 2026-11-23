@@ -6,6 +6,7 @@ struct timeval {
     time_t tv_sec;
     long tv_usec;
 };
+int utimes(const char *, const struct timeval[2]);
 int gettimeofday(struct timeval *__restrict, void *__restrict);
 _RS2_END
 #endif

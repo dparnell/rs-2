@@ -600,8 +600,43 @@ F1(acosh) F1(asinh) F1(atanh) F1(cosh) F1(sinh) F1(tanh)
 F1(exp) F1(exp2) F1(expm1) F1(log) F1(log10) F1(log1p) F1(log2) F1(logb)
 F1(cbrt) F1(fabs) F2(hypot) F2(pow) F1(sqrt) F1(erf) F1(erfc) F1(lgamma) F1(tgamma)
 F1(ceil) F1(floor) F1(nearbyint) F1(rint) F1(round) F1(trunc)
-F2(fmod) F2(remainder) F2(copysign) F2(nextafter) F2(fdim) F2(fmax) F2(fmin)
+F2(fmod) F2(remainder) F2(copysign) F2(fdim) F2(fmax) F2(fmin)
 
+float nextafterf(float x, float y) {
+    if (x != x || y != y)
+        return x + y;
+    if (x == y)
+        return y;
+    union { float f; uint32_t u; } v = {x};
+    if (x == 0)
+        v.u = 1 | (y < 0 ? 1U << 31 : 0);
+    else if ((x < y) == (x > 0))
+        v.u++;
+    else
+        v.u--;
+    return v.f;
+}
+/* In double precision, as the other long double functions. */
+long double nextafterl(long double x, long double y) { return nextafter((double)x, (double)y); }
+long double scalbnl(long double x, int n) { return x87_scale(x, n); }
+float scalblnf(float x, long n) { return (float)scalbln(x, n); }
+long double scalblnl(long double x, long n) { return x87_scale(x, n < -40000 ? -40000 : n > 40000 ? 40000 : n); }
+int ilogbf(float x) { return ilogb(x); }
+int ilogbl(long double x) { return ilogb((double)x); }
+long double fmal(long double x, long double y, long double z) { return x * y + z; }
+double nexttoward(double x, long double y) { return x == y ? (double)y : nextafter(x, y > x ? __builtin_inf() : -__builtin_inf()); }
+float nexttowardf(float x, long double y) { return x == y ? (float)y : nextafterf(x, y > x ? __builtin_inff() : -__builtin_inff()); }
+long double nexttowardl(long double x, long double y) { return nextafterl(x, y); }
+long lrintf(float x) { return lrint(x); }
+long lrintl(long double x) { return (long)x87_rnd(x); }
+long long llrintf(float x) { return llrint(x); }
+long long llrintl(long double x) { return (long long)x87_rnd(x); }
+long lroundf(float x) { return lround(x); }
+long lroundl(long double x) { return lround((double)x); }
+long long llroundf(float x) { return llround(x); }
+long long llroundl(long double x) { return llround((double)x); }
+float remquof(float x, float y, int *q) { return (float)remquo(x, y, q); }
+long double remquol(long double x, long double y, int *q) { return remquo((double)x, (double)y, q); }
 float frexpf(float x, int *e) { return (float)frexp(x, e); }
 long double frexpl(long double x, int *e) { return frexp((double)x, e); }
 float ldexpf(float x, int n) { return (float)ldexp(x, n); }

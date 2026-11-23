@@ -296,7 +296,7 @@ examples.
 ### C
 
 `userland64/c/cc64.sh -o OUT.EXE [--pm] [--dll] [--rc FILE.RC] FILE.c|.o|.a...`
-compiles with clang (Apple's will do: `--target=x86_64-unknown-linux-gnu`,
+compiles with clang (Apple's will do: `--target=x86_64-unknown-none-elf`,
 `-nostdinc` with userland64/include as the only system headers, `-fPIC`,
 hidden visibility) and links with rust-lld and `link64.ld`, as the Rust
 programs are, against rs2's C library (`C:\RS2\DLL64\LIBC64.DLL`, or
@@ -315,6 +315,8 @@ xtask lists the C programs `cargo xtask build` makes:
 - `C:\RS2\CPMHELLO.EXE` (pmhello.c, pmhello.rc): a PM window with a menu
   and a title from its resources, drawing with GPI; `CPMHELLO /SELFTEST`
   prints PASS/FAIL and `cpmhello selftest done: N failure(s)`.
+- `C:\RS2\CXXTEST.EXE` and `CXXTSTS.EXE`, with
+  `C:\RS2\DLL64\CXXTDLL.DLL`: C++ ([CXX64.md](CXX64.md)).
 - `C:\RS2\CLIBTEST.EXE` and `CLIBTSTS.EXE` (clibtest.c, with LIBC64.DLL
   and `--static`), with `C:\RS2\DLL64\CLIBTDLL.DLL`: the C library's
   tests (LIBC64.md, "Tests"); `clibtest: N checks, 0 failures`.

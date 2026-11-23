@@ -16,6 +16,11 @@ struct timespec {
     time_t tv_sec;
     long tv_nsec;
 };
+typedef int clockid_t;
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+int clock_gettime(clockid_t, struct timespec *);
+int clock_getres(clockid_t, struct timespec *);
 clock_t clock(void);
 time_t time(time_t *);
 double difftime(time_t, time_t);

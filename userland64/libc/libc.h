@@ -34,9 +34,19 @@ struct _rs2_thread {
     char strerror[48];
     /* The interrupted registers while a signal handler runs (signal.c). */
     unsigned long sigregs[20];
+    /* pthread.c: the event __rs2_wait sleeps on, the pthread_t, keys,
+     * thread_local destructors and variables. */
+    HEV event;
+    void *pthread;
+    void **specific;
+    void *dtors;
+    void **tls;
+    size_t tls_count;
 };
 HIDDEN struct _rs2_thread *_rs2_self(void);
 HIDDEN void _rs2_thread_done(void);
+HIDDEN void _rs2_thread_dtors(void);
+HIDDEN void _rs2_thread_exit(void);
 
 /* Sets errno from an OS/2 error; returns -1. */
 HIDDEN int _rs2_oserr(APIRET rc);
