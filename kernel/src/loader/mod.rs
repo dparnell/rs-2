@@ -169,8 +169,25 @@ pub struct Module {
     pub per_process_term: bool,
     /// Global (once per system) initialisation has run.
     pub global_init_done: core::sync::atomic::AtomicBool,
+    /// 64-bit modules: thread-local storage (elfload.rs).
+    pub tls: Tls64,
     /// Kept for resources.
     pub image: Option<Arc<[u8]>>,
+}
+
+/// What a 64-bit module's thread-local storage needs (docs/STD64.md).
+#[derive(Default)]
+pub struct Tls64 {
+    /// The address of the module's `RS2_MODULE`, the value of
+    /// R_X86_64_DTPMOD64 relocations for its variables.
+    pub module: Option<u32>,
+    /// The size and alignment of its block.
+    pub size: u64,
+    pub align: u64,
+    /// Exported thread-local variables: offsets in the module's block.
+    pub symbols: BTreeMap<String, u64>,
+    /// A program's `RS2_THREAD_START(param, pfn)`, where its threads start.
+    pub thread_start: Option<u32>,
 }
 
 impl Module {
@@ -375,6 +392,7 @@ pub fn init() {
             per_process_init: false,
             per_process_term: false,
             global_init_done: core::sync::atomic::AtomicBool::new(true),
+            tls: Default::default(),
             image: None,
         }));
     }

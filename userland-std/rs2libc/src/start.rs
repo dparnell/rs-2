@@ -11,10 +11,13 @@
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
+#[cfg(target_arch = "x86_64")]
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::spin::SpinLock;
 use crate::sys::*;
 
+#[cfg(target_arch = "x86")]
 unsafe extern "C" {
     fn main(argc: c_int, argv: *const *const c_char, envp: *const *const c_char) -> c_int;
     static __init_array_start: Option<unsafe extern "C" fn(c_int, *const *const c_char, *const *const c_char)>;
@@ -26,6 +29,106 @@ pub static mut HMOD: u32 = 0;
 pub static mut ARGC: c_int = 0;
 pub static mut ARGV: *const *const c_char = core::ptr::null();
 
+/// The arguments, the environment: once per process.
+#[cfg(target_arch = "x86_64")]
+unsafe fn init_process(env: *const u8, cmdline: *const u8) {
+    unsafe {
+        if !ARGV.is_null() {
+            return;
+        }
+        crate::misc::init_environ(env);
+        let argv = build_argv(cmdline);
+        ARGC = argv.len() as c_int - 1;
+        ARGV = Vec::leak(argv).as_ptr();
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+type Main = unsafe extern "C" fn(c_int, *const *const c_char, *const *const c_char) -> c_int;
+
+/// A module's constructors, with (argc, argv, envp) as glibc does.
+#[cfg(target_arch = "x86_64")]
+unsafe fn run_init(m: &crate::tls::Module) {
+    type Init = Option<unsafe extern "C" fn(c_int, *const *const c_char, *const *const c_char)>;
+    let r = m.init_array();
+    let mut f = r.start;
+    unsafe {
+        while f < r.end {
+            if let Some(init) = *(f as *const Init) {
+                init(ARGC, ARGV, crate::misc::environ as *const *const c_char);
+            }
+            f += size_of::<Init>();
+        }
+    }
+}
+
+/// A 64-bit program's start (crt64.rs).
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __rs2_exe_start(m: *mut crate::tls::Module, hmod: u32, env: *const u8, cmdline: *const u8, main: Main) -> ! {
+    unsafe {
+        HMOD = hmod;
+        crate::tls::set_program(m);
+        crate::frames::add(m);
+        crate::thread::init_main();
+        init_process(env, cmdline);
+        run_init(&*m);
+        exit(main(ARGC, ARGV, crate::misc::environ as *const *const c_char))
+    }
+}
+
+/// Where a 64-bit program's threads start, whoever made them (crt64.rs):
+/// the program's thread-local storage first.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __rs2_thread_start(_m: *mut crate::tls::Module, param: usize, f: unsafe extern "C" fn(usize)) {
+    unsafe {
+        crate::tls::setup(null_mut());
+        f(param);
+        // (pthreads do not come back.)
+        crate::thread::run_tls_dtors();
+        crate::tls::teardown();
+    }
+}
+
+/// A 64-bit DLL's _DLL_InitTerm (crt64.rs). The first call is for the DLL
+/// rs2libc is linked into: the DLLs and programs that share it come later.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __rs2_dll_init(m: *mut crate::tls::Module, _hmod: u32, flag: u32) -> u32 {
+    static HOST: AtomicPtr<crate::tls::Module> = AtomicPtr::new(null_mut());
+    unsafe {
+        if flag == 0 {
+            if HOST.load(Ordering::Relaxed).is_null() {
+                HOST.store(m, Ordering::Relaxed);
+                crate::tls::in_dll();
+                let pib = info_blocks().1;
+                HMOD = pib.hmte;
+                // A program that shares this rs2libc (its crt64.rs says so):
+                // its thread-local storage comes with the first thread's.
+                let (mut host, mut program) = (null_mut(), null_mut());
+                if DosQueryProcAddr(HMOD, 0, c"RS2_HOST".as_ptr().cast(), &mut host) == 0
+                    && *(host as *const usize) == __rs2_exe_start as *const () as usize
+                    && DosQueryProcAddr(HMOD, 0, c"RS2_MODULE".as_ptr().cast(), &mut program) == 0
+                {
+                    crate::tls::set_program(program.cast());
+                }
+                crate::thread::init_main();
+                init_process(pib.pchenv, pib.pchcmd);
+            }
+            crate::frames::add(m);
+            run_init(&*m);
+        } else {
+            if HOST.load(Ordering::Relaxed) == m {
+                run_atexit();
+            }
+            crate::frames::remove(m);
+        }
+    }
+    1
+}
+
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
 pub unsafe extern "C" fn _start(hmod: u32, _reserved: u32, env: *const u8, cmdline: *const u8) -> u32 {
@@ -135,6 +238,12 @@ pub unsafe extern "C" fn __cxa_atexit(f: extern "C" fn(*mut c_void), arg: *mut c
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn exit(code: c_int) -> ! {
+    run_atexit();
+    crate::thread::run_tls_dtors();
+    unsafe { _exit(code) }
+}
+
+fn run_atexit() {
     loop {
         let Some((f, arg)) = ATEXIT.lock().pop() else { break };
         unsafe {
@@ -147,8 +256,6 @@ pub unsafe extern "C" fn exit(code: c_int) -> ! {
             }
         }
     }
-    crate::thread::run_tls_dtors();
-    unsafe { _exit(code) }
 }
 
 #[unsafe(no_mangle)]

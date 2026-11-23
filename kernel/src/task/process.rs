@@ -154,7 +154,7 @@ pub struct Process {
     /// DosSetSignalExceptionFocus nesting.
     pub sig_focus: AtomicU32,
     /// Thread-local memory dwords in use (bit mask).
-    pub tls_used: AtomicU32,
+    pub tls_used: SpinLock<[u64; TLS_DWORDS64 / 64]>,
     /// File handle limit (DosSetMaxFH / DosSetRelMaxFH).
     pub max_fh: AtomicU32,
     /// Win16 interrupt handler (16:16), 0 if none (api/win16.rs).
@@ -171,6 +171,9 @@ pub struct Process {
 
 /// Thread-local memory: dwords per thread (in the process information area).
 pub const TLS_DWORDS: usize = 32;
+/// 64-bit callers get dwords after those, up to this one: each DLL with
+/// Rust's std takes one (docs/STD64.md).
+pub const TLS_DWORDS64: usize = 1024;
 
 static NEXT_PID: AtomicU32 = AtomicU32::new(1);
 
@@ -409,7 +412,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         pending_signal: SpinLock::new(None),
         sig_held: AtomicU32::new(0),
         sig_focus: AtomicU32::new(0),
-        tls_used: AtomicU32::new(0),
+        tls_used: SpinLock::new([0; TLS_DWORDS64 / 64]),
         max_fh: AtomicU32::new(match &p.parent {
             Some(q) => q.max_fh.load(Ordering::Relaxed),
             None => 20,

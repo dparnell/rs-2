@@ -5,8 +5,8 @@
 # are 64-bit OS/2 programs as they are: docs/STD64.md.
 [workspace]
 resolver = "3"
-members = ["rs2libc", "stdtest", "webcore", "webtext", "web", "webshot", "webjs", "pmstd64"]
-# pmstd64 is a 64-bit program (--target x86_64-unknown-linux-gnu).
+members = ["rs2libc", "stdtest", "webcore", "webtext", "web", "webshot", "webjs", "pmstd64", "stdtdll", "stdtrlib", "stdtrust"]
+# pmstd64 and stdtdll, stdtrlib, stdtrust are 64-bit (--target x86_64-unknown-linux-gnu).
 # webshot is a host tool (cargo run -p webshot --target aarch64-apple-darwin).
 default-members = ["rs2libc", "stdtest", "webcore", "webtext", "web"]
 

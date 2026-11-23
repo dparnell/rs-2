@@ -223,6 +223,8 @@ unsafe extern "C" {
     pub fn DosQueryProcAddr(hmod: u32, ord: u32, name: *const u8, ppfn: *mut *mut u8) -> APIRET;
     #[link_name = "DOSCALLS.322"]
     pub fn DosFreeModule(hmod: u32) -> APIRET;
+    #[link_name = "DOSCALLS.454"]
+    pub fn DosAllocThreadLocalMemory(cb: u32, p: *mut *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.232"]
     pub fn DosEnterCritSec() -> APIRET;
     #[link_name = "DOSCALLS.233"]

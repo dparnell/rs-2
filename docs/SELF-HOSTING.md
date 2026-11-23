@@ -86,8 +86,8 @@ the C and C++ runtimes, which are done, and native compilers serve
 programs of rs2's own as well.
 
 1. Rust's std for 64-bit programs: done ([STD64.md](STD64.md)).
-2. Rust DLLs with std: the loader's TLS relocations (R_X86_64_DTPMOD64),
-   proc macros and `rustc_driver` as DLLs.
+2. Rust DLLs with std, C and Rust interfaces (what proc macros and
+   `rustc_driver` are): done ([STD64.md](STD64.md)).
 3. LLVM's `lld`, then `clang`, cross-built with cc64.sh (C++ on
    LIBCXX64.DLL; what LLVM's Unix support code needs of POSIX, `mmap` of
    files first). Milestone: compile and link a C program on rs2.

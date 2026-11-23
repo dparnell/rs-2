@@ -1,4 +1,4 @@
-//! ELF thread-local storage on rs2.
+//! ELF thread-local storage on rs2 (32-bit; tls64.rs is the 64-bit one).
 //!
 //! std (built for i686 Linux) reaches its `thread_local!`s through the
 //! thread pointer in GS's base, using the i386 "variant II" layout: the
@@ -11,39 +11,13 @@
 //! LDT data selector of its own (an alias selector from RS2API 421, base =
 //! its thread pointer, limit 4 GB so that negative offsets wrap) loaded
 //! into GS. The kernel saves and restores GS with the thread's other
-//! segment registers. On x86-64 the thread pointer's register is FS, which
-//! OS/2 keeps for the TIB: 64-bit code does not use the TIB through FS, so
-//! there FS gets the selector (a descriptor's base is 32 bits: the block is
-//! below 4 GB); the 64-bit PMWIN puts the TIB's back around the 32-bit code
-//! it calls, and the kernel keeps FS for exception handlers. rs2libc's per-thread state (errno, pthread keys,
+//! segment registers. rs2libc's per-thread state (errno, pthread keys,
 //! the futex semaphore) is in the control block at the thread pointer.
 
 use core::ffi::{c_int, c_void};
 use core::ptr::null_mut;
 
 use crate::sys::Rs2Win16Selector;
-
-/// The segment register that holds the thread pointer's selector: GS on
-/// i386, FS on x86-64 (as the ABIs say).
-#[cfg(target_arch = "x86")]
-macro_rules! seg {
-    () => {
-        "gs"
-    };
-}
-#[cfg(target_arch = "x86_64")]
-macro_rules! seg {
-    () => {
-        "fs"
-    };
-}
-
-/// The thread's own value of the register, when nothing is loaded: GS is
-/// free on OS/2; FS is the TIB's (gdt::TIB_SEL).
-#[cfg(target_arch = "x86")]
-const NONE: u32 = 0;
-#[cfg(target_arch = "x86_64")]
-const NONE: u32 = 0x150b;
 
 pub const KEYS: usize = 128;
 
@@ -90,13 +64,13 @@ fn tls_layout() -> (usize, usize, usize) {
 #[inline]
 pub fn tcb() -> *mut Tcb {
     let gs: u32;
-    unsafe { core::arch::asm!(concat!("mov {0:e}, ", seg!()), out(reg) gs, options(nomem, nostack, preserves_flags)) };
-    if gs & 0xffff == NONE {
+    unsafe { core::arch::asm!("mov {0:e}, gs", out(reg) gs, options(nomem, nostack, preserves_flags)) };
+    if gs & 0xfff8 == 0 {
         // A thread rs2libc did not start (a DLL's): give it TLS now.
         return unsafe { setup(null_mut()) };
     }
     let p: *mut Tcb;
-    unsafe { core::arch::asm!(concat!("mov {0}, ", seg!(), ":[0]"), out(reg) p, options(nostack, readonly, preserves_flags)) };
+    unsafe { core::arch::asm!("mov {0}, gs:[0]", out(reg) p, options(nostack, readonly, preserves_flags)) };
     p
 }
 
@@ -128,7 +102,7 @@ pub unsafe fn setup(thread: *mut crate::thread::Thread) -> *mut Tcb {
             crate::start::fatal("rs2libc: no selector for thread-local storage\r\n");
         }
         (*tcb).selector = sel;
-        core::arch::asm!(concat!("mov ", seg!(), ", {0:e}"), in(reg) sel, options(nostack, preserves_flags));
+        core::arch::asm!("mov gs, {0:e}", in(reg) sel, options(nostack, preserves_flags));
         tcb
     }
 }
@@ -142,7 +116,7 @@ pub unsafe fn teardown() {
         if (*t).sem != 0 {
             crate::sys::DosCloseEventSem((*t).sem);
         }
-        core::arch::asm!(concat!("mov ", seg!(), ", {0:e}"), in(reg) NONE, options(nostack, preserves_flags));
+        core::arch::asm!("mov gs, {0:e}", in(reg) 0u32, options(nostack, preserves_flags));
         Rs2Win16Selector(4, sel, 0);
         crate::malloc::low_free(block);
     }

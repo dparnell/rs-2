@@ -1,0 +1,12 @@
+[package]
+name = "stdtdll"
+description = "STDTDLL.DLL: a DLL with std and a C interface (docs/STD64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }

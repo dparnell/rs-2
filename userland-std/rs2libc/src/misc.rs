@@ -446,15 +446,9 @@ pub unsafe extern "C" fn gnu_get_libc_version() -> *const c_char {
     c"2.35".as_ptr()
 }
 
-/// Never called, as `___tls_get_addr` (x86-64's name).
-#[cfg(target_arch = "x86_64")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn __tls_get_addr() -> *mut c_void {
-    crate::start::fatal("rs2libc: __tls_get_addr called\r\n");
-}
-
 /// Never called: the linker turns every TLS access into the local-exec
 /// form (tls.rs). Present so that the reference resolves.
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ___tls_get_addr() -> *mut c_void {
     crate::start::fatal("rs2libc: ___tls_get_addr called\r\n");
@@ -601,4 +595,23 @@ pub unsafe extern "C" fn getentropy(buf: *mut c_void, len: size_t) -> c_int {
     }
     unsafe { getrandom(buf, len, 0) };
     0
+}
+
+// ---- Not on OS/2 ----
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn getpwuid_r(_u: u32, _pw: *mut c_void, _buf: *mut c_char, _n: size_t, res: *mut *mut c_void) -> c_int {
+    unsafe { *res = null_mut() };
+    libc::ENOENT
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn killpg(_pgrp: c_int, _sig: c_int) -> c_int {
+    fail(libc::ESRCH)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mremap(_p: *mut c_void, _old: size_t, _new: size_t, _flags: c_int, _to: *mut c_void) -> *mut c_void {
+    fail(libc::ENOSYS);
+    libc::MAP_FAILED
 }

@@ -1,0 +1,12 @@
+[package]
+name = "stdtrlib"
+description = "STDTRLIB.DLL: a DLL with a Rust interface, whose std its users share (docs/STD64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }

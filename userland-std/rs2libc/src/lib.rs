@@ -32,7 +32,10 @@ extern crate alloc;
 
 pub mod sys;
 pub mod errno;
+#[cfg_attr(target_arch = "x86_64", path = "tls64.rs")]
 pub mod tls;
+#[cfg(target_arch = "x86_64")]
+pub mod frames;
 pub mod start;
 pub mod malloc;
 pub mod math;

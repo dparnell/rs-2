@@ -30,6 +30,9 @@ rustflags = [
     "-C", "link-arg=-znorelro",
     "-C", "link-arg=--hash-style=sysv",
     "-C", "link-arg=--eh-frame-hdr",
+    "-C", "link-arg=--export-dynamic-symbol=RS2_THREAD_START",
+    "-C", "link-arg=--export-dynamic-symbol=RS2_HOST",
+    "-C", "link-arg=--export-dynamic-symbol=RS2_MODULE",
     "-C", "link-arg=--export-dynamic-symbol=RS2_APPTYPE",
     "-C", "link-arg=--export-dynamic-symbol=RS2_RESOURCES",
 ]

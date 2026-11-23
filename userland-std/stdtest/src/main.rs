@@ -9,6 +9,7 @@
 //! - `panic`: catch_unwind, drops during unwinding, a panicking thread
 //! - `mem`: a large HashMap and Vec, then the address space limit (how many
 //!   MB can be allocated in 16 MB pieces; more than 512 with high memory)
+//! - `dll` (64-bit): DLLs with std
 //! - `mem64` (64-bit): memory above 4 GB and calls with data there
 //! - `net`: loopback TCP (1 MB echoed), UDP, a refused connection, timeouts,
 //!   name lookup
@@ -505,6 +506,77 @@ fn mem64(t: &mut T) {
     drop((fill, keep));
 }
 
+/// 64-bit DLLs: STDTDLL (its own std, a C interface), STDTRUST (a program
+/// sharing a DLL's std).
+#[cfg(target_pointer_width = "64")]
+fn dlls(t: &mut T) {
+    use std::ffi::{CStr, c_char, c_void};
+    unsafe extern "C" {
+        fn dlopen(name: *const c_char, flags: i32) -> *mut c_void;
+        fn dlsym(h: *mut c_void, name: *const c_char) -> *mut c_void;
+        fn dlclose(h: *mut c_void) -> i32;
+        #[link_name = "DOSCALLS.311"]
+        fn DosCreateThread(ptid: *mut u32, f: extern "C" fn(usize), param: usize, fl: u32, stack: u32) -> u32;
+        #[link_name = "DOSCALLS.349"]
+        fn DosWaitThread(ptid: *mut u32, option: u32) -> u32;
+    }
+    thread_local!(static HERE: std::cell::Cell<u32> = const { std::cell::Cell::new(5) });
+    extern "C" fn back(i: u32) -> u32 {
+        // In a thread the DLL made: the program's thread-locals work.
+        HERE.set(HERE.get() + i);
+        HERE.get()
+    }
+    /// Uses std and the DLL in a thread std knows nothing of.
+    extern "C" fn foreign(p: usize) {
+        let (count, out) = unsafe { &*(p as *const (extern "C" fn() -> u32, AtomicUsize)) };
+        HERE.set(HERE.get() * 2);
+        let first = count();
+        let s = format!("{} {}", HERE.get(), first);
+        out.store((s == "10 101") as usize + 1, Ordering::SeqCst);
+    }
+    for round in 1..=2 {
+        let h = unsafe { dlopen(c"STDTDLL".as_ptr(), 2) };
+        t.check(&format!("load STDTDLL ({round})"), !h.is_null(), "dlopen failed");
+        if h.is_null() {
+            return;
+        }
+        let sym = |n: &CStr| unsafe { dlsym(h, n.as_ptr()) };
+        macro_rules! f {
+            ($n:literal, $t:ty) => {
+                unsafe { std::mem::transmute::<*mut c_void, $t>(sym($n)) }
+            };
+        }
+        let count = f!(c"dll_count", extern "C" fn() -> u32);
+        let (a, b) = (count(), count());
+        t.check("the DLL's thread-locals", (a, b) == (101, 102), format!("{a} {b}"));
+        let c = std::thread::spawn(move || count()).join().unwrap();
+        t.check("in another thread", c == 101 && count() == 103, c);
+        let data = sym(c"STDTDLL_DATA") as *const [u32; 4];
+        t.check("data by name", !data.is_null() && unsafe { *data } == [1, 2, 3, 0x64], format!("{data:p}"));
+        let threads = f!(c"dll_threads", extern "C" fn(u32, extern "C" fn(u32) -> u32) -> u32);
+        let n = threads(6, back);
+        t.check("threads of the DLL's calling back", n == 6 * 5 + 15 && HERE.get() == 5, n);
+        let dropped = f!(c"dll_dropped", extern "C" fn() -> u32)();
+        t.check("their thread-locals dropped", dropped == 6, dropped);
+        t.check("a panic caught in the DLL", f!(c"dll_panic", extern "C" fn() -> u32)() == 1, "");
+        let r = std::panic::catch_unwind(|| panic!("ours"));
+        t.check("a panic here", r.is_err(), "");
+        t.check("arguments, environment, files in the DLL", f!(c"dll_env", extern "C" fn() -> u32)() == 1, "");
+        let arg = (count, AtomicUsize::new(0));
+        let mut tid = 0;
+        let rc = unsafe { DosCreateThread(&mut tid, foreign, &raw const arg as usize, 0, 65536) };
+        unsafe { DosWaitThread(&mut tid, 0) };
+        t.check("a DosCreateThread thread", rc == 0 && arg.1.load(Ordering::SeqCst) == 2, arg.1.load(Ordering::SeqCst));
+        t.check("unload", unsafe { dlclose(h) } == 0, "");
+    }
+    let out = std::process::Command::new("STDTRUST.EXE").arg("one two").output();
+    let text = out.as_ref().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    for l in text.lines() {
+        println!("     STDTRUST: {l}");
+    }
+    t.check("STDTRUST: a Rust DLL shared", matches!(&out, Ok(o) if o.status.success()), format!("{out:?}"));
+}
+
 fn net(t: &mut T) {
     use std::net::{TcpListener, TcpStream, UdpSocket};
     let l = TcpListener::bind("127.0.0.1:0");
@@ -677,6 +749,10 @@ fn main() {
     }
     if on("mem") {
         mem(&mut t);
+    }
+    #[cfg(target_pointer_width = "64")]
+    if on("dll") {
+        dlls(&mut t);
     }
     #[cfg(target_pointer_width = "64")]
     if on("mem64") {

@@ -1,0 +1,9 @@
+[package]
+name = "stdtrust"
+description = "STDTRUST.EXE: a program on STDTRLIB.DLL (docs/STD64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+stdtrlib = { path = "../stdtrlib" }
