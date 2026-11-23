@@ -102,6 +102,11 @@ pub fn os2_path(p: &[u8]) -> Vec<u8> {
         return b"CON\0".to_vec();
     }
     let mut v: Vec<u8> = p.iter().map(|&c| if c == b'/' { b'\\' } else { c }).collect();
+    // std's Path knows no drives: what it made of a directory and "C:/x"
+    // is "dir/C:/x", which means C:\x. (No file name has a colon.)
+    if let Some(i) = (1..v.len().saturating_sub(1)).rev().find(|&i| v[i - 1] == b'\\' && v[i].is_ascii_alphabetic() && v[i + 1] == b':') {
+        v.drain(..i);
+    }
     // "C:" alone means that drive's current directory; "dir\" is "dir".
     while v.len() > 1 && v.ends_with(b"\\") && !(v.len() == 3 && v[1] == b':') && !(v.len() == 1) {
         v.pop();
@@ -112,6 +117,15 @@ pub fn os2_path(p: &[u8]) -> Vec<u8> {
 
 pub unsafe fn c_path(p: *const c_char) -> Vec<u8> {
     os2_path(unsafe { cstr(p) })
+}
+
+/// A path as std's Path sees it: 64-bit programs get / (Path does not
+/// split at \).
+fn std_path(mut p: Vec<u8>) -> Vec<u8> {
+    if cfg!(target_arch = "x86_64") {
+        p.iter_mut().filter(|c| **c == b'\\').for_each(|c| *c = b'/');
+    }
+    p
 }
 
 fn is_absolute(p: &[u8]) -> bool {
@@ -603,6 +617,13 @@ pub unsafe extern "C" fn fstatat64(dirfd: c_int, path: *const c_char, buf: *mut 
     stat_os2(&p, buf)
 }
 
+/// (`stat` and `stat64` are the same structure on x86-64.)
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fstat(fd: c_int, buf: *mut stat64) -> c_int {
+    unsafe { fstat64(fd, buf) }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fstat64(fd: c_int, buf: *mut stat64) -> c_int {
     match classify(fd) {
@@ -813,7 +834,7 @@ pub fn full_path(p: &[u8]) -> Vec<u8> {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
-    let mut d = current_dir();
+    let mut d = std_path(current_dir());
     d.push(0);
     unsafe {
         if buf.is_null() {
@@ -863,7 +884,7 @@ pub unsafe extern "C" fn realpath(path: *const c_char, resolved: *mut c_char) ->
         fail_os2(rc);
         return core::ptr::null_mut();
     }
-    let mut full = if p == b"NUL\0" { b"NUL".to_vec() } else { full_path(&p) };
+    let mut full = if p == b"NUL\0" { b"NUL".to_vec() } else { std_path(full_path(&p)) };
     full.push(0);
     unsafe {
         let out = if resolved.is_null() { crate::malloc::malloc(full.len()) as *mut c_char } else { resolved };
@@ -878,7 +899,7 @@ pub unsafe extern "C" fn realpath(path: *const c_char, resolved: *mut c_char) ->
 pub unsafe extern "C" fn readlink(path: *const c_char, buf: *mut c_char, size: size_t) -> ssize_t {
     let p = unsafe { cstr(path) };
     if p == b"/proc/self/exe" {
-        let exe = crate::start::program_path();
+        let exe = std_path(crate::start::program_path());
         let n = exe.len().min(size);
         unsafe { core::ptr::copy_nonoverlapping(exe.as_ptr(), buf as *mut u8, n) };
         return n as ssize_t;
