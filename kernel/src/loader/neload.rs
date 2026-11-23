@@ -382,6 +382,7 @@ pub fn load(
         per_process_term: false,
         specific,
         global_init_done: core::sync::atomic::AtomicBool::new(false),
+        tls: Default::default(),
         image: Some(data.clone()),
     }))
 }

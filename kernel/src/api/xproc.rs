@@ -9,7 +9,7 @@ use core::sync::atomic::Ordering;
 
 use super::signal::{SIG_CTRLBREAK, SIG_CTRLC};
 use super::{err, Ctx};
-use crate::task::process::{self, info, TLS_DWORDS};
+use crate::task::process::{self, info, TLS_DWORDS, TLS_DWORDS64};
 use crate::task::thread::State;
 use crate::task::Process;
 
@@ -171,7 +171,7 @@ pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
     if n == 0 || n > 8 {
         return err::INVALID_PARAMETER;
     }
-    let mask = (1u64 << n) - 1;
+    let range = if c.is64 { TLS_DWORDS as u32..TLS_DWORDS64 as u32 } else { 0..TLS_DWORDS as u32 };
     if c.process.tlm.get().is_none() {
         tlm::enable(&c.process);
         // The caller goes on using it on this CPU right away; threads on
@@ -186,11 +186,14 @@ pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
     // DosFreeThreadLocalMemory knows how much to free.
     let first = {
         let mut runs = TLS_RUNS.lock();
-        let used = c.process.tls_used.load(Ordering::Relaxed);
-        let Some(first) = (0..=TLS_DWORDS as u32 - n).find(|&i| (used as u64 >> i) & mask == 0) else {
+        let mut used = c.process.tls_used.lock();
+        let free = |i: u32| used[i as usize / 64] >> (i % 64) & 1 == 0;
+        let Some(first) = (range.start..=range.end - n).find(|&i| (i..i + n).all(free)) else {
             return err::NOT_ENOUGH_MEMORY;
         };
-        c.process.tls_used.fetch_or((mask << first) as u32, Ordering::Relaxed);
+        for i in first..first + n {
+            used[i as usize / 64] |= 1 << (i % 64);
+        }
         runs.push((c.process.pid, first, n));
         first
     };
@@ -213,7 +216,7 @@ static TLS_RUNS: crate::sync::SpinLock<alloc::vec::Vec<(u32, u32, u32)>> = crate
 pub fn dos_free_thread_local_memory(c: &mut Ctx) -> u32 {
     let p = c.arg(0);
     let page = crate::mm::tlm::TLM_BASE;
-    if p < page || p >= page + TLS_DWORDS as u32 * 4 || p % 4 != 0 {
+    if p < page || p >= page + TLS_DWORDS64 as u32 * 4 || p % 4 != 0 {
         return err::INVALID_PARAMETER;
     }
     let first = (p - page) / 4;
@@ -224,8 +227,10 @@ pub fn dos_free_thread_local_memory(c: &mut Ctx) -> u32 {
         i.map(|i| r.remove(i))
     };
     let Some((_, first, n)) = run else { return err::INVALID_PARAMETER };
-    let mask = (((1u64 << n) - 1) << first) as u32;
-    c.process.tls_used.fetch_and(!mask, Ordering::Relaxed);
+    let mut used = c.process.tls_used.lock();
+    for i in first..first + n {
+        used[i as usize / 64] &= !(1 << (i % 64));
+    }
     0
 }
 

@@ -26,11 +26,12 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{err, Export, Format, Module, Object, Start, Target};
+use super::{err, Export, Format, Module, Object, Start, Target, Tls64};
 use crate::vm::{self, pag, AddressSpace, PageState, SegKind, SharedMem, PAGE, TILE};
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
+const PT_TLS: u32 = 7;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 
@@ -50,6 +51,18 @@ const R_X86_64_64: u32 = 1;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u32 = 8;
+const R_X86_64_DTPMOD64: u32 = 16;
+const R_X86_64_DTPOFF64: u32 = 17;
+const R_X86_64_TPOFF64: u32 = 18;
+
+/// In a program's `RS2_MODULE` (userland-std/link64.ld): where the table
+/// of the DLLs with thread-local storage of their own starts, and its
+/// entries (the DLL's RS2_MODULE, its block's distance below the thread
+/// pointer).
+const TLS_TABLE: u64 = 80;
+const TLS_TABLE_MAX: usize = 32;
+
+const STT_TLS: u8 = 6;
 
 /// Is this an x86-64 ELF64 file?
 pub fn is_elf64(data: &[u8]) -> bool {
@@ -79,6 +92,7 @@ struct Sym {
     value: u64,
     shndx: u16,
     bind: u8,
+    ty: u8,
 }
 
 /// The loaded image of all segments, addressed by link-time virtual
@@ -154,6 +168,35 @@ pub fn resource(m: &Module, ty: u16, id: u16) -> Option<(u32, u32)> {
     })
 }
 
+/// The thread-local storage segment's size and alignment (0: none).
+fn tls_segment(d: &[u8]) -> (u64, u64) {
+    let (phoff, phentsize, phnum) = (u64le(d, 32) as usize, u16le(d, 54) as usize, u16le(d, 56) as usize);
+    let p = (0..phnum).map(|i| phoff + i * phentsize).find(|&p| u32le(d, p) == PT_TLS);
+    p.map_or((0, 1), |p| (u64le(d, p + 40), u64le(d, p + 48).max(1)))
+}
+
+/// The DLLs in `imports` and what they import that have thread-local
+/// storage, each with its block's distance below the thread pointer of a
+/// program whose own block has `size` bytes (docs/STD64.md).
+fn static_tls(imports: &[Arc<Module>], size: u64, align: u64) -> Vec<(Arc<Module>, u64)> {
+    let mut off = size.next_multiple_of(align);
+    let mut out: Vec<(Arc<Module>, u64)> = Vec::new();
+    let mut seen: Vec<u16> = Vec::new();
+    let mut todo: Vec<Arc<Module>> = imports.iter().rev().cloned().collect();
+    while let Some(m) = todo.pop() {
+        if seen.contains(&m.hmte) {
+            continue;
+        }
+        seen.push(m.hmte);
+        todo.extend(m.deps());
+        if m.tls.module.is_some() && m.tls.size > 0 {
+            off = (off + m.tls.size).next_multiple_of(m.tls.align);
+            out.push((m, off));
+        }
+    }
+    out
+}
+
 pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
     let d = &data[..];
     if !is_elf64(d) || u16le(d, 16) != 3 {
@@ -161,6 +204,10 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
     }
     let entry = u64le(d, 24);
     let (segs, dynamic) = segments(d);
+    let (tls_size, tls_align) = tls_segment(d);
+    if !tls_align.is_power_of_two() || tls_size > 0x1000_0000 {
+        return Err(err::BAD_EXE_FORMAT);
+    }
     if segs.is_empty() {
         return Err(err::BAD_EXE_FORMAT);
     }
@@ -245,7 +292,7 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
     let mut syms = Vec::with_capacity(nsyms);
     for i in 0..nsyms {
         let Some(e) = img.slice(symtab + i as u64 * 24, 24) else { return Err(err::BAD_EXE_FORMAT) };
-        syms.push(Sym { name: cstr(u32le(e, 0)), bind: e[4] >> 4, shndx: u16le(e, 6), value: u64le(e, 8) });
+        syms.push(Sym { name: cstr(u32le(e, 0)), bind: e[4] >> 4, ty: e[4] & 15, shndx: u16le(e, 6), value: u64le(e, 8) });
     }
 
     // Exports: the defined global symbols, numbered in symbol order.
@@ -253,8 +300,15 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
     let mut names = BTreeMap::new();
     let mut app_type = 2;
     let mut init_term = None;
+    let mut tls_module = None;
+    let mut tls_symbols = BTreeMap::new();
+    let mut thread_start = None;
     for s in &syms {
         if s.shndx == 0 || s.name.is_empty() || (s.bind != 1 && s.bind != 2) {
+            continue;
+        }
+        if s.ty == STT_TLS {
+            tls_symbols.insert(s.name.clone(), s.value);
             continue;
         }
         let addr = s.value.wrapping_add(delta) as u32;
@@ -263,8 +317,11 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
                 app_type = u32le(b, 0);
             }
         }
-        if s.name == "_DLL_InitTerm" {
-            init_term = Some(addr);
+        match s.name.as_str() {
+            "_DLL_InitTerm" => init_term = Some(addr),
+            "RS2_MODULE" => tls_module = Some(addr),
+            "RS2_THREAD_START" if !dll => thread_start = Some(addr),
+            _ => {}
         }
         exports.push(Export::At(Target::flat32(addr, true)));
         names.insert(s.name.clone(), exports.len() as u16);
@@ -282,7 +339,8 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
     // (A thread_local's control block, __emutls_v.NAME, is a plain symbol.)
     let import = |name: &str| -> Option<(String, String)> {
         let (m, what) = name.split_once('.')?;
-        (!m.starts_with("__emutls_")).then(|| (super::module_name(m), what.to_string()))
+        // (Nor are mangled names with a dot imports.)
+        (!m.starts_with('_')).then(|| (super::module_name(m), what.to_string()))
     };
     for s in &syms {
         if s.shndx == 0 && !s.name.is_empty() {
@@ -335,6 +393,22 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
         })
     };
 
+    // The program's static thread-local storage.
+    let layout = if dll { Vec::new() } else { static_tls(&imports, tls_size, tls_align) };
+    if let Some(at) = tls_module.filter(|_| !layout.is_empty()) {
+        if layout.len() > TLS_TABLE_MAX {
+            crate::println!("{path}: more than {TLS_TABLE_MAX} DLLs with thread-local storage");
+            return Err(err::BAD_EXE_FORMAT);
+        }
+        let at = (at as u64).wrapping_sub(delta) + TLS_TABLE;
+        for (i, (m, off)) in layout.iter().enumerate() {
+            let e = at + i as u64 * 16;
+            if !img.put_u64(e, m.tls.module.unwrap_or(0) as u64) || !img.put_u64(e + 8, *off) {
+                return Err(err::BAD_EXE_FORMAT);
+            }
+        }
+    }
+
     // Relocations (RELA and the PLT's, bound now).
     let mut relocs = Vec::new();
     if let (Some(&at), Some(&sz)) = (tags.get(&DT_RELA), tags.get(&DT_RELASZ)) {
@@ -355,6 +429,43 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
                     let s = syms.get(sym).ok_or(err::BAD_EXE_FORMAT)?;
                     let v = resolve(s)?;
                     if ty == R_X86_64_64 { v.wrapping_add(addend) } else { v }
+                }
+                // A thread-local variable: its module's RS2_MODULE and its
+                // offset in the block, for __tls_get_addr (rs2libc).
+                R_X86_64_DTPMOD64 | R_X86_64_DTPOFF64 => {
+                    let s = syms.get(sym).ok_or(err::BAD_EXE_FORMAT)?;
+                    let (module, value) = if sym == 0 || s.shndx != 0 {
+                        (tls_module, s.value)
+                    } else {
+                        let owner = needed.iter().find_map(|n| {
+                            let m = imports.iter().find(|x| x.name.eq_ignore_ascii_case(n))?;
+                            m.tls.symbols.get(&s.name).map(|&v| (m.tls.module, v))
+                        });
+                        owner.ok_or_else(|| {
+                            crate::println!("{path}: unresolved thread-local {}", s.name);
+                            err::PROC_NOT_FOUND
+                        })?
+                    };
+                    if ty == R_X86_64_DTPOFF64 {
+                        value.wrapping_add(addend)
+                    } else {
+                        module.ok_or(err::BAD_EXE_FORMAT)? as u64
+                    }
+                }
+                // A variable's offset from the thread pointer: a program's
+                // own, or that of a DLL loaded with it.
+                R_X86_64_TPOFF64 if !dll => {
+                    let s = syms.get(sym).ok_or(err::BAD_EXE_FORMAT)?;
+                    let (value, off) = if sym == 0 || s.shndx != 0 {
+                        (s.value, tls_size.next_multiple_of(tls_align))
+                    } else {
+                        let v = layout.iter().find_map(|(m, off)| m.tls.symbols.get(&s.name).map(|&v| (v, *off)));
+                        v.ok_or_else(|| {
+                            crate::println!("{path}: unresolved thread-local {}", s.name);
+                            err::PROC_NOT_FOUND
+                        })?
+                    };
+                    value.wrapping_add(addend).wrapping_sub(off)
                 }
                 _ => {
                     crate::println!("{path}: unsupported relocation type {ty}");
@@ -440,6 +551,7 @@ pub fn load(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, mut space: O
         per_process_init: true,
         per_process_term: init_term.is_some(),
         global_init_done: core::sync::atomic::AtomicBool::new(true),
+        tls: Tls64 { module: tls_module, size: tls_size, align: tls_align, symbols: tls_symbols, thread_start },
         image: Some(data.clone()),
     }))
 }

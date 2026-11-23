@@ -376,10 +376,14 @@ fn dos_create_thread64(c: &mut Ctx) -> u32 {
     let sp = ((top - 64) & !15) - 8;
     let exit_stub = crate::loader::gate::slot_address(0, super::proc::THREAD_EXIT_ORDINAL) as u64;
     c.space().poke_bytes(sp, &exit_stub.to_le_bytes());
+    let hook = c.process.exe.tls.thread_start;
     let frame = TrapFrame {
         rflags: 0x202,
         cs: USER_CS64 as u64,
-        rip: pfn,
+        // A program with thread-local storage starts its threads itself:
+        // RS2_THREAD_START(param, pfn) (docs/STD64.md).
+        rip: hook.map_or(pfn, |h| h as u64),
+        rsi: pfn,
         ss: USER_DS as u64,
         rsp: sp as u64,
         ds: USER_DS as u64,

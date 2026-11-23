@@ -1267,7 +1267,17 @@ const STD_PROGRAMS: &[(&str, &str, bool)] = &[
 
 /// The 64-bit programs of userland-std/ (docs/STD64.md): cargo package,
 /// destination. They stay ELF.
-const STD_PROGRAMS64: &[(&str, &str)] = &[("stdtest", "RS2\\STDTST64.EXE"), ("pmstd64", "RS2\\PMSTD64.EXE")];
+const STD_PROGRAMS64: &[(&str, &str)] = &[
+    ("stdtest", "RS2\\STDTST64.EXE"),
+    ("pmstd64", "RS2\\PMSTD64.EXE"),
+    ("stdtdll", "RS2\\DLL64\\STDTDLL.DLL"),
+    (DYN_PROGRAM64, "RS2\\STDTRUST.EXE"),
+    ("stdtrlib", "RS2\\DLL64\\STDTRLIB.DLL"),
+];
+
+/// The one among them that shares a Rust DLL's std (userland-std/dyn64.sh
+/// builds it and the DLL, stdtrlib).
+const DYN_PROGRAM64: &str = "stdtrust";
 
 /// Build userland-std's 64-bit programs.
 fn build_userland_std64() -> Option<image::FileList> {
@@ -1275,10 +1285,14 @@ fn build_userland_std64() -> Option<image::FileList> {
     let dir = root().join("userland-std");
     let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
     cmd.current_dir(&dir).args(["build", "--release", "--target", TARGET]).env_remove("CARGO_TARGET_DIR");
-    for (pkg, _) in STD_PROGRAMS64 {
+    let dynamic = |pkg: &str| pkg == DYN_PROGRAM64 || pkg == "stdtrlib";
+    for (pkg, _) in STD_PROGRAMS64.iter().filter(|p| !dynamic(p.0)) {
         cmd.args(["-p", pkg]);
     }
     if !cmd.status().ok()?.success() {
+        return None;
+    }
+    if !Command::new("sh").arg(dir.join("dyn64.sh")).arg(DYN_PROGRAM64).env_remove("CARGO_TARGET_DIR").status().ok()?.success() {
         return None;
     }
     let out_dir = root().join("work/userland/64");
@@ -1286,7 +1300,9 @@ fn build_userland_std64() -> Option<image::FileList> {
     let mut files = Vec::new();
     for (bin, dest) in STD_PROGRAMS64 {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
-        std::fs::copy(dir.join("target").join(TARGET).join("release").join(bin), &out).ok()?;
+        let file = if dest.ends_with(".DLL") { format!("lib{bin}.so") } else { bin.to_string() };
+        let target = dir.join(if dynamic(bin) { "target/dyn64" } else { "target" });
+        std::fs::copy(target.join(TARGET).join("release").join(file), &out).ok()?;
         files.push((out, dest.to_string()));
     }
     Some(files)

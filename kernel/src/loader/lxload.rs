@@ -354,6 +354,7 @@ pub fn load(
         per_process_term: h.module_flags & mflags::PER_PROCESS_TERM != 0,
         specific,
         global_init_done: core::sync::atomic::AtomicBool::new(false),
+        tls: Default::default(),
         image: Some(data.clone()),
     }))
 }
