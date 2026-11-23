@@ -313,7 +313,7 @@ fn time(t: &mut T) {
 }
 
 fn env(t: &mut T, args: &[String]) {
-    t.check("args[0]", args.first().is_some_and(|a| a.to_ascii_uppercase().contains("STDTEST")), format!("{args:?}"));
+    t.check("args[0]", args.first().is_some_and(|a| a.to_ascii_uppercase().contains("STDT")), format!("{args:?}"));
     unsafe { std::env::set_var("STDTEST_VAR", "value 1") };
     t.check("set_var/var", std::env::var("STDTEST_VAR").as_deref() == Ok("value 1"), "");
     t.check("vars has it", std::env::vars().any(|(k, v)| k == "STDTEST_VAR" && v == "value 1"), "");
@@ -321,7 +321,7 @@ fn env(t: &mut T, args: &[String]) {
     t.check("remove_var", std::env::var("STDTEST_VAR").is_err(), "");
     t.check("PATH", std::env::var("PATH").is_ok(), "");
     let exe = std::env::current_exe();
-    t.check("current_exe", matches!(&exe, Ok(p) if p.to_string_lossy().to_ascii_uppercase().ends_with("STDTEST.EXE")), format!("{exe:?}"));
+    t.check("current_exe", matches!(&exe, Ok(p) if p.to_string_lossy().to_ascii_uppercase().ends_with(if cfg!(target_pointer_width = "64") { "STDTST64.EXE" } else { "STDTEST.EXE" })), format!("{exe:?}"));
     let cwd = std::env::current_dir();
     t.check("current_dir", matches!(&cwd, Ok(p) if p.to_string_lossy().len() >= 3), format!("{cwd:?}"));
 }

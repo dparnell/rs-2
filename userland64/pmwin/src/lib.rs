@@ -114,6 +114,18 @@ unsafe extern "C" {
 global_asm!(
     ".globl rs2_call32",
     "rs2_call32:",
+    "    mov eax, fs",
+    "    push rax",
+    "    push rax",
+    "    cmp ax, 0x150b",
+    "    je 5f",
+    "    mov rcx, [rip + {fs64}]",
+    "    test rcx, rcx",
+    "    jz 8f",
+    "    mov [rcx], eax",
+    "8:  mov eax, 0x150b",
+    "    mov fs, eax",
+    "5:",
     "    push rbp",
     "    push rbx",
     "    push r12",
@@ -156,7 +168,12 @@ global_asm!(
     "    pop r12",
     "    pop rbx",
     "    pop rbp",
-    "    ret",
+    "    pop rcx",
+    "    pop rcx",
+    "    cmp cx, 0x150b",
+    "    je 6f",
+    "    mov fs, ecx",
+    "6:  ret",
     "",
     ".globl rs2_entry64",
     "rs2_entry64:",
@@ -172,9 +189,18 @@ global_asm!(
     "    mov edx, [rbp + 40]",
     "    mov ecx, [rbp + 44]",
     "    mov r8d, [rbp + 48]",
-    "    cld",
+    "    mov r10, [rip + {fs64}]",
+    "    test r10, r10",
+    "    jz 7f",
+    "    mov r10d, [r10]",
+    "    test r10d, r10d",
+    "    jz 7f",
+    "    mov fs, r10d",
+    "7:  cld",
     "    call {wndproc}",
     "    mov rsp, rbp",
+    "    mov ecx, 0x150b",
+    "    mov fs, ecx",
     "    pop rdi",
     "    pop rsi",
     "    pop rbp",
@@ -197,13 +223,29 @@ global_asm!(
     "    mov edi, eax",
     "    jmp {proc4}",
     wndproc = sym rs2_wndproc,
+    fs64 = sym FS64,
     proc4 = sym rs2_proc4,
 );
+
+/// Each thread's FS selector when 64-bit code has one of its own (a thread
+/// pointer: Rust's std, rs2libc), in thread-local memory. FS is the TIB's
+/// while 32-bit code runs, and this one again in a window procedure called
+/// back; all threads of a process that never changed FS have 0 here.
+static FS64: AtomicU64 = AtomicU64::new(0);
 
 /// Call a 32-bit function.
 pub fn call32(target: u32, args: &[u32]) -> u32 {
     if target == 0 {
         return 0;
+    }
+    if FS64.load(Ordering::Acquire) == 0 {
+        lock();
+        if FS64.load(Ordering::Relaxed) == 0 {
+            let mut p: *mut u32 = core::ptr::null_mut();
+            unsafe { DosAllocThreadLocalMemory(1, (&raw mut p).cast()) };
+            FS64.store(p as u64, Ordering::Release);
+        }
+        unlock();
     }
     unsafe { rs2_call32(target, args.as_ptr(), args.len()) }
 }

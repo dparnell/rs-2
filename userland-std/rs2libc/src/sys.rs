@@ -31,9 +31,9 @@ pub const ERROR_INTERRUPT: u32 = 95;
 
 #[repr(C)]
 pub struct Tib {
-    pub pexchain: u32,
-    pub pstack: u32,
-    pub pstacklimit: u32,
+    pub pexchain: usize,
+    pub pstack: usize,
+    pub pstacklimit: usize,
     pub ptib2: *const Tib2,
     pub version: u32,
     pub ordinal: u32,
@@ -76,7 +76,7 @@ pub struct DateTime {
 /// FILESTATUS3 (level 1 of DosQueryPathInfo / DosQueryFileInfo).
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
-pub struct FileStatus3 {
+pub struct FileStatus3Find {
     pub cdate: u16,
     pub ctime: u16,
     pub adate: u16,
@@ -88,12 +88,36 @@ pub struct FileStatus3 {
     pub attr: u32,
 }
 
+/// What DosQueryPathInfo, DosQueryFileInfo and DosSetPathInfo exchange at
+/// level [`FS_LEVEL`]: FILESTATUS3, in 64-bit programs FILESTATUS3L.
+#[cfg(target_arch = "x86")]
+pub type FileStatus3 = FileStatus3Find;
+#[cfg(target_arch = "x86")]
+pub const FS_LEVEL: u32 = 1;
+
+#[cfg(target_arch = "x86_64")]
+#[repr(C, packed(4))]
+#[derive(Default, Clone, Copy)]
+pub struct FileStatus3 {
+    pub cdate: u16,
+    pub ctime: u16,
+    pub adate: u16,
+    pub atime: u16,
+    pub wdate: u16,
+    pub wtime: u16,
+    pub cb_file: u64,
+    pub cb_alloc: u64,
+    pub attr: u32,
+}
+#[cfg(target_arch = "x86_64")]
+pub const FS_LEVEL: u32 = 11;
+
 /// FILEFINDBUF3 (level 1 of DosFindFirst).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FileFindBuf3 {
     pub next: u32,
-    pub st: FileStatus3,
+    pub st: FileStatus3Find,
     pub cch_name: u8,
     pub name: [u8; 257],
 }
@@ -108,7 +132,7 @@ pub struct SockAddrIn {
     pub zero: [u8; 8],
 }
 
-pub type ThreadFn = unsafe extern "C" fn(u32);
+pub type ThreadFn = unsafe extern "C" fn(usize);
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.234"]
@@ -117,33 +141,10 @@ unsafe extern "C" {
     pub fn DosWrite(hf: u32, buf: *const u8, cb: u32, actual: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.281"]
     pub fn DosRead(hf: u32, buf: *mut u8, cb: u32, actual: *mut u32) -> APIRET;
-    #[link_name = "DOSCALLS.273"]
-    pub fn DosOpen(
-        name: *const u8,
-        phf: *mut u32,
-        action: *mut u32,
-        size: u32,
-        attr: u32,
-        open_flags: u32,
-        open_mode: u32,
-        eaop: *mut u8,
-    ) -> APIRET;
     #[link_name = "DOSCALLS.257"]
     pub fn DosClose(hf: u32) -> APIRET;
     #[link_name = "DOSCALLS.212"]
     pub fn DosError(fl: u32) -> APIRET;
-    #[link_name = "DOSCALLS.256"]
-    pub fn DosSetFilePtr(hf: u32, off: i32, method: u32, actual: *mut u32) -> APIRET;
-    #[link_name = "DOSCALLS.259"]
-    pub fn DosDelete(name: *const u8) -> APIRET;
-    #[link_name = "DOSCALLS.270"]
-    pub fn DosCreateDir(name: *const u8, eaop: *mut u8) -> APIRET;
-    #[link_name = "DOSCALLS.226"]
-    pub fn DosDeleteDir(name: *const u8) -> APIRET;
-    #[link_name = "DOSCALLS.264"]
-    pub fn DosFindFirst(spec: *const u8, phdir: *mut u32, attr: u32, buf: *mut u8, cb: u32, count: *mut u32, level: u32) -> APIRET;
-    #[link_name = "DOSCALLS.265"]
-    pub fn DosFindNext(hdir: u32, buf: *mut u8, cb: u32, count: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.263"]
     pub fn DosFindClose(hdir: u32) -> APIRET;
     #[link_name = "DOSCALLS.312"]
@@ -161,7 +162,7 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.348"]
     pub fn DosQuerySysInfo(first: u32, last: u32, buf: *mut u32, cb: u32) -> APIRET;
     #[link_name = "DOSCALLS.311"]
-    pub fn DosCreateThread(ptid: *mut u32, pfn: ThreadFn, param: u32, flags: u32, cb_stack: u32) -> APIRET;
+    pub fn DosCreateThread(ptid: *mut u32, pfn: ThreadFn, param: usize, flags: u32, cb_stack: u32) -> APIRET;
     #[link_name = "DOSCALLS.349"]
     pub fn DosWaitThread(ptid: *mut u32, option: u32) -> APIRET;
     #[link_name = "DOSCALLS.324"]
@@ -192,22 +193,12 @@ unsafe extern "C" {
     pub fn DosSetDefaultDisk(disk: u32) -> APIRET;
     #[link_name = "DOSCALLS.274"]
     pub fn DosQueryCurrentDir(disk: u32, buf: *mut u8, pcb: *mut u32) -> APIRET;
-    #[link_name = "DOSCALLS.255"]
-    pub fn DosSetCurrentDir(dir: *const u8) -> APIRET;
-    #[link_name = "DOSCALLS.223"]
-    pub fn DosQueryPathInfo(path: *const u8, level: u32, buf: *mut u8, cb: u32) -> APIRET;
     #[link_name = "DOSCALLS.279"]
     pub fn DosQueryFileInfo(hf: u32, level: u32, buf: *mut u8, cb: u32) -> APIRET;
     #[link_name = "DOSCALLS.218"]
     pub fn DosSetFileInfo(hf: u32, level: u32, buf: *const u8, cb: u32) -> APIRET;
-    #[link_name = "DOSCALLS.219"]
-    pub fn DosSetPathInfo(path: *const u8, level: u32, buf: *const u8, cb: u32, opts: u32) -> APIRET;
-    #[link_name = "DOSCALLS.271"]
-    pub fn DosMove(from: *const u8, to: *const u8) -> APIRET;
     #[link_name = "DOSCALLS.224"]
     pub fn DosQueryHType(hf: u32, ptype: *mut u32, pattr: *mut u32) -> APIRET;
-    #[link_name = "DOSCALLS.272"]
-    pub fn DosSetFileSize(hf: u32, size: u32) -> APIRET;
     #[link_name = "DOSCALLS.221"]
     pub fn DosSetFHState(hf: u32, state: u32) -> APIRET;
     #[link_name = "DOSCALLS.276"]
@@ -220,10 +211,18 @@ unsafe extern "C" {
     pub fn DosTmrQueryTime(t: *mut u64) -> APIRET;
     #[link_name = "DOSCALLS.235"]
     pub fn DosKillProcess(action: u32, pid: u32) -> APIRET;
-    #[link_name = "DOSCALLS.283"]
-    pub fn DosExecPgm(fail: *mut u8, cbfail: u32, flags: u32, args: *const u8, env: *const u8, res: *mut [u32; 2], name: *const u8) -> APIRET;
     #[link_name = "DOSCALLS.280"]
     pub fn DosWaitChild(action: u32, option: u32, res: *mut [u32; 2], ppid: *mut u32, pid: u32) -> APIRET;
+    /// DosSetFileLocks(hf, unlock, lock, ms, flags): ranges are
+    /// [offset, length].
+    #[link_name = "DOSCALLS.428"]
+    pub fn DosSetFileLocks(hf: u32, unlock: *const [u32; 2], lock: *const [u32; 2], ms: u32, flags: u32) -> APIRET;
+    #[link_name = "DOSCALLS.318"]
+    pub fn DosLoadModule(fail: *mut u8, cbfail: u32, name: *const u8, phmod: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.321"]
+    pub fn DosQueryProcAddr(hmod: u32, ord: u32, name: *const u8, ppfn: *mut *mut u8) -> APIRET;
+    #[link_name = "DOSCALLS.322"]
+    pub fn DosFreeModule(hmod: u32) -> APIRET;
     #[link_name = "DOSCALLS.232"]
     pub fn DosEnterCritSec() -> APIRET;
     #[link_name = "DOSCALLS.233"]
@@ -256,18 +255,10 @@ unsafe extern "C" {
     pub fn Rs2SockShutdown(s: u32, how: u32) -> u32;
     #[link_name = "RS2API.211"]
     pub fn Rs2SockClose(s: u32) -> u32;
-    #[link_name = "RS2API.212"]
-    pub fn Rs2SockSelect(socks: *mut u32, nread: u32, nwrite: u32, nexcept: u32, ms: i32, nready: *mut u32) -> u32;
     #[link_name = "RS2API.213"]
     pub fn Rs2SockIoctl(s: u32, cmd: u32, arg: *mut u32) -> u32;
-    #[link_name = "RS2API.214"]
-    pub fn Rs2SockSetOpt(s: u32, level: u32, opt: u32, val: *const u8, cb: u32) -> u32;
-    #[link_name = "RS2API.215"]
-    pub fn Rs2SockGetOpt(s: u32, level: u32, opt: u32, val: *mut u8, cb: *mut u32) -> u32;
     #[link_name = "RS2API.216"]
     pub fn Rs2SockGetName(s: u32, peer: u32, addr: *mut SockAddrIn) -> u32;
-    #[link_name = "RS2API.217"]
-    pub fn Rs2NetResolve(name: *const u8, addrs: *mut [u8; 4], max: u32, count: *mut u32) -> u32;
 }
 
 /// The current thread's TIB and the process's PIB.
@@ -279,3 +270,238 @@ pub fn info_blocks() -> (&'static Tib, &'static Pib) {
         (&*t, &*p)
     }
 }
+
+// ---- Calls whose arguments may be on the heap ----
+//
+// In 64-bit programs the heap may be above 4 GB (malloc.rs), where most of
+// the API does not take pointers (docs/API64.md): paths and buffers go
+// through copies below.
+
+#[cfg(target_arch = "x86")]
+mod calls {
+    use super::*;
+    unsafe extern "C" {
+        #[link_name = "DOSCALLS.273"]
+        pub fn DosOpen(
+            name: *const u8,
+            phf: *mut u32,
+            action: *mut u32,
+            size: u32,
+            attr: u32,
+            open_flags: u32,
+            open_mode: u32,
+            eaop: *mut u8,
+        ) -> APIRET;
+        #[link_name = "DOSCALLS.259"]
+        pub fn DosDelete(name: *const u8) -> APIRET;
+        #[link_name = "DOSCALLS.270"]
+        pub fn DosCreateDir(name: *const u8, eaop: *mut u8) -> APIRET;
+        #[link_name = "DOSCALLS.226"]
+        pub fn DosDeleteDir(name: *const u8) -> APIRET;
+        #[link_name = "DOSCALLS.264"]
+        pub fn DosFindFirst(spec: *const u8, phdir: *mut u32, attr: u32, buf: *mut u8, cb: u32, count: *mut u32, level: u32) -> APIRET;
+        #[link_name = "DOSCALLS.265"]
+        pub fn DosFindNext(hdir: u32, buf: *mut u8, cb: u32, count: *mut u32) -> APIRET;
+        #[link_name = "DOSCALLS.223"]
+        pub fn DosQueryPathInfo(path: *const u8, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+        #[link_name = "DOSCALLS.219"]
+        pub fn DosSetPathInfo(path: *const u8, level: u32, buf: *const u8, cb: u32, opts: u32) -> APIRET;
+        #[link_name = "DOSCALLS.271"]
+        pub fn DosMove(from: *const u8, to: *const u8) -> APIRET;
+        #[link_name = "DOSCALLS.255"]
+        pub fn DosSetCurrentDir(dir: *const u8) -> APIRET;
+        #[link_name = "DOSCALLS.283"]
+        pub fn DosExecPgm(fail: *mut u8, cbfail: u32, flags: u32, args: *const u8, env: *const u8, res: *mut [u32; 2], name: *const u8) -> APIRET;
+        #[link_name = "DOSCALLS.256"]
+        pub fn DosSetFilePtr(hf: u32, off: i32, method: u32, actual: *mut u32) -> APIRET;
+        #[link_name = "DOSCALLS.272"]
+        pub fn DosSetFileSize(hf: u32, size: u32) -> APIRET;
+        #[link_name = "RS2API.212"]
+        pub fn Rs2SockSelect(socks: *mut u32, nread: u32, nwrite: u32, nexcept: u32, ms: i32, nready: *mut u32) -> u32;
+        #[link_name = "RS2API.214"]
+        pub fn Rs2SockSetOpt(s: u32, level: u32, opt: u32, val: *const u8, cb: u32) -> u32;
+        #[link_name = "RS2API.215"]
+        pub fn Rs2SockGetOpt(s: u32, level: u32, opt: u32, val: *mut u8, cb: *mut u32) -> u32;
+        #[link_name = "RS2API.217"]
+        pub fn Rs2NetResolve(name: *const u8, addrs: *mut [u8; 4], max: u32, count: *mut u32) -> u32;
+    }
+    pub unsafe fn seek(hf: u32, off: i64, method: u32) -> Result<u64, APIRET> {
+        let Ok(off) = i32::try_from(off) else { return Err(131) };
+        let mut pos = 0;
+        match unsafe { DosSetFilePtr(hf, off, method, &mut pos) } {
+            0 => Ok(pos as u64),
+            rc => Err(rc),
+        }
+    }
+    pub unsafe fn set_file_size(hf: u32, size: i64) -> APIRET {
+        unsafe { DosSetFileSize(hf, size as u32) }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+mod calls {
+    use super::*;
+
+    mod raw {
+        use super::*;
+        unsafe extern "C" {
+            #[link_name = "DOSCALLS.259"]
+            pub fn DosDelete(name: *const u8) -> APIRET;
+            #[link_name = "DOSCALLS.270"]
+            pub fn DosCreateDir(name: *const u8, eaop: *mut u8) -> APIRET;
+            #[link_name = "DOSCALLS.226"]
+            pub fn DosDeleteDir(name: *const u8) -> APIRET;
+            #[link_name = "DOSCALLS.264"]
+            pub fn DosFindFirst(spec: *const u8, phdir: *mut u32, attr: u32, buf: *mut u8, cb: u32, count: *mut u32, level: u32) -> APIRET;
+            #[link_name = "DOSCALLS.265"]
+            pub fn DosFindNext(hdir: u32, buf: *mut u8, cb: u32, count: *mut u32) -> APIRET;
+            #[link_name = "DOSCALLS.223"]
+            pub fn DosQueryPathInfo(path: *const u8, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+            #[link_name = "DOSCALLS.219"]
+            pub fn DosSetPathInfo(path: *const u8, level: u32, buf: *const u8, cb: u32, opts: u32) -> APIRET;
+            #[link_name = "DOSCALLS.271"]
+            pub fn DosMove(from: *const u8, to: *const u8) -> APIRET;
+            #[link_name = "DOSCALLS.255"]
+            pub fn DosSetCurrentDir(dir: *const u8) -> APIRET;
+            #[link_name = "DOSCALLS.283"]
+            pub fn DosExecPgm(fail: *mut u8, cbfail: u32, flags: u32, args: *const u8, env: *const u8, res: *mut [u32; 2], name: *const u8) -> APIRET;
+            #[link_name = "RS2API.212"]
+            pub fn Rs2SockSelect(socks: *mut u32, nread: u32, nwrite: u32, nexcept: u32, ms: i32, nready: *mut u32) -> u32;
+            #[link_name = "RS2API.214"]
+            pub fn Rs2SockSetOpt(s: u32, level: u32, opt: u32, val: *const u8, cb: u32) -> u32;
+            #[link_name = "RS2API.215"]
+            pub fn Rs2SockGetOpt(s: u32, level: u32, opt: u32, val: *mut u8, cb: *mut u32) -> u32;
+            #[link_name = "RS2API.217"]
+            pub fn Rs2NetResolve(name: *const u8, addrs: *mut [u8; 4], max: u32, count: *mut u32) -> u32;
+            #[link_name = "DOSCALLS.981"]
+            pub fn DosOpenL(name: *const u8, phf: *mut u32, action: *mut u32, size: i64, attr: u32, open_flags: u32, open_mode: u32, eaop: *mut u8) -> APIRET;
+            #[link_name = "DOSCALLS.988"]
+            pub fn DosSetFilePtrL(hf: u32, off: i64, method: u32, actual: *mut u64) -> APIRET;
+            #[link_name = "DOSCALLS.989"]
+            pub fn DosSetFileSizeL(hf: u32, size: i64) -> APIRET;
+        }
+    }
+
+    /// `n` bytes below 4 GB: the caller's if they are there, else a copy,
+    /// written back and freed when dropped.
+    struct Low<T> {
+        p: *mut T,
+        back: Option<(*mut T, usize)>,
+    }
+
+    impl<T> Low<T> {
+        unsafe fn new(p: *const T, bytes: usize, back: bool) -> Low<T> {
+            if (p as usize) < 1 << 32 {
+                return Low { p: p as *mut T, back: None };
+            }
+            let q = crate::malloc::low_memalign(16, bytes);
+            if q.is_null() {
+                crate::start::fatal("rs2libc: no memory below 4 GB\r\n");
+            }
+            unsafe { core::ptr::copy_nonoverlapping(p as *const u8, q, bytes) };
+            Low { p: q as *mut T, back: Some((p as *mut T, if back { bytes } else { 0 })) }
+        }
+        unsafe fn cstr(p: *const T) -> Low<T> {
+            if (p as usize) < 1 << 32 {
+                return Low { p: p as *mut T, back: None };
+            }
+            let n = unsafe { crate::string::strlen(p as *const core::ffi::c_char) } + 1;
+            unsafe { Low::new(p, n, false) }
+        }
+        /// A block of strings ended by an empty one.
+        unsafe fn block(p: *const T) -> Low<T> {
+            let b = p as *const u8;
+            let mut n = 0;
+            if (p as usize) >= 1 << 32 {
+                unsafe {
+                    while *b.add(n) != 0 || *b.add(n + 1) != 0 {
+                        n += 1;
+                    }
+                }
+            }
+            unsafe { Low::new(p, n + 2, false) }
+        }
+    }
+
+    impl<T> Drop for Low<T> {
+        fn drop(&mut self) {
+            if let Some((to, n)) = self.back {
+                unsafe {
+                    core::ptr::copy_nonoverlapping(self.p as *const u8, to as *mut u8, n);
+                    crate::malloc::low_free(self.p as *mut u8);
+                }
+            }
+        }
+    }
+
+    pub unsafe fn DosOpen(
+        name: *const u8,
+        phf: *mut u32,
+        action: *mut u32,
+        size: u32,
+        attr: u32,
+        open_flags: u32,
+        open_mode: u32,
+        eaop: *mut u8,
+    ) -> APIRET {
+        unsafe { raw::DosOpenL(Low::cstr(name).p, phf, action, size as i64, attr, open_flags, open_mode, eaop) }
+    }
+    pub unsafe fn DosDelete(name: *const u8) -> APIRET {
+        unsafe { raw::DosDelete(Low::cstr(name).p) }
+    }
+    pub unsafe fn DosCreateDir(name: *const u8, eaop: *mut u8) -> APIRET {
+        unsafe { raw::DosCreateDir(Low::cstr(name).p, eaop) }
+    }
+    pub unsafe fn DosDeleteDir(name: *const u8) -> APIRET {
+        unsafe { raw::DosDeleteDir(Low::cstr(name).p) }
+    }
+    pub unsafe fn DosFindFirst(spec: *const u8, phdir: *mut u32, attr: u32, buf: *mut u8, cb: u32, count: *mut u32, level: u32) -> APIRET {
+        unsafe {
+            let h = Low::new(phdir, 4, true);
+            raw::DosFindFirst(Low::cstr(spec).p, h.p, attr, Low::new(buf, cb as usize, true).p, cb, count, level)
+        }
+    }
+    pub unsafe fn DosFindNext(hdir: u32, buf: *mut u8, cb: u32, count: *mut u32) -> APIRET {
+        unsafe { raw::DosFindNext(hdir, Low::new(buf, cb as usize, true).p, cb, count) }
+    }
+    pub unsafe fn DosQueryPathInfo(path: *const u8, level: u32, buf: *mut u8, cb: u32) -> APIRET {
+        unsafe { raw::DosQueryPathInfo(Low::cstr(path).p, level, buf, cb) }
+    }
+    pub unsafe fn DosSetPathInfo(path: *const u8, level: u32, buf: *const u8, cb: u32, opts: u32) -> APIRET {
+        unsafe { raw::DosSetPathInfo(Low::cstr(path).p, level, buf, cb, opts) }
+    }
+    pub unsafe fn DosMove(from: *const u8, to: *const u8) -> APIRET {
+        unsafe { raw::DosMove(Low::cstr(from).p, Low::cstr(to).p) }
+    }
+    pub unsafe fn DosSetCurrentDir(dir: *const u8) -> APIRET {
+        unsafe { raw::DosSetCurrentDir(Low::cstr(dir).p) }
+    }
+    pub unsafe fn DosExecPgm(fail: *mut u8, cbfail: u32, flags: u32, args: *const u8, env: *const u8, res: *mut [u32; 2], name: *const u8) -> APIRET {
+        unsafe { raw::DosExecPgm(fail, cbfail, flags, Low::block(args).p, Low::block(env).p, res, Low::cstr(name).p) }
+    }
+    pub unsafe fn Rs2SockSelect(socks: *mut u32, nread: u32, nwrite: u32, nexcept: u32, ms: i32, nready: *mut u32) -> u32 {
+        let bytes = (nread + nwrite + nexcept) as usize * 4;
+        unsafe { raw::Rs2SockSelect(Low::new(socks, bytes, true).p, nread, nwrite, nexcept, ms, nready) }
+    }
+    pub unsafe fn Rs2SockSetOpt(s: u32, level: u32, opt: u32, val: *const u8, cb: u32) -> u32 {
+        unsafe { raw::Rs2SockSetOpt(s, level, opt, Low::new(val, cb as usize, false).p, cb) }
+    }
+    pub unsafe fn Rs2SockGetOpt(s: u32, level: u32, opt: u32, val: *mut u8, cb: *mut u32) -> u32 {
+        unsafe { raw::Rs2SockGetOpt(s, level, opt, Low::new(val, *cb as usize, true).p, cb) }
+    }
+    pub unsafe fn Rs2NetResolve(name: *const u8, addrs: *mut [u8; 4], max: u32, count: *mut u32) -> u32 {
+        unsafe { raw::Rs2NetResolve(Low::cstr(name).p, addrs, max, count) }
+    }
+    pub unsafe fn seek(hf: u32, off: i64, method: u32) -> Result<u64, APIRET> {
+        let mut pos = 0;
+        match unsafe { raw::DosSetFilePtrL(hf, off, method, &mut pos) } {
+            0 => Ok(pos),
+            rc => Err(rc),
+        }
+    }
+    pub unsafe fn set_file_size(hf: u32, size: i64) -> APIRET {
+        unsafe { raw::DosSetFileSizeL(hf, size) }
+    }
+}
+
+pub use calls::*;

@@ -184,6 +184,9 @@ fn call_handler(sp: &mut AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
     let ret = gate::slot_address(0, HANDLER_RETURN_ORDINAL) as u64;
     let rsp = (d.stack & !15) - 8;
     wr64(sp, rsp, ret);
+    // 64-bit code may keep a thread pointer in FS (Rust's std, rs2libc):
+    // the handler sees it, unless 32-bit code was interrupted.
+    let fs = if f.cs as u16 == USER_CS64 { f.fs } else { TIB_SEL as u64 };
     *f = TrapFrame {
         rip: handler,
         rsp,
@@ -195,7 +198,7 @@ fn call_handler(sp: &mut AddressSpace, f: &mut TrapFrame, d: &Dispatch) {
         ss: USER_DS as u64,
         ds: USER_DS as u64,
         es: USER_DS as u64,
-        fs: TIB_SEL as u64,
+        fs,
         gs: 0,
         rflags: 0x202,
         ..*f

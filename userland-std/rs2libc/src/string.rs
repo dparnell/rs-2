@@ -6,6 +6,7 @@ use core::arch::asm;
 use core::ffi::{c_char, c_int, c_void};
 use libc::size_t;
 
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     unsafe {
@@ -16,6 +17,47 @@ pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t
     dest
 }
 
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
+    unsafe {
+        // Short copies (most are) in registers: `rep movsb` starts slowly.
+        if n <= 32 {
+            return copy_small(dest as *mut u8, src as *const u8, n) as *mut c_void;
+        }
+        asm!("rep movsb", inout("rsi") src => _, inout("rcx") n => _, inout("rdi") dest => _,
+             options(nostack, preserves_flags));
+    }
+    dest
+}
+
+/// Copy up to 32 bytes, overlapping or not (everything is read first).
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn copy_small(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
+    macro_rules! ends {
+        ($t:ty) => {{
+            let k = core::mem::size_of::<$t>();
+            let a = (s as *const $t).read_unaligned();
+            let b = (s.add(n - k) as *const $t).read_unaligned();
+            (d as *mut $t).write_unaligned(a);
+            (d.add(n - k) as *mut $t).write_unaligned(b);
+        }};
+    }
+    unsafe {
+        match n {
+            0 => {}
+            1 => *d = *s,
+            2..=3 => ends!(u16),
+            4..=7 => ends!(u32),
+            8..=15 => ends!(u64),
+            _ => ends!(u128),
+        }
+    }
+    d
+}
+
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     if (dest as usize).wrapping_sub(src as usize) >= n {
@@ -32,6 +74,35 @@ pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_
     dest
 }
 
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
+    if n <= 32 || (dest as usize).wrapping_sub(src as usize) >= n {
+        // No overlap a forward copy would trip on.
+        return unsafe { memcpy(dest, src, n) };
+    }
+    unsafe {
+        // Backwards in words (`std; rep movsb` is very slow), the rest in
+        // bytes.
+        let words = n / 8;
+        asm!("std", "rep movsq", "cld",
+             inout("rsi") (src as *const u8).add(n).wrapping_sub(8) => _,
+             inout("rcx") words => _,
+             inout("rdi") (dest as *mut u8).add(n).wrapping_sub(8) => _,
+             options(nostack));
+        // (The first n % 8 bytes have not been overwritten: the words
+        // copied so far all went above dest + n % 8 > src's bytes.)
+        let (d, s) = (dest as *mut u8, src as *const u8);
+        let mut i = n % 8;
+        while i > 0 {
+            i -= 1;
+            core::ptr::write_volatile(d.add(i), core::ptr::read_volatile(s.add(i)));
+        }
+    }
+    dest
+}
+
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void {
     unsafe {
@@ -41,6 +112,17 @@ pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut 
     dest
 }
 
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void {
+    unsafe {
+        asm!("rep stosb", inout("rcx") n => _, inout("rdi") dest => _, in("al") c as u8,
+             options(nostack, preserves_flags));
+    }
+    dest
+}
+
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcmp(a: *const c_void, b: *const c_void, n: size_t) -> c_int {
     let (a, b) = (a as *const u8, b as *const u8);
@@ -51,6 +133,30 @@ pub unsafe extern "C" fn memcmp(a: *const c_void, b: *const c_void, n: size_t) -
             return x as c_int - y as c_int;
         }
         i += 1;
+    }
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcmp(a: *const c_void, b: *const c_void, n: size_t) -> c_int {
+    let (a, b) = (a as *const u8, b as *const u8);
+    let mut i = 0;
+    unsafe {
+        while i + 8 <= n {
+            let (x, y) = ((a.add(i) as *const u64).read_unaligned(), (b.add(i) as *const u64).read_unaligned());
+            if x != y {
+                return if u64::from_be(x) < u64::from_be(y) { -1 } else { 1 };
+            }
+            i += 8;
+        }
+        while i < n {
+            let (x, y) = (core::ptr::read_volatile(a.add(i)), core::ptr::read_volatile(b.add(i)));
+            if x != y {
+                return x as c_int - y as c_int;
+            }
+            i += 1;
+        }
     }
     0
 }

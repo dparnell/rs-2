@@ -35,6 +35,13 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146097 + doe - 719468
 }
 
+/// Seconds to add to local time (file times, DosGetDateTime) for UTC.
+pub fn zone_seconds() -> i64 {
+    let mut dt = DateTime::default();
+    unsafe { DosGetDateTime(&mut dt) };
+    if dt.timezone != -1 { dt.timezone as i64 * 60 } else { 0 }
+}
+
 /// (seconds, nanoseconds) since 1970 UTC.
 pub fn realtime() -> (i64, u32) {
     let mut dt = DateTime::default();
@@ -176,7 +183,7 @@ fn local_offset() -> i64 {
     if dt.timezone == -1 { 0 } else { -(dt.timezone as i64) * 60 }
 }
 
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = z - era * 146097;

@@ -14,7 +14,29 @@ rustflags = [
     "-C", "link-arg=--eh-frame-hdr",
 ]
 
+# 64-bit programs (cargo build --target x86_64-unknown-linux-gnu,
+# docs/STD64.md).
+[target.x86_64-unknown-linux-gnu]
+linker = "./lld.sh"
+rustflags = [
+    "-C", "linker-flavor=ld.lld",
+    "-C", "link-arg=--rs2-64",
+    # The imports stay undefined dynamic symbols (of a PIE).
+    "-C", "link-arg=-zdynamic-undefined-weak",
+    "-C", "link-arg=--unresolved-symbols=ignore-all",
+    "-C", "link-arg=-nostdlib",
+    "-C", "link-arg=--no-rosegment",
+    "-C", "link-arg=-znow",
+    "-C", "link-arg=-znorelro",
+    "-C", "link-arg=--hash-style=sysv",
+    "-C", "link-arg=--eh-frame-hdr",
+    "-C", "link-arg=--export-dynamic-symbol=RS2_APPTYPE",
+    "-C", "link-arg=--export-dynamic-symbol=RS2_RESOURCES",
+]
+
 [env]
+CC_x86_64_unknown_linux_gnu = { value = "cc64.sh", relative = true }
+AR_x86_64_unknown_linux_gnu = { value = "ar.sh", relative = true }
 # C code (ring) is compiled by clang with rs2libc's headers.
 CC_i686_unknown_linux_gnu = { value = "cc.sh", relative = true }
 AR_i686_unknown_linux_gnu = { value = "ar.sh", relative = true }

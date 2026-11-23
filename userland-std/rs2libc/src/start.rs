@@ -119,17 +119,17 @@ pub fn fatal(msg: &str) -> ! {
     loop {}
 }
 
-static ATEXIT: SpinLock<Vec<(usize, usize)>> = SpinLock::new(Vec::new());
+static ATEXIT: SpinLock<Vec<(usize, Option<usize>)>> = SpinLock::new(Vec::new());
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn atexit(f: extern "C" fn()) -> c_int {
-    ATEXIT.lock().push((f as usize, 0));
+    ATEXIT.lock().push((f as usize, None));
     0
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __cxa_atexit(f: extern "C" fn(*mut c_void), arg: *mut c_void, _dso: *mut c_void) -> c_int {
-    ATEXIT.lock().push((f as usize | 1 << 31, arg as usize));
+    ATEXIT.lock().push((f as usize, Some(arg as usize)));
     0
 }
 
@@ -138,8 +138,8 @@ pub unsafe extern "C" fn exit(code: c_int) -> ! {
     loop {
         let Some((f, arg)) = ATEXIT.lock().pop() else { break };
         unsafe {
-            if f & 1 << 31 != 0 {
-                let f: extern "C" fn(*mut c_void) = core::mem::transmute(f & !(1 << 31));
+            if let Some(arg) = arg {
+                let f: extern "C" fn(*mut c_void) = core::mem::transmute(f);
                 f(arg as *mut c_void);
             } else {
                 let f: extern "C" fn() = core::mem::transmute(f);
