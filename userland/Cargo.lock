@@ -792,7 +792,6 @@ dependencies = [
 name = "rxsom"
 version = "0.1.0"
 dependencies = [
- "os2",
  "somsup",
 ]
 
