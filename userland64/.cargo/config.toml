@@ -4,9 +4,11 @@ target = "x86_64-unknown-linux-gnu"
 # Every program and DLL is a cdylib: a position-independent ELF64 shared
 # object whose undefined symbols (`MODULE.ordinal`, `MODULE.Name`) stay
 # dynamic imports for rs2's loader.
+# The linker is in rustflags, not `linker =`: on an x86-64 Linux host that
+# would link the build scripts too (rustflags do not reach them).
 [target.x86_64-unknown-linux-gnu]
-linker = "rust-lld"
 rustflags = [
+    "-C", "linker=rust-lld",
     "-C", "linker-flavor=ld.lld",
     "-C", "link-arg=-Tlink64.ld",
     "-C", "link-arg=--no-rosegment",

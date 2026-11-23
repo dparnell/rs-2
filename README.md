@@ -109,7 +109,9 @@ Each [GitHub release](https://github.com/dparnell/rs-2/releases) has a
 ready-built `rs2-live.iso` (and its SHA-256), made by
 [.github/workflows/release-iso.yml](.github/workflows/release-iso.yml)
 when a `v*` tag is pushed (`git tag v0.0.2 && git push origin v0.0.2`
-creates the release). To build one yourself, from the
+creates the release). Every push is built too
+([build-iso.yml](.github/workflows/build-iso.yml)); its run keeps the ISO
+for a week as the artifact `rs2-live`. To build one yourself, from the
 repository root:
 
 ```bash

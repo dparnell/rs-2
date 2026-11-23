@@ -1,6 +1,6 @@
 # On a pushed tag (v*): create the GitHub release for it (if there is none
-# yet), build the live ISO (rs2's own files only, from dist/manifest.txt)
-# and attach it to the release as rs2-live.iso, with its SHA-256.
+# yet), build the live ISO (build-iso.yml) and attach it to the release as
+# rs2-live.iso, with its SHA-256.
 #
 # A release made by hand in GitHub's web page for a new tag creates that
 # tag, which also starts this workflow: the release is then kept as it is
@@ -17,23 +17,21 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-iso-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
-  iso:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
       GH_TOKEN: ${{ github.token }}
-      CARGO_TERM_COLOR: always
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ env.TAG }}
-
       - name: Create the release
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -42,32 +40,25 @@ jobs:
             gh release create "$TAG" --verify-tag --title "rs2 $TAG" --generate-notes
           fi
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal \
-            --target x86_64-unknown-uefi,x86_64-unknown-none,i686-unknown-linux-gnu \
-            --component llvm-tools
-          rustup default stable
+  build:
+    needs: release
+    uses: ./.github/workflows/build-iso.yml
+    with:
+      ref: refs/tags/${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
-      # userland-std compiles ring's C code with clang (userland-std/cc.sh).
-      - name: Install clang
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang clang-19
-          # The C++ samples (userland64/c/cc64.sh): libc++ 21 needs clang 19.
-          echo "CLANG=clang-19" >> "$GITHUB_ENV"
-
-      - uses: Swatinem/rust-cache@v2
+  attach:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: |
-            . -> target
-            userland -> target
-            userland-std -> target
-
-      - name: Build the live ISO
-        run: cargo xtask iso --dist --release -o rs2-live.iso
-
-      - name: Checksum
-        run: sha256sum rs2-live.iso > rs2-live.iso.sha256
+          name: rs2-live
 
       - name: Attach to the release
         run: gh release upload "$TAG" rs2-live.iso rs2-live.iso.sha256 --clobber

@@ -1,0 +1,76 @@
+# Build the live ISO (rs2's own files only, from dist/manifest.txt) on
+# every push to any branch and on pull requests from forks, so that a
+# change that breaks the build from a clean checkout shows at once. The
+# ISO is kept for a week as the run's artifact "rs2-live".
+#
+# release-iso.yml calls this too, to build a tag's ISO.
+name: Build ISO
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: What to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  iso:
+    # A pull request from this repository was built when it was pushed.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # Not ubuntu-latest: the clang-19 package must be there.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --target x86_64-unknown-uefi,x86_64-unknown-none,i686-unknown-linux-gnu,x86_64-unknown-linux-gnu \
+            --component llvm-tools
+          rustup default stable
+
+      # userland-std compiles ring's C code with clang (userland-std/cc.sh).
+      - name: Install clang
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang clang-19
+          # The C and C++ libraries and samples (userland64/c/cc64.sh):
+          # libc++ 21 needs clang 19.
+          echo "CLANG=clang-19" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            userland -> target
+            userland-std -> target
+            userland64 -> target
+          # Branches start from main's cache.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the live ISO
+        run: cargo xtask iso --dist --release -o rs2-live.iso
+
+      - name: Checksum
+        run: sha256sum rs2-live.iso | tee rs2-live.iso.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs2-live
+          path: |
+            rs2-live.iso
+            rs2-live.iso.sha256
+          if-no-files-found: error
+          retention-days: 7
