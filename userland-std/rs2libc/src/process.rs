@@ -120,7 +120,7 @@ pub unsafe extern "C" fn posix_spawnattr_setsigmask(_a: *mut libc::posix_spawnat
 
 fn exists(p: &[u8]) -> bool {
     let mut st = FileStatus3::default();
-    unsafe { DosQueryPathInfo(p.as_ptr(), 1, &mut st as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) == 0 && st.attr & 0x10 == 0 }
+    unsafe { DosQueryPathInfo(p.as_ptr(), FS_LEVEL, &mut st as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) == 0 && st.attr & 0x10 == 0 }
 }
 
 /// The program file for `name` (with NUL): as given, with ".EXE" added,

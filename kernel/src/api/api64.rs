@@ -50,6 +50,33 @@ const PLAIN: &[u16] = &[
     661, 662, 663, 664, 665, 666, 667, 668,
 ];
 
+/// The RS2API module (loader::gate's numbering).
+const RS2API: u8 = 8;
+
+/// The RS2API entries 64-bit code may call (rs2libc, docs/STD64.md) and
+/// their pointer arguments that must be below 4 GB. The buffers of the
+/// socket transfers may be anywhere.
+const RS2API_PTR_ARGS: &[(u16, u16)] = &[
+    (201, 0b1000),     // Rs2SockCreate(domain, type, protocol, ps)
+    (202, 0b10),       // Rs2SockBind(s, addr, cb)
+    (203, 0),          // Rs2SockListen(s, backlog)
+    (204, 0b110),      // Rs2SockAccept(s, peer, ps)
+    (205, 0b10),       // Rs2SockConnect(s, addr, cb)
+    (206, 0b1_0000),   // Rs2SockSend(s, buf, cb, flags, sent)
+    (207, 0b1_0000),   // Rs2SockRecv(s, buf, cb, flags, got)
+    (208, 0b11_0000),  // Rs2SockSendTo(s, buf, cb, flags, to, sent)
+    (209, 0b11_0000),  // Rs2SockRecvFrom(s, buf, cb, flags, from, got)
+    (210, 0),          // Rs2SockShutdown(s, how)
+    (211, 0),          // Rs2SockClose(s)
+    (212, 0b10_0001),  // Rs2SockSelect(socks, nread, nwrite, nexcept, ms, nready)
+    (213, 0b100),      // Rs2SockIoctl(s, cmd, arg)
+    (214, 0b1000),     // Rs2SockSetOpt(s, level, opt, val, cb)
+    (215, 0b1_1000),   // Rs2SockGetOpt(s, level, opt, val, cb)
+    (216, 0b100),      // Rs2SockGetName(s, peer, addr)
+    (217, 0b1011),     // Rs2NetResolve(name, addrs, max, count)
+    (421, 0),          // Rs2Win16Selector(op, sel, value): no pointers but op 11's
+];
+
 /// Entries that return a pointer through argument `n`: the 32-bit
 /// implementation writes its low half, the high half is set to 0.
 const PTR_OUT: &[(u16, usize)] = &[
@@ -67,6 +94,9 @@ const PTR_OUT: &[(u16, usize)] = &[
 /// The handler for a 64-bit call of DOSCALLS `ordinal` (other modules:
 /// none yet), or None if 64-bit programs cannot call it.
 pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
+    if module == RS2API {
+        return RS2API_PTR_ARGS.iter().any(|p| p.0 == ordinal).then(|| super::doscalls::handler(module, ordinal)).flatten();
+    }
     if module != 0 {
         return None;
     }
@@ -216,6 +246,11 @@ fn ptr_args(ordinal: u16) -> u16 {
 /// know (extended attribute lists hold pointers), and pointers above 4 GB
 /// to calls not written for them: refused.
 pub fn refused(c: &Ctx, module: u8, ordinal: u16) -> Option<u32> {
+    if module == RS2API {
+        let mask = RS2API_PTR_ARGS.iter().find(|p| p.0 == ordinal).map_or(0, |p| p.1);
+        const EFAULT: u32 = 14;
+        return (0..16).any(|i| mask & (1 << i) != 0 && c.arg64(i) > u32::MAX as u64).then_some(EFAULT);
+    }
     if module != 0 {
         return None;
     }

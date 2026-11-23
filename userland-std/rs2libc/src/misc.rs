@@ -216,6 +216,14 @@ pub unsafe extern "C" fn gethostname(buf: *mut c_char, len: size_t) -> c_int {
 /// `syscall(number, ...)` for the Linux system calls std makes directly.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall(nr: c_long, a1: usize, a2: usize, a3: usize, a4: usize, _a5: usize, _a6: usize) -> c_long {
+    #[cfg(target_arch = "x86_64")]
+    return match nr {
+        libc::SYS_futex => unsafe { crate::futex::sys_futex(a1, a2 as i32, a3 as u32, a4) as c_long },
+        libc::SYS_getrandom => unsafe { getrandom(a1 as *mut c_void, a2, a3 as u32) as c_long },
+        libc::SYS_gettid => unsafe { crate::thread::gettid() as c_long },
+        _ => fail(libc::ENOSYS) as c_long,
+    };
+    #[cfg(target_arch = "x86")]
     match nr {
         // futex, futex_time64
         240 => unsafe { crate::futex::sys_futex(a1, a2 as i32, a3 as u32, a4) as c_long },
@@ -377,9 +385,50 @@ pub unsafe extern "C" fn madvise(_addr: *mut c_void, _len: size_t, _advice: c_in
 
 // ---- The dynamic linker that is not there ----
 
+/// dlopen loads a DLL (DosLoadModule); dlsym finds what it exports. There
+/// is no global scope to search.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dlsym(_handle: *mut c_void, _name: *const c_char) -> *mut c_void {
-    null_mut()
+pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_void {
+    if name.is_null() {
+        return null_mut();
+    }
+    let mut fail_name = [0u8; 260];
+    let mut path = [0u8; 264];
+    let p = crate::file::os2_path(unsafe { cstr(name) });
+    if p.len() > path.len() {
+        return null_mut();
+    }
+    path[..p.len()].copy_from_slice(&p);
+    let mut h = 0;
+    let rc = unsafe { DosLoadModule(fail_name.as_mut_ptr(), 260, path.as_ptr(), &mut h) };
+    if rc == 0 { h as usize as *mut c_void } else { null_mut() }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void {
+    // RTLD_DEFAULT, RTLD_NEXT
+    if handle.is_null() || handle as usize == usize::MAX {
+        return null_mut();
+    }
+    let mut buf = [0u8; 512];
+    let n = unsafe { cstr(name) };
+    if n.len() >= buf.len() {
+        return null_mut();
+    }
+    buf[..n.len()].copy_from_slice(n);
+    let mut p = null_mut();
+    let rc = unsafe { DosQueryProcAddr(handle as usize as u32, 0, buf.as_ptr(), &mut p) };
+    if rc == 0 { p as *mut c_void } else { null_mut() }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dlclose(handle: *mut c_void) -> c_int {
+    (unsafe { DosFreeModule(handle as usize as u32) } != 0) as c_int
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dlerror() -> *const c_char {
+    c"not found".as_ptr()
 }
 
 #[unsafe(no_mangle)]
@@ -395,6 +444,13 @@ pub unsafe extern "C" fn getauxval(_ty: c_ulong) -> c_ulong {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gnu_get_libc_version() -> *const c_char {
     c"2.35".as_ptr()
+}
+
+/// Never called, as `___tls_get_addr` (x86-64's name).
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __tls_get_addr() -> *mut c_void {
+    crate::start::fatal("rs2libc: __tls_get_addr called\r\n");
 }
 
 /// Never called: the linker turns every TLS access into the local-exec
@@ -417,6 +473,11 @@ struct Rng {
 
 static RNG: SpinLock<Rng> = SpinLock::new(Rng { key: [0; 8], counter: 0, seeded: false });
 
+#[cfg(target_arch = "x86")]
+use core::arch::x86 as arch;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64 as arch;
+
 fn rdtsc() -> u64 {
     let (lo, hi): (u32, u32);
     unsafe { core::arch::asm!("rdtsc", out("eax") lo, out("edx") hi, options(nomem, nostack)) };
@@ -424,7 +485,7 @@ fn rdtsc() -> u64 {
 }
 
 fn rdrand() -> Option<u32> {
-    let ecx = core::arch::x86::__cpuid(1).ecx;
+    let ecx = arch::__cpuid(1).ecx;
     if ecx & (1 << 30) == 0 {
         return None;
     }
@@ -488,7 +549,7 @@ fn seed(r: &mut Rng) {
     let (tib, pib) = info_blocks();
     mix(pib.pid, &mut pool);
     mix(unsafe { (*tib.ptib2).tid }, &mut pool);
-    mix(&pool as *const _ as u32, &mut pool);
+    mix(&pool as *const _ as usize as u32, &mut pool);
     for k in 0..64 {
         let mut t = 0u64;
         unsafe { DosTmrQueryTime(&mut t) };

@@ -1,0 +1,11 @@
+[package]
+name = "pmstd64"
+description = "PMSTD64: a 64-bit Presentation Manager program in Rust with std (docs/STD64.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }
+# The API bindings without their own heap and panic handler: std has them.
+os2 = { path = "../../userland64/os2", default-features = false }

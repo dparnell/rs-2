@@ -11,7 +11,7 @@ rs2 as native 64-bit code.
 
 | | 64-bit API |
 |-|------------|
-| CPU mode | long mode, code selector `0x6B` (`gdt::USER_CS64`); SS/DS/ES are the flat `0x53`, FS the thread's 32-bit TIB `0x150B` |
+| CPU mode | long mode, code selector `0x6B` (`gdt::USER_CS64`); SS/DS/ES are the flat `0x53`, FS the thread's 32-bit TIB `0x150B` (a program may load its own selector: [STD64.md](STD64.md)) |
 | Calling convention | System V AMD64 (`extern "C"`), for API calls and for callbacks (window procedures) |
 | Data model | ULONG, LONG, APIRET, BOOL and the handles (HFILE, HEV, HMTX, HMODULE, HWND, HPS, HAB...) stay 32 bits; pointers (PVOID, PSZ, PFN) and MPARAM/MRESULT are 64 bits |
 | Structures | OS/2's, with pointer fields widened to 8 bytes (natural alignment) |
@@ -76,7 +76,7 @@ either format.
 
 The entry point is `_start(hmod, 0, env, cmdline)` (RDI, RSI, RDX, RCX),
 entered as if called from the exit stub: returning ends the process with
-RAX as the result. Thread 1 has a 1 MB stack growing down over a guard
+RAX as the result. Thread 1 has a 4 MB stack growing down over a guard
 page.
 
 ## Calling the kernel
@@ -295,7 +295,7 @@ fn main(s: &Startup) -> u32 {
 ```
 
 `C:\RS2\HELLO64.EXE` and `C:\RS2\PMDEMO64.EXE` (below) are the Rust
-examples.
+examples. Programs with Rust's standard library: [STD64.md](STD64.md).
 
 ### C
 

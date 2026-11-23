@@ -225,10 +225,10 @@ pub fn connect(c: &mut Ctx) -> u32 {
 }
 
 fn send_common(c: &mut Ctx, to: Option<Endpoint>, out: u32) -> u32 {
-    let (s, buf, len, flags) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
+    let (s, buf, len, flags) = (c.arg(0), c.uptr(1), c.arg(2), c.arg(3));
     let len = len.min(MAX_IO);
     let data = if len == 0 { Vec::new() } else {
-        match c.read_vec(buf, len) {
+        match c.uread_vec(buf, len) {
             Some(d) => d,
             None => return EFAULT,
         }
@@ -262,7 +262,7 @@ pub fn send_to(c: &mut Ctx) -> u32 {
 }
 
 fn recv_common(c: &mut Ctx, from_at: u32, out: u32) -> u32 {
-    let (s, buf, len, flags) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
+    let (s, buf, len, flags) = (c.arg(0), c.uptr(1), c.arg(2), c.arg(3));
     let r = so::recv(pid(c), s, len.min(MAX_IO) as usize, flags);
     if c.trace {
         match &r {
@@ -272,7 +272,7 @@ fn recv_common(c: &mut Ctx, from_at: u32, out: u32) -> u32 {
     }
     match r {
         Ok((data, from)) => {
-            if !data.is_empty() && !c.write(buf, &data) {
+            if !data.is_empty() && !c.uwrite(buf, &data) {
                 return EFAULT;
             }
             write_addr(c, from_at, from);

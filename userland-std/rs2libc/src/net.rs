@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+use core::mem::size_of;
 use libc::{addrinfo, size_t, sockaddr, socklen_t, ssize_t};
 
 use crate::errno::{fail, fail_bsd};
@@ -384,6 +385,15 @@ fn bsd_opt(level: c_int, opt: c_int) -> Option<(u32, u32)> {
 pub unsafe extern "C" fn setsockopt(fd: c_int, level: c_int, opt: c_int, val: *const c_void, len: socklen_t) -> c_int {
     let s = sock!(fd);
     let Some((l, o)) = bsd_opt(level, opt) else { return fail(libc::ENOPROTOOPT) };
+    // SO_SNDTIMEO, SO_RCVTIMEO: rs2's timeval has 32-bit fields.
+    let tv;
+    let (val, len) = if l == 0xffff && (o == 0x1005 || o == 0x1006) && len as usize == size_of::<libc::timeval>() {
+        let t = unsafe { &*(val as *const libc::timeval) };
+        tv = [t.tv_sec as u32, t.tv_usec as u32];
+        (tv.as_ptr() as *const c_void, 8)
+    } else {
+        (val, len)
+    };
     let rc = unsafe { Rs2SockSetOpt(s, l, o, val as *const u8, len) };
     // Options the stack does not keep (buffer sizes, multicast...) are
     // accepted: callers treat them as hints.
@@ -394,6 +404,18 @@ pub unsafe extern "C" fn setsockopt(fd: c_int, level: c_int, opt: c_int, val: *c
 pub unsafe extern "C" fn getsockopt(fd: c_int, level: c_int, opt: c_int, val: *mut c_void, len: *mut socklen_t) -> c_int {
     let s = sock!(fd);
     let Some((l, o)) = bsd_opt(level, opt) else { return fail(libc::ENOPROTOOPT) };
+    if l == 0xffff && (o == 0x1005 || o == 0x1006) && unsafe { *len } as usize >= size_of::<libc::timeval>() {
+        let mut tv = [0u32; 2];
+        let rc = unsafe { Rs2SockGetOpt(s, l, o, tv.as_mut_ptr() as *mut u8, &mut 8) };
+        if rc != 0 {
+            return fail_bsd(rc);
+        }
+        unsafe {
+            *(val as *mut libc::timeval) = libc::timeval { tv_sec: tv[0] as _, tv_usec: tv[1] as _ };
+            *len = size_of::<libc::timeval>() as socklen_t;
+        }
+        return 0;
+    }
     let mut cb = unsafe { *len };
     let rc = unsafe { Rs2SockGetOpt(s, l, o, val as *mut u8, &mut cb) };
     if rc != 0 {

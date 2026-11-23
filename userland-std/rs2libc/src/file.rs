@@ -12,7 +12,7 @@
 
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_void};
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use libc::{mode_t, off64_t, size_t, ssize_t};
 type stat64 = libc::stat64;
@@ -21,6 +21,9 @@ use crate::errno::{fail, fail_os2};
 use crate::spin::SpinLock;
 use crate::string::cstr;
 use crate::sys::*;
+
+/// The most one transfer moves (reads and writes may be short).
+const MAX_IO: usize = 1 << 30;
 
 pub const SOCK_BASE: c_int = 0x1_0000;
 pub const DIR_BASE: c_int = 0x2_0000;
@@ -149,7 +152,7 @@ fn dir_path(i: usize) -> Option<Vec<u8>> {
 
 fn query_path(p: &[u8]) -> Result<FileStatus3, u32> {
     let mut st = FileStatus3::default();
-    let rc = unsafe { DosQueryPathInfo(p.as_ptr(), 1, &mut st as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) };
+    let rc = unsafe { DosQueryPathInfo(p.as_ptr(), FS_LEVEL, &mut st as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) };
     if rc == 0 {
         return Ok(st);
     }
@@ -262,7 +265,7 @@ pub unsafe extern "C" fn read(fd: c_int, buf: *mut c_void, n: size_t) -> ssize_t
     match classify(fd) {
         Some(Fd::File(h)) => {
             let mut got = 0;
-            let rc = unsafe { DosRead(h, buf as *mut u8, n as u32, &mut got) };
+            let rc = unsafe { DosRead(h, buf as *mut u8, n.min(MAX_IO) as u32, &mut got) };
             if rc == 109 {
                 return 0; // broken pipe: end of file
             }
@@ -297,8 +300,7 @@ pub unsafe extern "C" fn read(fd: c_int, buf: *mut c_void, n: size_t) -> ssize_t
 fn write_handle(h: u32, b: &[u8]) -> ssize_t {
     let f = flags(h);
     if f & F_APPEND != 0 {
-        let mut pos = 0;
-        unsafe { DosSetFilePtr(h, 0, 2, &mut pos) };
+        let _ = unsafe { seek(h, 0, 2) };
     }
     if f & F_CHARDEV != 0 && b.contains(&b'\n') {
         let mut out = Vec::with_capacity(b.len() + 16);
@@ -329,7 +331,7 @@ fn write_handle(h: u32, b: &[u8]) -> ssize_t {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn write(fd: c_int, buf: *const c_void, n: size_t) -> ssize_t {
     match classify(fd) {
-        Some(Fd::File(h)) => write_handle(h, unsafe { core::slice::from_raw_parts(buf as *const u8, n) }),
+        Some(Fd::File(h)) => write_handle(h, unsafe { core::slice::from_raw_parts(buf as *const u8, n.min(MAX_IO)) }),
         Some(Fd::Socket(_)) => unsafe { crate::net::send(fd, buf, n, 0) },
         Some(Fd::Dir(_)) => fail(libc::EISDIR) as ssize_t,
         None => fail(libc::EBADF) as ssize_t,
@@ -368,32 +370,38 @@ pub unsafe extern "C" fn readv(fd: c_int, iov: *const libc::iovec, cnt: c_int) -
     0
 }
 
+/// Serialises positional transfers on a handle: they move its pointer.
+static POS_LOCKS: [AtomicU32; 64] = [const { AtomicU32::new(0) }; 64];
+
+unsafe fn at_offset(h: u32, off: off64_t, f: impl FnOnce() -> ssize_t) -> ssize_t {
+    let w = &POS_LOCKS[h as usize % 64];
+    while w.swap(1, Ordering::Acquire) != 0 {
+        unsafe { DosSleep(0) };
+    }
+    let r = unsafe {
+        match seek(h, 0, 1).and_then(|old| seek(h, off, 0).map(|_| old)) {
+            Ok(old) => {
+                let r = f();
+                let _ = seek(h, old as i64, 0);
+                r
+            }
+            Err(rc) => fail_os2(rc) as ssize_t,
+        }
+    };
+    w.store(0, Ordering::Release);
+    r
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pread64(fd: c_int, buf: *mut c_void, n: size_t, off: off64_t) -> ssize_t {
     let Some(Fd::File(h)) = classify(fd) else { return fail(libc::ESPIPE) as ssize_t };
-    let mut old = 0;
-    unsafe {
-        DosSetFilePtr(h, 0, 1, &mut old);
-        let mut p = 0;
-        DosSetFilePtr(h, off as i32, 0, &mut p);
-        let r = read(fd, buf, n);
-        DosSetFilePtr(h, old as i32, 0, &mut p);
-        r
-    }
+    unsafe { at_offset(h, off, || read(fd, buf, n)) }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pwrite64(fd: c_int, buf: *const c_void, n: size_t, off: off64_t) -> ssize_t {
     let Some(Fd::File(h)) = classify(fd) else { return fail(libc::ESPIPE) as ssize_t };
-    let mut old = 0;
-    unsafe {
-        DosSetFilePtr(h, 0, 1, &mut old);
-        let mut p = 0;
-        DosSetFilePtr(h, off as i32, 0, &mut p);
-        let r = write(fd, buf, n);
-        DosSetFilePtr(h, old as i32, 0, &mut p);
-        r
-    }
+    unsafe { at_offset(h, off, || write(fd, buf, n)) }
 }
 
 #[unsafe(no_mangle)]
@@ -402,15 +410,14 @@ pub unsafe extern "C" fn lseek64(fd: c_int, off: off64_t, whence: c_int) -> off6
     if flags(h) & (F_CHARDEV | F_PIPE) != 0 {
         return fail(libc::ESPIPE) as off64_t;
     }
+    #[cfg(target_arch = "x86")]
     if off > i32::MAX as i64 || off < i32::MIN as i64 {
         return fail(libc::EOVERFLOW) as off64_t;
     }
-    let mut pos = 0;
-    let rc = unsafe { DosSetFilePtr(h, off as i32, whence as u32, &mut pos) };
-    if rc != 0 {
-        return fail_os2(rc) as off64_t;
+    match unsafe { seek(h, off, whence as u32) } {
+        Ok(pos) => pos as off64_t,
+        Err(rc) => fail_os2(rc) as off64_t,
     }
-    pos as off64_t
 }
 
 #[unsafe(no_mangle)]
@@ -432,7 +439,104 @@ fn file_time(date: u16, time: u16) -> i64 {
     let doy = (153 * mp + 2) / 5 + d.max(1) as i64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    days * 86400 + h * 3600 + mi * 60 + s
+    days * 86400 + h * 3600 + mi * 60 + s + crate::time::zone_seconds()
+}
+
+/// An FDATE/FTIME pair of seconds since 1970 (clamped to what it holds).
+fn file_date(t: i64) -> (u16, u16) {
+    let t = (t - crate::time::zone_seconds()).max(315_532_800);
+    let (y, m, d) = crate::time::civil_from_days(t.div_euclid(86400));
+    let s = t.rem_euclid(86400) as u32;
+    if y > 2107 {
+        return (0xff9f, 0xbf7d);
+    }
+    let date = ((y - 1980) as u32) << 9 | m << 5 | d;
+    (date as u16, ((s / 3600) << 11 | (s / 60 % 60) << 5 | (s % 60) / 2) as u16)
+}
+
+/// Apply utimensat's two times (access, modification) to `s`.
+unsafe fn set_times(s: &mut FileStatus3, ts: *const libc::timespec) {
+    let now = crate::time::realtime().0;
+    for i in 0..2 {
+        let t = if ts.is_null() {
+            now
+        } else {
+            let t = unsafe { &*ts.add(i) };
+            match t.tv_nsec as i64 {
+                n if n == libc::UTIME_OMIT as i64 => continue,
+                n if n == libc::UTIME_NOW as i64 => now,
+                _ => t.tv_sec as i64,
+            }
+        };
+        let (d, t) = file_date(t);
+        if i == 0 {
+            (s.adate, s.atime) = (d, t);
+        } else {
+            (s.wdate, s.wtime) = (d, t);
+        }
+    }
+}
+
+const FS_SIZE: u32 = core::mem::size_of::<FileStatus3>() as u32;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn utimensat(dirfd: c_int, path: *const c_char, ts: *const libc::timespec, _flags: c_int) -> c_int {
+    let Some(p) = (unsafe { at_path(dirfd, path) }) else { return fail(libc::EBADF) };
+    let mut s = match query_path(&p) {
+        Ok(s) => s,
+        Err(rc) => return fail_os2(rc),
+    };
+    unsafe { set_times(&mut s, ts) };
+    let rc = unsafe { DosSetPathInfo(p.as_ptr(), FS_LEVEL, &s as *const _ as *const u8, FS_SIZE, 0) };
+    if rc != 0 { fail_os2(rc) } else { 0 }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn futimens(fd: c_int, ts: *const libc::timespec) -> c_int {
+    let h = match classify(fd) {
+        Some(Fd::File(h)) => h,
+        Some(Fd::Dir(i)) => {
+            let Some(mut p) = dir_path(i) else { return fail(libc::EBADF) };
+            p.push(0);
+            return unsafe { utimensat(libc::AT_FDCWD, p.as_ptr() as *const c_char, ts, 0) };
+        }
+        _ => return fail(libc::EBADF),
+    };
+    let mut s = FileStatus3::default();
+    let mut rc = unsafe { DosQueryFileInfo(h, FS_LEVEL, &mut s as *mut _ as *mut u8, FS_SIZE) };
+    if rc == 0 {
+        unsafe { set_times(&mut s, ts) };
+        rc = unsafe { DosSetFileInfo(h, FS_LEVEL, &s as *const _ as *const u8, FS_SIZE) };
+    }
+    if rc != 0 { fail_os2(rc) } else { 0 }
+}
+
+/// flock: OS/2's region locks, which keep others from reading and writing
+/// what is locked, on a byte no file reaches, so that (as POSIX says) only
+/// programs that ask for the lock see it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flock(fd: c_int, op: c_int) -> c_int {
+    let Some(Fd::File(h)) = classify(fd) else { return fail(libc::EBADF) };
+    const NONE: [u32; 2] = [0, 0];
+    const BYTE: [u32; 2] = [0x7fff_fff0, 1];
+    // Let go of a lock held already (changing one is not atomic on Linux
+    // either).
+    let rc = unsafe { DosSetFileLocks(h, &BYTE, &NONE, 0, 0) };
+    let kind = op & !libc::LOCK_NB;
+    if kind == libc::LOCK_UN {
+        return if rc != 0 && rc != 33 { fail_os2(rc) } else { 0 };
+    }
+    let shared = (kind == libc::LOCK_SH) as u32;
+    loop {
+        let ms = if op & libc::LOCK_NB != 0 { 0 } else { 1000 };
+        match unsafe { DosSetFileLocks(h, &NONE, &BYTE, ms, shared) } {
+            0 => return 0,
+            // Locked by someone else.
+            33 | 36 | 95 | 232 | 640 if op & libc::LOCK_NB != 0 => return fail(libc::EWOULDBLOCK),
+            33 | 36 | 95 | 232 | 640 => unsafe { DosSleep(10); },
+            rc => return fail_os2(rc),
+        }
+    }
 }
 
 fn hash_path(p: &[u8]) -> u64 {
@@ -514,7 +618,7 @@ pub unsafe extern "C" fn fstat64(fd: c_int, buf: *mut stat64) -> c_int {
                 return 0;
             }
             let mut s = FileStatus3::default();
-            let rc = unsafe { DosQueryFileInfo(h, 1, &mut s as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) };
+            let rc = unsafe { DosQueryFileInfo(h, FS_LEVEL, &mut s as *mut _ as *mut u8, core::mem::size_of::<FileStatus3>() as u32) };
             if rc != 0 {
                 return fail_os2(rc);
             }
@@ -805,7 +909,7 @@ pub unsafe extern "C" fn chmod(path: *const c_char, mode: mode_t) -> c_int {
         return 0;
     }
     s.attr = if mode & 0o222 == 0 { s.attr | 1 } else { s.attr & !1 };
-    let rc = unsafe { DosSetPathInfo(p.as_ptr(), 1, &s as *const _ as *const u8, core::mem::size_of::<FileStatus3>() as u32, 0) };
+    let rc = unsafe { DosSetPathInfo(p.as_ptr(), FS_LEVEL, &s as *const _ as *const u8, core::mem::size_of::<FileStatus3>() as u32, 0) };
     if rc != 0 { fail_os2(rc) } else { 0 }
 }
 
@@ -827,7 +931,7 @@ pub unsafe extern "C" fn fdatasync(fd: c_int) -> c_int {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ftruncate64(fd: c_int, len: off64_t) -> c_int {
     let Some(Fd::File(h)) = classify(fd) else { return fail(libc::EINVAL) };
-    let rc = unsafe { DosSetFileSize(h, len as u32) };
+    let rc = unsafe { set_file_size(h, len) };
     if rc != 0 { fail_os2(rc) } else { 0 }
 }
 
@@ -1133,4 +1237,56 @@ pub unsafe extern "C" fn splice(_a: c_int, _ao: *mut off64_t, _b: c_int, _bo: *m
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn copy_file_range(_a: c_int, _ao: *mut off64_t, _b: c_int, _bo: *mut off64_t, _n: size_t, _f: u32) -> ssize_t {
     fail(libc::ENOSYS) as ssize_t
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn preadv(fd: c_int, iov: *const libc::iovec, cnt: c_int, off: off64_t) -> ssize_t {
+    for i in 0..cnt.max(0) as usize {
+        let v = unsafe { &*iov.add(i) };
+        if v.iov_len != 0 {
+            return unsafe { pread64(fd, v.iov_base, v.iov_len, off) };
+        }
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pwritev(fd: c_int, iov: *const libc::iovec, cnt: c_int, off: off64_t) -> ssize_t {
+    for i in 0..cnt.max(0) as usize {
+        let v = unsafe { &*iov.add(i) };
+        if v.iov_len != 0 {
+            return unsafe { pwrite64(fd, v.iov_base, v.iov_len, off) };
+        }
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn linkat(_d1: c_int, _a: *const c_char, _d2: c_int, _b: *const c_char, _f: c_int) -> c_int {
+    fail(libc::EPERM)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mkfifo(_p: *const c_char, _m: mode_t) -> c_int {
+    fail(libc::EPERM)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fchmodat(dirfd: c_int, path: *const c_char, mode: mode_t, _flags: c_int) -> c_int {
+    let Some(p) = (unsafe { at_path(dirfd, path) }) else { return fail(libc::EBADF) };
+    unsafe { chmod(p.as_ptr() as *const c_char, mode) }
+}
+
+// OS/2 files have no owners.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn chown(_p: *const c_char, _u: u32, _g: u32) -> c_int {
+    0
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lchown(_p: *const c_char, _u: u32, _g: u32) -> c_int {
+    0
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fchown(_fd: c_int, _u: u32, _g: u32) -> c_int {
+    0
 }

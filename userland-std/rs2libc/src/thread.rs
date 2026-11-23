@@ -28,8 +28,8 @@ pub struct Thread {
     done: u32,
     state: AtomicU32,
     /// Lowest and highest address of the thread's stack.
-    pub stack_lo: u32,
-    pub stack_hi: u32,
+    pub stack_lo: usize,
+    pub stack_hi: usize,
 }
 
 static mut MAIN: Thread = Thread {
@@ -127,16 +127,17 @@ pub unsafe extern "C" fn pthread_getattr_np(t: pthread_t, a: *mut pthread_attr_t
     unsafe {
         pthread_attr_init(a);
         if (*t).stack_hi > (*t).stack_lo {
-            (*attr(a)).stack_addr = (*t).stack_lo as usize;
-            (*attr(a)).stack_size = ((*t).stack_hi - (*t).stack_lo) as usize;
+            (*attr(a)).stack_addr = (*t).stack_lo;
+            (*attr(a)).stack_size = (*t).stack_hi - (*t).stack_lo;
         }
     }
     0
 }
 
 /// DosCreateThread's entry: align the stack for Rust code, then start.
+#[cfg(target_arch = "x86")]
 #[unsafe(naked)]
-unsafe extern "C" fn thread_entry(_t: u32) {
+unsafe extern "C" fn thread_entry(_t: usize) {
     core::arch::naked_asm!(
         "push ebp",
         "mov ebp, esp",
@@ -149,6 +150,11 @@ unsafe extern "C" fn thread_entry(_t: u32) {
         "ret",
         start = sym thread_start,
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" fn thread_entry(t: usize) {
+    unsafe { thread_start(t as *mut Thread) }
 }
 
 unsafe extern "C" fn thread_start(t: *mut Thread) {
@@ -210,7 +216,7 @@ pub unsafe extern "C" fn pthread_create(
     let mut tid = 0;
     // Round the stack to whole 64 KB (OS/2 objects come in tiles anyway).
     let stack = ((stack + 0xffff) & !0xffff) as u32;
-    let rc = unsafe { DosCreateThread(&mut tid, thread_entry, t as u32, 0, stack) };
+    let rc = unsafe { DosCreateThread(&mut tid, thread_entry, t as usize, 0, stack) };
     if rc != 0 {
         unsafe {
             DosCloseEventSem(done);

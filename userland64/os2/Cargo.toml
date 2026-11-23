@@ -6,5 +6,8 @@ version.workspace = true
 license.workspace = true
 
 [features]
-default = ["heap"]
+default = ["heap", "runtime"]
+# The global allocator.
 heap = []
+# The panic handler and mem* functions (programs with std have their own).
+runtime = []

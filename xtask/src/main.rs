@@ -1114,6 +1114,7 @@ fn build_userland() -> Option<image::FileList> {
         files.push((ul.join(src), dest.to_string()));
     }
     files.extend(build_userland_std()?);
+    files.extend(build_userland_std64()?);
     files.extend(build_userland64()?);
     Some(files)
 }
@@ -1263,6 +1264,33 @@ const STD_PROGRAMS: &[(&str, &str, bool)] = &[
     ("webtext", "OS2\\APPS\\WEBTEXT.EXE", false),
     ("web", "OS2\\APPS\\WEB.EXE", true),
 ];
+
+/// The 64-bit programs of userland-std/ (docs/STD64.md): cargo package,
+/// destination. They stay ELF.
+const STD_PROGRAMS64: &[(&str, &str)] = &[("stdtest", "RS2\\STDTST64.EXE"), ("pmstd64", "RS2\\PMSTD64.EXE")];
+
+/// Build userland-std's 64-bit programs.
+fn build_userland_std64() -> Option<image::FileList> {
+    const TARGET: &str = "x86_64-unknown-linux-gnu";
+    let dir = root().join("userland-std");
+    let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+    cmd.current_dir(&dir).args(["build", "--release", "--target", TARGET]).env_remove("CARGO_TARGET_DIR");
+    for (pkg, _) in STD_PROGRAMS64 {
+        cmd.args(["-p", pkg]);
+    }
+    if !cmd.status().ok()?.success() {
+        return None;
+    }
+    let out_dir = root().join("work/userland/64");
+    std::fs::create_dir_all(&out_dir).ok()?;
+    let mut files = Vec::new();
+    for (bin, dest) in STD_PROGRAMS64 {
+        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
+        std::fs::copy(dir.join("target").join(TARGET).join("release").join(bin), &out).ok()?;
+        files.push((out, dest.to_string()));
+    }
+    Some(files)
+}
 
 /// Build the userland-std workspace and convert its programs to LX.
 fn build_userland_std() -> Option<image::FileList> {

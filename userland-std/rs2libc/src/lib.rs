@@ -4,7 +4,7 @@
 //! Programs are built for `i686-unknown-linux-gnu` with the precompiled std
 //! rustup ships for that target. That std calls glibc functions by name
 //! (`open64`, `pthread_create`, `getaddrinfo`, `syscall(SYS_futex)`...);
-//! this crate defines them, with glibc's i386 structure layouts (taken from
+//! this crate defines them, with glibc's (i386 or x86-64) structure layouts (taken from
 //! the `libc` crate, as std's own declarations are), in terms of DOSCALLS
 //! and rs2's kernel socket interface. The program is then linked statically
 //! (userland-std/link.ld) and converted to LX by tools/elf2lx like rs2's

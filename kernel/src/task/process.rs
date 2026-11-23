@@ -14,6 +14,9 @@ use crate::loader::{self, Module};
 use crate::sync::SpinLock;
 use crate::vm::{self, pag, AddressSpace, SegKind};
 
+/// The size of a 64-bit program's first stack.
+const STACK64: u32 = 0x40_0000;
+
 /// Offsets in the per-process information area.
 pub mod info {
     /// Process information block.
@@ -283,9 +286,9 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
 
     // Stack.
     let (stack_flat, stack_sel, stack_off) = if is64 {
-        // 64-bit programs: 1 MB, growing down from a committed top page
+        // 64-bit programs: 4 MB (STACK64), growing down from a committed top page
         // over a guard page.
-        let size = 0x10_0000;
+        let size = STACK64;
         let base = space.alloc(size, pag::READ | pag::WRITE, SegKind::Data, None).map_err(|e| e.code())?;
         let _ = space.set_mem(base + size - vm::PAGE, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
         let _ = space.set_mem(base + size - 2 * vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
@@ -417,7 +420,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         dregs: [const { AtomicU32::new(0) }; 4],
         dr7: AtomicU32::new(0),
     });
-    let stack_bottom = if is64 { stack_flat - 0x10_0000 } else { stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000)) };
+    let stack_bottom = if is64 { stack_flat - STACK64 } else { stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000)) };
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
     {
         let mut sp = proc.space.lock();
