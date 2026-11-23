@@ -151,7 +151,7 @@ pub extern "C" fn thunk16_enter(ss: u32, sp: u32) -> u32 {
 /// Returning to 16-bit code.
 pub extern "C" fn thunk16_leave() {
     let s = slot();
-    let _ = DEPTH[s].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |d| d.checked_sub(1));
+    let _ = DEPTH[s].try_update(Ordering::Relaxed, Ordering::Relaxed, |d| d.checked_sub(1));
 }
 
 /// The 16-bit SS:SP below which a callback may use the stack (0: the

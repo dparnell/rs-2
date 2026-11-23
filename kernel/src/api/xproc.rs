@@ -64,11 +64,11 @@ pub fn dos_set_signal_exception_focus(c: &mut Ctx) -> u32 {
     let (flag, ptimes) = (c.arg(0), c.arg(1));
     let f = &c.process.sig_focus;
     let n = match flag {
-        1 => match f.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| (n < MAX_NESTING).then_some(n + 1)) {
+        1 => match f.try_update(Ordering::AcqRel, Ordering::Relaxed, |n| (n < MAX_NESTING).then_some(n + 1)) {
             Ok(n) => n + 1,
             Err(_) => return ERROR_NESTING_TOO_DEEP,
         },
-        0 => match f.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)) {
+        0 => match f.try_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)) {
             Ok(n) => n - 1,
             Err(_) => return err::ALREADY_RESET,
         },
@@ -288,7 +288,7 @@ pub fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
     let delta = c.read_u32(preq).unwrap_or(0) as i32;
     let used = c.process.handles.lock().len() as i64;
     let want = |cur: u32| (cur as i64 + delta as i64).clamp(used.max(20), 32768) as u32;
-    let cur = c.process.max_fh.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |cur| Some(want(cur))).unwrap_or(0);
+    let cur = c.process.max_fh.try_update(Ordering::AcqRel, Ordering::Relaxed, |cur| Some(want(cur))).unwrap_or(0);
     let want = want(cur);
     c.write_u32(pmax, want as u32);
     0

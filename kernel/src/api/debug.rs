@@ -790,7 +790,7 @@ fn set_watch(p: &Process, u: &mut Udb) {
     };
     WATCHING.store(true, Ordering::Relaxed);
     p.dregs[i].store(addr, Ordering::SeqCst);
-    let _ = p.dr7.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+    let _ = p.dr7.try_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
         Some(v & !dr7_bits(i) | 1 << (2 * i) | rwlen << (16 + 4 * i) | DR7_LE)
     });
     u.set(udb::INDEX, WATCH_HANDLE | i as u32);

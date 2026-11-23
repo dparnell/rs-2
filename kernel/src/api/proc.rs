@@ -513,7 +513,7 @@ pub fn dos_resume_thread(c: &mut Ctx) -> u32 {
     let t = c.process.threads.lock().iter().find(|t| t.tid == tid).cloned();
     match t {
         Some(t) => {
-            if t.suspend.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)).is_err() {
+            if t.suspend.try_update(Ordering::AcqRel, Ordering::Relaxed, |n| n.checked_sub(1)).is_err() {
                 return 90; // ERROR_NOT_FROZEN
             }
             c.process.thread_waiters.wake_all();

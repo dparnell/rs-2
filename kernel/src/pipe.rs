@@ -59,7 +59,7 @@ impl PipeEnd {
     }
 
     pub fn set_mode(&self, m: u32) {
-        let _ = self.mode.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((m & !0x7) | (old & 0x7)));
+        let _ = self.mode.try_update(Ordering::Relaxed, Ordering::Relaxed, |old| Some((m & !0x7) | (old & 0x7)));
     }
 
     /// Read up to `n` bytes; blocks until data arrives or all writers close
