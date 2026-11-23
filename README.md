@@ -60,12 +60,12 @@ programs tested so far.
 
 ### Requirements
 
-- **Rust**, stable, through [rustup](https://rustup.rs), with three
-  extra targets: the UEFI loader, the kernel and the 32-bit OS/2 programs
-  and DLLs:
+- **Rust**, stable, through [rustup](https://rustup.rs), with four
+  extra targets: the UEFI loader, the kernel, and the 32-bit and 64-bit
+  OS/2 programs and DLLs:
 
   ```bash
-  rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu
+  rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu x86_64-unknown-linux-gnu
   ```
 
   and the `llvm-tools` component (its `llvm-ar` archives the C code

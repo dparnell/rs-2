@@ -38,6 +38,7 @@ for a in "$@"; do
     done
     "$lld" -flavor "$flavor" -L "$dir/syslib" -T "$dir/link64.ld" "$@" || exit
     nm=$(dirname "$lld")/llvm-nm
+    [ -x "$nm" ] || nm=llvm-nm
     bad=$("$nm" -D --undefined-only "$out" | awk '$1 == "U" && $2 !~ /[.]/ { print "    " $2 }')
     if [ -n "$bad" ]; then
         echo "lld.sh: $out: not in rs2libc:" >&2

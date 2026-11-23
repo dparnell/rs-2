@@ -6,15 +6,23 @@ rs2 runs 64-bit programs (ELF64, long mode) with a native 64-bit OS/2
 API, including PM: see [API64.md](API64.md). They can use memory above
 4 GB (API64.md, "Memory"), and C programs have a C library of their own
 ([LIBC64.md](LIBC64.md)) and C++ with libc++ ([CXX64.md](CXX64.md)),
-the base route B needs.
+the base route B needs. Rust programs have std, threads, sockets and
+processes included ([STD64.md](STD64.md)).
 
 ## What the build needs
 
-The build is light: two Cargo workspaces (about 58 crates in total), the
-stable toolchain, and an xtask that only runs `cargo`, `rustc` and
-`objcopy` (debug-info stripping). QEMU is needed only for `xtask run`, not
-for `build`, `iso` or `disk`. So the problem is running rustc, cargo and
-LLVM on rs2.
+The build is three Cargo workspaces (kernel and tools, `userland` and
+`userland-std`, `userland64`), the stable toolchain, and an xtask that runs
+`cargo`, `rustc` and `rust-objcopy`, and these besides:
+
+- `clang`, for the 64-bit C and C++ libraries (`userland64/c/cc64.sh`) and
+  for ring's C code in userland-std
+- a POSIX shell, for `cc64.sh`, `userland-std/{cc,cc64,ar,lld}.sh` and the
+  DOS test programs' `build.sh` (better rewritten in Rust than a shell
+  ported)
+- `git` (the version stamp), `curl` and `unzip` (optional downloads)
+
+QEMU is needed only for `xtask run`, not for `build`, `iso` or `disk`.
 
 ## Why not as OS/2 programs
 
@@ -25,7 +33,7 @@ LLVM on rs2.
 
 The compiler therefore has to run as a 64-bit process ([API64.md](API64.md)).
 
-## Route A (preferred): a Linux system-call layer for 64-bit ELF programs
+## Route A: a Linux system-call layer for 64-bit ELF programs
 
 The same idea as WSL1 or FreeBSD's Linux compatibility: run the official
 rustc/cargo binaries unchanged instead of porting anything. Targeting the
@@ -71,33 +79,35 @@ Steps 1-3 are most of the kernel work, roughly on the scale of the
 networking milestone. After that it is mostly chasing missing system calls
 until rustc runs.
 
-## Route B: a native rs2 target
+## Route B (preferred now): native tools
 
-An `x86_64-unknown-rs2` target with a Rust `std` port. It needs the same
-64-bit process and memory work (done), plus a C library (a first one is
-done: LIBC64.md) and
-cross-building LLVM (C++), rustc and cargo with their C dependencies (curl,
-libgit2, zlib). It's cleaner and more "rs2", but much more work. It's only
-worth it if native tools matter more than a compatibility layer.
+64-bit OS/2 builds of the tools. Its extra cost over route A was mostly
+the C and C++ runtimes, which are done, and native compilers serve
+programs of rs2's own as well.
+
+1. Rust's std for 64-bit programs: done ([STD64.md](STD64.md)).
+2. Rust DLLs with std: the loader's TLS relocations (R_X86_64_DTPMOD64),
+   proc macros and `rustc_driver` as DLLs.
+3. LLVM's `lld`, then `clang`, cross-built with cc64.sh (C++ on
+   LIBCXX64.DLL; what LLVM's Unix support code needs of POSIX, `mmap` of
+   files first). Milestone: compile and link a C program on rs2.
+4. `rustc`: LLVM in a DLL of its own, behind the C interface of rustc's
+   LLVM wrapper (each module has its own C library), `rustc_driver`, proc
+   macros. Milestone: `rustc hello.rs` on rs2.
+5. `cargo`, offline and without curl and libgit2 as far as it goes.
+   Milestone: `cargo build` of a host-tested crate.
+6. `cargo xtask iso` on rs2, with the shell scripts gone.
 
 ## Needed by either route
 
 - Offline builds: vendor the dependencies (`cargo vendor`) and build with
-  `--offline`; crates.io stays out of reach without TLS in the network
-  stack.
+  `--offline`. (TLS itself works: rustls, in the browser.)
 - The precompiled libraries for `x86_64-unknown-uefi`,
   `x86_64-unknown-none` and the userland's i686 target, copied into the
   sysroot as-is (they are data).
-- Performance: each disk runs one command at a time and the kernel has a
-  big lock (both on the roadmap). Builds would be slow but workable on a
+- Performance: each disk runs one command at a time (on the roadmap).
+  Builds would be slow but workable on a
   VM with several CPUs and 8 GB+ of memory.
 - Distribution: the toolchain's licences allow shipping it, but it is not
   rs2 code, so it belongs on a separate developer image rather than the
   dist ISO.
-
-## First step if this is picked up
-
-A design for the 64-bit process model: its address-space layout next to
-the OS/2 arenas, the second system-call entry, signals, and how such
-processes appear to OS/2 programs (DosExecPgm of an ELF64 file, sessions,
-pipes between the two worlds).
