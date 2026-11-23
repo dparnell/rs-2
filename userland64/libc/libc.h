@@ -54,10 +54,14 @@ HIDDEN int _rs2_errno_of(APIRET rc);
 
 /* malloc may give memory above 4 GB, which most OS/2 calls do not take:
  * LOW is a string's copy on the stack if it is there, and _rs2_low_alloc
- * zeroed memory below 4 GB (free it with free). */
+ * zeroed memory below 4 GB (free it with free). A path /C:/dir (as cargo
+ * writes them: rs2libc's rooted_paths) is C:/dir. */
+static inline const char *_rs2_unroot(const char *p) {
+    return p[0] == '/' && p[1] && p[2] == ':' && ((p[1] | 0x20) >= 'a' && (p[1] | 0x20) <= 'z') ? p + 1 : p;
+}
 #define LOW(p) \
-    ((PCSZ)((uintptr_t)(p) >> 32 ? __builtin_strcpy(__builtin_alloca(__builtin_strlen((const char *)(p)) + 1), (const char *)(p)) \
-                                 : (const char *)(p)))
+    ((PCSZ)((uintptr_t)(p) >> 32 ? __builtin_strcpy(__builtin_alloca(__builtin_strlen((const char *)(p)) + 1), _rs2_unroot((const char *)(p))) \
+                                 : _rs2_unroot((const char *)(p))))
 HIDDEN void *_rs2_low_alloc(size_t n);
 
 /* A lock: spins, then yields. Recursive locks belong to one thread. */

@@ -22,12 +22,15 @@ const EXEC_TRACE: u32 = 3;
 const EXEC_BACKGROUND: u32 = 4;
 const EXEC_ASYNCRESULTDB: u32 = 6;
 
+/// The arguments and the environment are at most a segment each.
+const MAX_BLOCK: usize = 0x1_0000;
+
 /// Read a double-NUL terminated block of strings.
 pub(super) fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> {
     let mut v = Vec::new();
     let mut a = addr;
     loop {
-        let s = c.read_str(a, 4096)?;
+        let s = c.read_str(a, MAX_BLOCK)?;
         if s.is_empty() {
             break;
         }

@@ -281,3 +281,26 @@ pub fn program_path() -> Vec<u8> {
 fn unused() -> *mut u8 {
     null_mut()
 }
+
+/// A path with \ or a drive, as `rooted_paths` says.
+pub fn rooted(a: &[u8]) -> Option<Vec<u8>> {
+    let drive = a.len() >= 2 && a[0].is_ascii_alphabetic() && a[1] == b':';
+    if a.contains(&b'"') || !(drive || a.contains(&b'\\')) {
+        return None;
+    }
+    let mut v: Vec<u8> = if drive { alloc::vec![b'/'] } else { Vec::new() };
+    v.extend(a.iter().map(|&c| if c == b'\\' { b'/' } else { c }));
+    Some(v)
+}
+
+/// The program's arguments. (std reads the array each time.)
+pub unsafe fn rooted_args() {
+    unsafe {
+        for i in 1..ARGC as usize {
+            let p = ARGV.add(i) as *mut *const c_char;
+            if let Some(v) = rooted(crate::string::cstr(*p)) {
+                *p = leak_cstr(&v);
+            }
+        }
+    }
+}

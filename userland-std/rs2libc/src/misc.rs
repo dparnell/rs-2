@@ -416,6 +416,10 @@ pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_vo
 pub unsafe extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void {
     // RTLD_DEFAULT, RTLD_NEXT
     if handle.is_null() || handle as usize == usize::MAX {
+        // What the getrandom crate looks for.
+        if unsafe { cstr(name) } == b"getrandom" {
+            return getrandom as *mut c_void;
+        }
         return null_mut();
     }
     let mut buf = [0u8; 512];
@@ -692,4 +696,55 @@ pub unsafe extern "C" fn sem_wait(s: *mut libc::sem_t) -> c_int {
             return 0;
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn getpwnam(_name: *const c_char) -> *mut c_void {
+    null_mut()
+}
+
+/// Nothing is known (no file system is a network's).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn statfs(_path: *const c_char, buf: *mut libc::statfs) -> c_int {
+    unsafe { core::ptr::write_bytes(buf, 0, 1) };
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uname(u: *mut libc::utsname) -> c_int {
+    fn put(d: &mut [c_char], s: &[u8]) {
+        for (d, &c) in d.iter_mut().zip(s) {
+            *d = c as c_char;
+        }
+    }
+    unsafe {
+        core::ptr::write_bytes(u, 0, 1);
+        let u = &mut *u;
+        put(&mut u.sysname, b"OS/2");
+        put(&mut u.nodename, b"rs2");
+        put(&mut u.release, b"4.52");
+        put(&mut u.version, b"rs2");
+        put(&mut u.machine, if cfg!(target_arch = "x86_64") { b"x86_64" } else { b"i686" });
+    }
+    0
+}
+
+/// For programs that need absolute paths to be what std's Path calls
+/// absolute: from now on the current directory, the program's path and
+/// canonical paths are /C:/dir (which all calls take, as they do C:\dir),
+/// and so are the program's arguments that start with a drive, and cargo's
+/// environment variables. Call it first in `main`.
+pub fn rooted_paths() {
+    crate::file::set_rooted();
+    for name in [c"HOME", c"CARGO_HOME", c"CARGO_TARGET_DIR", c"RUSTC", c"RUSTDOC", c"RUSTC_WRAPPER"] {
+        unsafe {
+            let v = getenv(name.as_ptr());
+            if !v.is_null()
+                && let Some(p) = crate::start::rooted(cstr(v))
+            {
+                set(name.to_bytes(), Some(&p));
+            }
+        }
+    }
+    unsafe { crate::start::rooted_args() };
 }

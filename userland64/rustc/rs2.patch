@@ -144,11 +144,12 @@
          buf.into_inner()
 --- a/compiler/rustc_target/src/spec/base/linux_gnu.rs
 +++ b/compiler/rustc_target/src/spec/base/linux_gnu.rs
-@@ -4,6 +4,9 @@
+@@ -4,6 +4,10 @@
      let mut base = TargetOptions {
          env: Env::Gnu,
          static_position_independent_executables: true,
 +        // rs2: RS2-LD.EXE (userland-std/rs2ld) links its programs.
++        exe_suffix: ".exe".into(),
 +        linker: Some("rs2-ld".into()),
 +        linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::No),
          ..base::linux::opts()

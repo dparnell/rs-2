@@ -70,6 +70,24 @@ fn quoted(a: &str) -> String {
     s + "\"\n"
 }
 
+/// Paths as cargo writes them (rs2libc's rooted_paths): /C:/dir is C:/dir.
+fn unrooted(a: &str) -> String {
+    let b = a.as_bytes();
+    let at = |i: usize| b.get(i) == Some(&b'/') && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) && b.get(i + 2) == Some(&b':');
+    // At the start, after -L or after =; and the last drive counts.
+    match (0..a.len()).rev().find(|&i| at(i)) {
+        Some(i) => {
+            let keep = match a.find(['=']) {
+                Some(e) if e < i => e + 1,
+                _ if a.starts_with("-L") => 2,
+                _ => 0,
+            };
+            format!("{}{}", &a[..keep], &a[i + 1..])
+        }
+        None => a.to_string(),
+    }
+}
+
 /// A DLL's module name: libfoo.so or libfoo-HASH.so is FOO.
 fn module(out: &str) -> String {
     let n = Path::new(out).file_stem().unwrap_or_default().to_string_lossy().into_owned();
@@ -88,6 +106,9 @@ fn main() {
     let part = |n: &str| lib.join(n).to_string_lossy().into_owned();
     let mut args = Vec::new();
     expand(std::env::args().skip(1), &mut args);
+    for a in &mut args {
+        *a = unrooted(a);
+    }
     if args.first().is_some_and(|a| a == "-flavor") {
         args.drain(..2.min(args.len()));
     }

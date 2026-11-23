@@ -1,0 +1,2676 @@
+--- a/cargo/Cargo.lock
++++ b/cargo/Cargo.lock
+@@ -421,6 +421,7 @@
+  "portable-atomic",
+  "rand 0.10.1",
+  "regex",
++ "rs2libc",
+  "rusqlite",
+  "rustc-hash 2.1.2",
+  "rustc-stable-hash",
+@@ -953,13 +954,9 @@
+ [[package]]
+ name = "curl"
+ version = "0.4.50"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3a45ee8994e5307cb4c60cfc1c20bf7263ffb771ddc135c9f768a14bcbc15b09"
+ dependencies = [
+  "curl-sys",
+  "libc",
+- "openssl-probe",
+- "openssl-sys",
+  "schannel",
+  "socket2",
+  "windows-sys 0.61.2",
+@@ -968,14 +965,10 @@
+ [[package]]
+ name = "curl-sys"
+ version = "0.4.90+curl-8.21.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "97799a0d220bfb3361e0fe4936966ff8c4b24d65c3f06dfc70d7b680b44e7897"
+ dependencies = [
+  "cc",
+  "libc",
+- "libnghttp2-sys",
+  "libz-sys",
+- "openssl-sys",
+  "pkg-config",
+  "vcpkg",
+  "windows-sys 0.61.2",
+@@ -1146,6 +1139,17 @@
+ ]
+ 
+ [[package]]
++name = "dlmalloc"
++version = "0.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
++dependencies = [
++ "cfg-if",
++ "libc",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
+ name = "dunce"
+ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -1440,6 +1444,12 @@
+ ]
+ 
+ [[package]]
++name = "gimli"
++version = "0.34.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
++
++[[package]]
+ name = "git2"
+ version = "0.21.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -1449,8 +1459,6 @@
+  "libc",
+  "libgit2-sys",
+  "log",
+- "openssl-probe",
+- "openssl-sys",
+  "url",
+ ]
+ 
+@@ -2874,14 +2882,10 @@
+ [[package]]
+ name = "libgit2-sys"
+ version = "0.18.7+1.9.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "23c7391e4b9f4ffab1a624223cc1d7385ff9a678f490768add717de7ea2f4d89"
+ dependencies = [
+  "cc",
+  "libc",
+- "libssh2-sys",
+  "libz-sys",
+- "openssl-sys",
+  "pkg-config",
+ ]
+ 
+@@ -2896,20 +2900,14 @@
+ ]
+ 
+ [[package]]
+-name = "libnghttp2-sys"
+-version = "0.1.13+1.68.1"
++name = "libm"
++version = "0.2.16"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "492e00167f1418c15648144f42bbfc63099806ecee9bf8d09a6353d6b4856b3c"
+-dependencies = [
+- "cc",
+- "libc",
+-]
++checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+ 
+ [[package]]
+ name = "libsqlite3-sys"
+ version = "0.38.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f6c19a05435c21ac299d71b6a9c13db3e3f47c520517d58990a462a1397a61db"
+ dependencies = [
+  "cc",
+  "pkg-config",
+@@ -2917,25 +2915,8 @@
+ ]
+ 
+ [[package]]
+-name = "libssh2-sys"
+-version = "0.3.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fce5a0b125f6aeac93b304b35f7f1e9f054aad29ddac57091928e41df3ccd233"
+-dependencies = [
+- "cc",
+- "libc",
+- "libz-sys",
+- "openssl-sys",
+- "pkg-config",
+- "semver",
+- "vcpkg",
+-]
+-
+-[[package]]
+ name = "libz-sys"
+ version = "1.1.29"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -3365,12 +3346,6 @@
+ ]
+ 
+ [[package]]
+-name = "openssl-probe"
+-version = "0.1.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+-
+-[[package]]
+ name = "openssl-src"
+ version = "300.6.1+3.6.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3918,6 +3893,16 @@
+ ]
+ 
+ [[package]]
++name = "rs2libc"
++version = "0.1.0"
++dependencies = [
++ "dlmalloc",
++ "libc",
++ "libm",
++ "unwinding",
++]
++
++[[package]]
+ name = "rsqlite-vfs"
+ version = "0.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -4920,6 +4905,15 @@
+ version = "0.9.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
++
++[[package]]
++name = "unwinding"
++version = "0.2.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4b134ada16dda9e435abe2a6d76a01d497bc60707357845a15f9b0ed42dc88ce"
++dependencies = [
++ "gimli",
++]
+ 
+ [[package]]
+ name = "url"
+--- a/cargo/Cargo.toml
++++ b/cargo/Cargo.toml
+@@ -45,13 +45,13 @@
+ core-foundation = { version = "0.10.1", features = ["mac_os_10_7_support"] }
+ crates-io = { version = "0.41.3", path = "crates/crates-io" }
+ criterion = { version = "0.8.2", features = ["html_reports"] }
+-curl = "0.4.49"
++curl = { version = "0.4.49", default-features = false }
+ curl-sys = "0.4.88"
+ filetime = "0.2.27"
+ flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
+ futures = { version = "0.3.32", default-features = false, features = ["std", "executor", "async-await"]}
+ futures-timer = "3.0.3"
+-git2 = { version = "0.21.0", features = ["https", "ssh"] }
++git2 = { version = "0.21.0", default-features = false, features = ["cred"] }
+ git2-curl = "0.22.0"
+ # When updating this, also see if `gix-transport` further down needs updating or some auth-related tests will fail.
+ gix = { version = "0.85.0", default-features = false, features = ["sha1", "progress-tree", "parallel", "dirwalk", "status"] }
+@@ -173,7 +173,7 @@
+ clap_complete.workspace = true
+ color-print.workspace = true
+ crates-io.workspace = true
+-curl = { workspace = true, features = ["http2"] }
++curl.workspace = true
+ curl-sys.workspace = true
+ filetime.workspace = true
+ flate2.workspace = true
+@@ -235,6 +235,7 @@
+ 
+ [target.'cfg(unix)'.dependencies]
+ libc.workspace = true
++rs2libc = { path = "../../rs2libc" }
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ cargo-credential-libsecret.workspace = true
+@@ -296,3 +297,10 @@
+ 
+ [lints]
+ workspace = true
++
++[patch.crates-io]
++curl-sys = { path = "../curl-sys" }
++libgit2-sys = { path = "../libgit2-sys" }
++libsqlite3-sys = { path = "../libsqlite3-sys" }
++libz-sys = { path = "../libz-sys" }
++curl = { path = "../curl" }
+--- a/cargo/crates/cargo-util/src/paths.rs
++++ b/cargo/crates/cargo-util/src/paths.rs
+@@ -18,7 +18,15 @@
+ /// environment variable this is will be used for, which is included in the
+ /// error message.
+ pub fn join_paths<T: AsRef<OsStr>>(paths: &[T], env: &str) -> Result<OsString> {
+-    env::join_paths(paths.iter()).with_context(|| {
++    // rs2: ; between paths, which have drives.
++    let mut joined = OsString::new();
++    for (i, p) in paths.iter().enumerate() {
++        if i > 0 {
++            joined.push(";");
++        }
++        joined.push(p);
++    }
++    Ok::<_, env::JoinPathsError>(joined).with_context(|| {
+         let mut message = format!(
+             "failed to join paths from `${env}` together\n\n\
+              Check if any of path segments listed below contain an \
+@@ -33,6 +41,17 @@
+     })
+ }
+ 
++/// Like [`std::env::split_paths`], with rs2's separator.
++pub fn split_paths(s: &OsStr) -> impl Iterator<Item = PathBuf> {
++    let parts: Vec<PathBuf> = s
++        .to_string_lossy()
++        .split(';')
++        .filter(|p| !p.is_empty())
++        .map(|p| PathBuf::from(p.replace('\\', "/")))
++        .collect();
++    parts.into_iter()
++}
++
+ /// Returns the name of the environment variable used for searching for
+ /// dynamic libraries.
+ pub fn dylib_path_envvar() -> &'static str {
+@@ -70,7 +89,7 @@
+ /// will need to be dealt with.
+ pub fn dylib_path() -> Vec<PathBuf> {
+     match env::var_os(dylib_path_envvar()) {
+-        Some(var) => env::split_paths(&var).collect(),
++        Some(var) => split_paths(&var).collect(),
+         None => Vec::new(),
+     }
+ }
+@@ -124,13 +143,9 @@
+ pub fn resolve_executable(exec: &Path) -> Result<PathBuf> {
+     if exec.components().count() == 1 {
+         let paths = env::var_os("PATH").ok_or_else(|| anyhow::format_err!("no PATH"))?;
+-        let candidates = env::split_paths(&paths).flat_map(|path| {
++        let candidates = split_paths(&paths).flat_map(|path| {
+             let candidate = path.join(&exec);
+-            let with_exe = if env::consts::EXE_EXTENSION.is_empty() {
+-                None
+-            } else {
+-                Some(candidate.with_extension(env::consts::EXE_EXTENSION))
+-            };
++            let with_exe = Some(candidate.with_extension("exe"));
+             iter::once(candidate).chain(with_exe)
+         });
+         for candidate in candidates {
+--- a/cargo/crates/cargo-util/src/process_builder.rs
++++ b/cargo/crates/cargo-util/src/process_builder.rs
+@@ -547,8 +547,9 @@
+                 }
+             }
+         }
++        // rs2: passing a jobserver on needs fork.
+         if let Some(ref c) = self.jobserver {
+-            c.configure(&mut command);
++            let _ = c;
+         }
+         command
+     }
+@@ -634,36 +635,13 @@
+ 
+ #[cfg(unix)]
+ mod imp {
+-    use super::{ProcessBuilder, ProcessError, close_tempfile_and_log_error, debug_force_argfile};
++    use super::ProcessBuilder;
+     use anyhow::Result;
+     use std::io;
+-    use std::os::unix::process::CommandExt;
+ 
++    // rs2: there is no exec; run it and wait.
+     pub fn exec_replace(process_builder: &ProcessBuilder) -> Result<()> {
+-        let mut error;
+-        let mut file = None;
+-        if debug_force_argfile(process_builder.retry_with_argfile) {
+-            let (mut command, argfile) = process_builder.build_command_with_argfile()?;
+-            file = Some(argfile);
+-            error = command.exec()
+-        } else {
+-            let mut command = process_builder.build_command();
+-            error = command.exec();
+-            if process_builder.should_retry_with_argfile(&error) {
+-                let (mut command, argfile) = process_builder.build_command_with_argfile()?;
+-                file = Some(argfile);
+-                error = command.exec()
+-            }
+-        }
+-        if let Some(file) = file {
+-            close_tempfile_and_log_error(file);
+-        }
+-
+-        Err(anyhow::Error::from(error).context(ProcessError::new(
+-            &format!("could not execute process {}", process_builder),
+-            None,
+-            None,
+-        )))
++        process_builder.exec()
+     }
+ 
+     pub fn command_line_too_big(err: &io::Error) -> bool {
+--- a/cargo/crates/cargo-util/src/read2.rs
++++ b/cargo/crates/cargo-util/src/read2.rs
+@@ -1,81 +1,45 @@
+ pub use self::imp::read2;
+ 
++// rs2: pipes always block, so each has a thread.
+ #[cfg(unix)]
+ mod imp {
+-    use libc::{F_GETFL, F_SETFL, O_NONBLOCK, c_int, fcntl};
+-    use std::io;
+-    use std::io::prelude::*;
+-    use std::mem;
+-    use std::os::unix::prelude::*;
++    use std::io::{self, Read};
+     use std::process::{ChildStderr, ChildStdout};
++    use std::sync::mpsc;
+ 
+-    fn set_nonblock(fd: c_int) -> io::Result<()> {
+-        let flags = unsafe { fcntl(fd, F_GETFL) };
+-        if flags == -1 || unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } == -1 {
+-            return Err(io::Error::last_os_error());
+-        }
+-        Ok(())
++    fn reader(
++        mut pipe: impl Read + Send + 'static,
++        is_out: bool,
++        tx: mpsc::Sender<(bool, io::Result<Vec<u8>>)>,
++    ) {
++        std::thread::spawn(move || {
++            let mut buf = vec![0; 16384];
++            loop {
++                let r = pipe.read(&mut buf).map(|n| buf[..n].to_vec());
++                let last = !matches!(&r, Ok(v) if !v.is_empty());
++                if tx.send((is_out, r)).is_err() || last {
++                    break;
++                }
++            }
++        });
+     }
+ 
+     pub fn read2(
+-        mut out_pipe: ChildStdout,
+-        mut err_pipe: ChildStderr,
++        out_pipe: ChildStdout,
++        err_pipe: ChildStderr,
+         data: &mut dyn FnMut(bool, &mut Vec<u8>, bool),
+     ) -> io::Result<()> {
+-        set_nonblock(out_pipe.as_raw_fd())?;
+-        set_nonblock(err_pipe.as_raw_fd())?;
+-
+-        let mut out_done = false;
+-        let mut err_done = false;
+-        let mut out = Vec::new();
+-        let mut err = Vec::new();
+-
+-        let mut fds: [libc::pollfd; 2] = unsafe { mem::zeroed() };
+-        fds[0].fd = out_pipe.as_raw_fd();
+-        fds[0].events = libc::POLLIN;
+-        fds[1].fd = err_pipe.as_raw_fd();
+-        fds[1].events = libc::POLLIN;
+-        let mut nfds = 2;
+-        let mut errfd = 1;
+-
+-        while nfds > 0 {
+-            // wait for either pipe to become readable using `poll`
+-            let r = unsafe { libc::poll(fds.as_mut_ptr(), nfds, -1) };
+-            if r == -1 {
+-                let err = io::Error::last_os_error();
+-                if err.kind() == io::ErrorKind::Interrupted {
+-                    continue;
+-                }
+-                return Err(err);
+-            }
+-
+-            // Read as much as we can from each pipe, ignoring EWOULDBLOCK or
+-            // EAGAIN. If we hit EOF, then this will happen because the underlying
+-            // reader will return Ok(0), in which case we'll see `Ok` ourselves. In
+-            // this case we flip the other fd back into blocking mode and read
+-            // whatever's leftover on that file descriptor.
+-            let handle = |res: io::Result<_>| match res {
+-                Ok(_) => Ok(true),
+-                Err(e) => {
+-                    if e.kind() == io::ErrorKind::WouldBlock {
+-                        Ok(false)
+-                    } else {
+-                        Err(e)
+-                    }
+-                }
+-            };
+-            if !err_done && fds[errfd].revents != 0 && handle(err_pipe.read_to_end(&mut err))? {
+-                err_done = true;
+-                nfds -= 1;
+-            }
+-            data(false, &mut err, err_done);
+-            if !out_done && fds[0].revents != 0 && handle(out_pipe.read_to_end(&mut out))? {
+-                out_done = true;
+-                fds[0].fd = err_pipe.as_raw_fd();
+-                errfd = 0;
+-                nfds -= 1;
+-            }
+-            data(true, &mut out, out_done);
++        let (tx, rx) = mpsc::channel();
++        reader(out_pipe, true, tx.clone());
++        reader(err_pipe, false, tx);
++        let (mut out, mut err, mut open) = (Vec::new(), Vec::new(), 2);
++        while open > 0 {
++            let Ok((is_out, r)) = rx.recv() else { break };
++            let v = r?;
++            let buf = if is_out { &mut out } else { &mut err };
++            buf.extend_from_slice(&v);
++            open -= v.is_empty() as usize;
++            data(is_out, buf, v.is_empty());
+         }
+         Ok(())
+     }
+--- a/cargo/src/bin/cargo/main.rs
++++ b/cargo/src/bin/cargo/main.rs
+@@ -1,4 +1,5 @@
+ use cargo::util::{self, CargoResult, closest_msg, command_prelude};
++use rs2libc as _;
+ use cargo::workspace::features;
+ use cargo_util::{ProcessBuilder, ProcessError};
+ use cargo_util_schemas::manifest::StringOrVec;
+@@ -15,6 +16,8 @@
+ use crate::command_prelude::*;
+ 
+ fn main() {
++    // rs2: absolute paths as /C:/dir, which Path and Url take for absolute.
++    rs2libc::rooted_paths();
+     let _guard = setup_logger();
+ 
+     let mut gctx = match GlobalContext::default() {
+@@ -343,7 +346,7 @@
+ 
+ fn search_directories(gctx: &GlobalContext) -> Vec<PathBuf> {
+     let mut path_dirs = if let Some(val) = gctx.get_env_os("PATH") {
+-        env::split_paths(&val).collect()
++        cargo_util::paths::split_paths(&val).collect()
+     } else {
+         vec![]
+     };
+--- a/cargo/src/compiler/mod.rs
++++ b/cargo/src/compiler/mod.rs
+@@ -772,7 +772,7 @@
+ ) -> CargoResult<()> {
+     let var = paths::dylib_path_envvar();
+     let search_path = rustc.get_env(var).unwrap_or_default();
+-    let mut search_path = env::split_paths(&search_path).collect::<Vec<_>>();
++    let mut search_path = paths::split_paths(&search_path).collect::<Vec<_>>();
+     for (pkg_id, metadata) in &build_scripts.plugins {
+         let output = build_script_outputs
+             .get(*metadata)
+@@ -876,7 +876,7 @@
+         base.env("CARGO_PRIMARY_PACKAGE", "1");
+         let file_list = build_runner.sbom_output_files(unit)?;
+         if !file_list.is_empty() {
+-            let file_list = std::env::join_paths(file_list)?;
++            let file_list = paths::join_paths(&file_list, "CARGO_SBOM_PATH")?;
+             base.env("CARGO_SBOM_PATH", file_list);
+         }
+     }
+--- a/cargo/src/ops/cargo_install.rs
++++ b/cargo/src/ops/cargo_install.rs
+@@ -846,7 +846,7 @@
+         // Print a warning that if this directory isn't in PATH that they won't be
+         // able to run these commands.
+         let path = gctx.get_env_os("PATH").unwrap_or_default();
+-        let dst_in_path = env::split_paths(&path).any(|path| path == dst);
++        let dst_in_path = paths::split_paths(&path).any(|path| path == dst);
+ 
+         if !dst_in_path {
+             gctx.shell().warn(&format!(
+--- a/curl/Cargo.toml
++++ b/curl/Cargo.toml
+@@ -32,20 +32,16 @@
+ repository = "https://github.com/alexcrichton/curl-rust"
+ 
+ [features]
+-default = ["ssl"]
++default = []
+ force-system-lib-on-osx = ["curl-sys/force-system-lib-on-osx"]
+-http2 = ["curl-sys/http2"]
++http2 = []
+ mesalink = ["curl-sys/mesalink"]
+ ntlm = ["curl-sys/ntlm"]
+ poll_7_68_0 = ["curl-sys/poll_7_68_0"]
+ protocol-ftp = ["curl-sys/protocol-ftp"]
+ rustls = ["curl-sys/rustls"]
+ spnego = ["curl-sys/spnego"]
+-ssl = [
+-    "openssl-sys",
+-    "openssl-probe",
+-    "curl-sys/ssl",
+-]
++ssl = []
+ static-curl = ["curl-sys/static-curl"]
+ static-ssl = ["curl-sys/static-ssl"]
+ upkeep_7_62_0 = ["curl-sys/upkeep_7_62_0"]
+--- a/curl-sys/Cargo.toml
++++ b/curl-sys/Cargo.toml
+@@ -33,16 +33,16 @@
+ repository = "https://github.com/alexcrichton/curl-rust"
+ 
+ [features]
+-default = ["ssl"]
++default = []
+ force-system-lib-on-osx = []
+-http2 = ["libnghttp2-sys"]
++http2 = []
+ mesalink = []
+ ntlm = []
+ poll_7_68_0 = []
+ protocol-ftp = []
+ rustls = ["rustls-ffi"]
+ spnego = []
+-ssl = ["openssl-sys"]
++ssl = []
+ static-curl = []
+ static-ssl = ["openssl-sys/vendored"]
+ upkeep_7_62_0 = []
+--- a/curl-sys/build.rs
++++ b/curl-sys/build.rs
+@@ -1,599 +1,2 @@
+-use std::env;
+-use std::fs;
+-use std::path::{Path, PathBuf};
+-use std::process::Command;
+-
+-fn main() {
+-    println!("cargo:rerun-if-changed=curl");
+-    println!(
+-        "cargo:rustc-check-cfg=cfg(\
+-            libcurl_vendored,\
+-            link_libnghttp2,\
+-            link_libz,\
+-            link_openssl,\
+-        )"
+-    );
+-    let target = env::var("TARGET").unwrap();
+-    let windows = target.contains("windows");
+-
+-    if cfg!(feature = "mesalink") {
+-        println!("cargo:warning=MesaLink support has been removed as of curl 7.82.0, will use default TLS backend instead.");
+-    }
+-
+-    // This feature trumps all others, and is largely set by rustbuild to force
+-    // usage of the system library to ensure that we're always building an
+-    // ABI-compatible Cargo.
+-    if cfg!(feature = "force-system-lib-on-osx") && target.contains("apple") {
+-        return println!("cargo:rustc-flags=-l curl");
+-    }
+-
+-    // If the static-curl feature is disabled, probe for a system-wide libcurl.
+-    if !cfg!(feature = "static-curl") {
+-        // OSX ships libcurl by default, so we just use that version
+-        // so long as it has the right features enabled.
+-        if target.contains("apple") && (!cfg!(feature = "http2") || curl_config_reports_http2()) {
+-            return println!("cargo:rustc-flags=-l curl");
+-        }
+-
+-        // Next, fall back and try to use pkg-config if its available.
+-        if windows {
+-            if try_vcpkg() {
+-                return;
+-            }
+-        } else if try_pkg_config() {
+-            return;
+-        }
+-    }
+-
+-    if !Path::new("curl/.git").exists() {
+-        let _ = Command::new("git")
+-            .args(&["submodule", "update", "--init", "curl"])
+-            .status();
+-    }
+-
+-    let dst = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+-    let include = dst.join("include");
+-    let build = dst.join("build");
+-    println!("cargo:root={}", dst.display());
+-    println!("cargo:include={}", include.display());
+-    println!("cargo:static=1");
+-    println!("cargo:rustc-cfg=libcurl_vendored");
+-    fs::create_dir_all(include.join("curl")).unwrap();
+-
+-    for header in [
+-        "curl.h",
+-        "curlver.h",
+-        "easy.h",
+-        "options.h",
+-        "header.h",
+-        "mprintf.h",
+-        "multi.h",
+-        "stdcheaders.h",
+-        "system.h",
+-        "urlapi.h",
+-        "typecheck-gcc.h",
+-        "websockets.h",
+-    ]
+-    .iter()
+-    {
+-        fs::copy(
+-            format!("curl/include/curl/{}", header),
+-            include.join("curl").join(header),
+-        )
+-        .unwrap();
+-    }
+-
+-    let pkgconfig = dst.join("lib/pkgconfig");
+-    fs::create_dir_all(&pkgconfig).unwrap();
+-    let contents = fs::read_to_string("curl/libcurl.pc.in").unwrap();
+-    fs::write(
+-        pkgconfig.join("libcurl.pc"),
+-        contents
+-            .replace("@prefix@", dst.to_str().unwrap())
+-            .replace("@exec_prefix@", "")
+-            .replace("@libdir@", dst.join("lib").to_str().unwrap())
+-            .replace("@includedir@", include.to_str().unwrap())
+-            .replace("@CPPFLAG_CURL_STATICLIB@", "-DCURL_STATICLIB")
+-            .replace("@LIBCURL_LIBS@", "")
+-            .replace("@SUPPORT_FEATURES@", "")
+-            .replace("@SUPPORT_PROTOCOLS@", "")
+-            .replace("@CURLVERSION@", "8.21.0"),
+-    )
+-    .unwrap();
+-
+-    let mut cfg = cc::Build::new();
+-    cfg.out_dir(&build)
+-        .include("curl/lib")
+-        .include("curl/include")
+-        .define("BUILDING_LIBCURL", None)
+-        .define("CURL_DISABLE_DICT", None)
+-        .define("CURL_DISABLE_GOPHER", None)
+-        .define("CURL_DISABLE_IMAP", None)
+-        .define("CURL_DISABLE_LDAP", None)
+-        .define("CURL_DISABLE_LDAPS", None)
+-        .define("CURL_DISABLE_POP3", None)
+-        .define("CURL_DISABLE_RTSP", None)
+-        .define("CURL_DISABLE_SMB", None)
+-        .define("CURL_DISABLE_SMTP", None)
+-        .define("CURL_DISABLE_TELNET", None)
+-        .define("CURL_DISABLE_TFTP", None)
+-        .define("CURL_STATICLIB", None)
+-        .define("ENABLE_IPV6", None)
+-        .define("HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID", None)
+-        .define("HAVE_ASSERT_H", None)
+-        .define("CURL_OS", "\"unknown\"") // TODO
+-        .define("HAVE_ZLIB_H", None)
+-        .define("HAVE_LONGLONG", None)
+-        .define("HAVE_LIBZ", None)
+-        .define("HAVE_BOOL_T", None)
+-        .define("HAVE_STDBOOL_H", None)
+-        .define("HAVE_STDINT_H", None)
+-        .define("USE_RESOLV_THREADED", None)
+-        .file("curl/lib/altsvc.c")
+-        .file("curl/lib/asyn-base.c")
+-        .file("curl/lib/asyn-thrdd.c")
+-        .file("curl/lib/bufq.c")
+-        .file("curl/lib/bufref.c")
+-        .file("curl/lib/cf-dns.c")
+-        .file("curl/lib/cf-h1-proxy.c")
+-        .file("curl/lib/cf-haproxy.c")
+-        .file("curl/lib/cf-https-connect.c")
+-        .file("curl/lib/cf-ip-happy.c")
+-        .file("curl/lib/cf-recvbuf.c")
+-        .file("curl/lib/cf-setup.c")
+-        .file("curl/lib/cf-socket.c")
+-        .file("curl/lib/cfilters.c")
+-        .file("curl/lib/conncache.c")
+-        .file("curl/lib/connect.c")
+-        .file("curl/lib/content_encoding.c")
+-        .file("curl/lib/cookie.c")
+-        .file("curl/lib/creds.c")
+-        .file("curl/lib/cshutdn.c")
+-        .file("curl/lib/curl_addrinfo.c")
+-        .file("curl/lib/curl_fopen.c")
+-        .file("curl/lib/curl_get_line.c")
+-        .file("curl/lib/curl_memrchr.c")
+-        .file("curl/lib/curl_range.c")
+-        .file("curl/lib/curl_sha512_256.c")
+-        .file("curl/lib/curl_share.c")
+-        .file("curl/lib/curl_threads.c")
+-        .file("curl/lib/curl_trc.c")
+-        .file("curl/lib/curlx/base64.c")
+-        .file("curl/lib/curlx/basename.c")
+-        .file("curl/lib/curlx/dynbuf.c")
+-        .file("curl/lib/curlx/fopen.c")
+-        .file("curl/lib/curlx/inet_ntop.c")
+-        .file("curl/lib/curlx/inet_pton.c")
+-        .file("curl/lib/curlx/nonblock.c")
+-        .file("curl/lib/curlx/snprintf.c")
+-        .file("curl/lib/curlx/strcopy.c")
+-        .file("curl/lib/curlx/strdup.c")
+-        .file("curl/lib/curlx/strerr.c")
+-        .file("curl/lib/curlx/strparse.c")
+-        .file("curl/lib/curlx/timediff.c")
+-        .file("curl/lib/curlx/timeval.c")
+-        .file("curl/lib/curlx/wait.c")
+-        .file("curl/lib/curlx/warnless.c")
+-        .file("curl/lib/cw-out.c")
+-        .file("curl/lib/cw-pause.c")
+-        .file("curl/lib/dict.c")
+-        .file("curl/lib/dnscache.c")
+-        .file("curl/lib/doh.c")
+-        .file("curl/lib/dynhds.c")
+-        .file("curl/lib/easy.c")
+-        .file("curl/lib/escape.c")
+-        .file("curl/lib/file.c")
+-        .file("curl/lib/fileinfo.c")
+-        .file("curl/lib/formdata.c")
+-        .file("curl/lib/ftp.c")
+-        .file("curl/lib/getenv.c")
+-        .file("curl/lib/getinfo.c")
+-        .file("curl/lib/gopher.c")
+-        .file("curl/lib/hash.c")
+-        .file("curl/lib/headers.c")
+-        .file("curl/lib/hmac.c")
+-        .file("curl/lib/hostip.c")
+-        .file("curl/lib/hostip6.c")
+-        .file("curl/lib/hsts.c")
+-        .file("curl/lib/http.c")
+-        .file("curl/lib/http1.c")
+-        .file("curl/lib/http_aws_sigv4.c")
+-        .file("curl/lib/http_chunks.c")
+-        .file("curl/lib/http_digest.c")
+-        .file("curl/lib/http_proxy.c")
+-        .file("curl/lib/idn.c")
+-        .file("curl/lib/if2ip.c")
+-        .file("curl/lib/imap.c")
+-        .file("curl/lib/ldap.c")
+-        .file("curl/lib/llist.c")
+-        .file("curl/lib/macos.c")
+-        .file("curl/lib/md5.c")
+-        .file("curl/lib/mime.c")
+-        .file("curl/lib/mprintf.c")
+-        .file("curl/lib/mqtt.c")
+-        .file("curl/lib/multi.c")
+-        .file("curl/lib/multi_ev.c")
+-        .file("curl/lib/multi_ntfy.c")
+-        .file("curl/lib/netrc.c")
+-        .file("curl/lib/parsedate.c")
+-        .file("curl/lib/peer.c")
+-        .file("curl/lib/pop3.c")
+-        .file("curl/lib/progress.c")
+-        .file("curl/lib/protocol.c")
+-        .file("curl/lib/proxy.c")
+-        .file("curl/lib/rand.c")
+-        .file("curl/lib/ratelimit.c")
+-        .file("curl/lib/request.c")
+-        .file("curl/lib/rtsp.c")
+-        .file("curl/lib/select.c")
+-        .file("curl/lib/sendf.c")
+-        .file("curl/lib/setopt.c")
+-        .file("curl/lib/sha256.c")
+-        .file("curl/lib/slist.c")
+-        .file("curl/lib/smb.c")
+-        .file("curl/lib/smtp.c")
+-        .file("curl/lib/socketpair.c")
+-        .file("curl/lib/socks.c")
+-        .file("curl/lib/splay.c")
+-        .file("curl/lib/strcase.c")
+-        .file("curl/lib/strequal.c")
+-        .file("curl/lib/strerror.c")
+-        .file("curl/lib/telnet.c")
+-        .file("curl/lib/tftp.c")
+-        .file("curl/lib/thrdpool.c")
+-        .file("curl/lib/thrdqueue.c")
+-        .file("curl/lib/transfer.c")
+-        .file("curl/lib/uint-bset.c")
+-        .file("curl/lib/uint-hash.c")
+-        .file("curl/lib/uint-spbset.c")
+-        .file("curl/lib/uint-table.c")
+-        .file("curl/lib/url.c")
+-        .file("curl/lib/urlapi.c")
+-        .file("curl/lib/vauth/digest.c")
+-        .file("curl/lib/vauth/vauth.c")
+-        .file("curl/lib/version.c")
+-        .file("curl/lib/vquic/vquic-tls.c")
+-        .file("curl/lib/vquic/vquic.c")
+-        .file("curl/lib/vssh/vssh.c")
+-        .file("curl/lib/vtls/hostcheck.c")
+-        .file("curl/lib/vtls/keylog.c")
+-        .file("curl/lib/vtls/vtls.c")
+-        .file("curl/lib/vtls/vtls_config.c")
+-        .file("curl/lib/vtls/vtls_scache.c")
+-        .file("curl/lib/ws.c")
+-        .define("HAVE_GETADDRINFO", None)
+-        .define("HAVE_GETPEERNAME", None)
+-        .define("HAVE_GETSOCKNAME", None)
+-        .warnings(false);
+-
+-    if cfg!(feature = "ntlm") {
+-        cfg.file("curl/lib/curl_endian.c")
+-            .file("curl/lib/curl_gethostname.c")
+-            .file("curl/lib/curl_ntlm_core.c")
+-            .file("curl/lib/http_ntlm.c")
+-            .file("curl/lib/md4.c")
+-            .file("curl/lib/vauth/ntlm.c")
+-            .file("curl/lib/vauth/ntlm_sspi.c");
+-    } else {
+-        cfg.define("CURL_DISABLE_NTLM", None);
+-    }
+-
+-    if cfg!(feature = "protocol-ftp") {
+-        cfg.file("curl/lib/curl_fnmatch.c")
+-            .file("curl/lib/ftp.c")
+-            .file("curl/lib/ftplistparser.c")
+-            .file("curl/lib/pingpong.c");
+-    } else {
+-        cfg.define("CURL_DISABLE_FTP", None);
+-    }
+-
+-    if cfg!(feature = "http2") {
+-        cfg.define("USE_NGHTTP2", None)
+-            .define("NGHTTP2_STATICLIB", None)
+-            .file("curl/lib/cf-h2-proxy.c")
+-            .file("curl/lib/http2.c");
+-
+-        println!("cargo:rustc-cfg=link_libnghttp2");
+-        if let Some(path) = env::var_os("DEP_NGHTTP2_ROOT") {
+-            let path = PathBuf::from(path);
+-            cfg.include(path.join("include"));
+-        }
+-    }
+-
+-    println!("cargo:rustc-cfg=link_libz");
+-    if let Some(path) = env::var_os("DEP_Z_INCLUDE") {
+-        cfg.include(path);
+-    }
+-
+-    if cfg!(feature = "spnego") {
+-        cfg.define("USE_SPNEGO", None)
+-            .file("curl/lib/http_negotiate.c")
+-            .file("curl/lib/vauth/vauth.c");
+-    }
+-
+-    // Configure TLS backend. Since Cargo does not support mutually exclusive
+-    // features, make sure we only compile one vtls.
+-    if cfg!(feature = "rustls") {
+-        cfg.define("USE_RUSTLS", None)
+-            .file("curl/lib/vtls/cipher_suite.c")
+-            .file("curl/lib/vtls/rustls.c")
+-            .file("curl/lib/vtls/x509asn1.c")
+-            .include(env::var_os("DEP_RUSTLS_FFI_INCLUDE").unwrap());
+-    } else if cfg!(feature = "windows-static-ssl") {
+-        if windows {
+-            cfg.define("USE_OPENSSL", None)
+-                .file("curl/lib/vtls/openssl.c");
+-            // We need both openssl and zlib
+-            // Those can be installed with
+-            // ```shell
+-            // git clone https://github.com/microsoft/vcpkg
+-            // cd vcpkg
+-            // ./bootstrap-vcpkg.bat -disableMetrics
+-            // ./vcpkg.exe integrate install
+-            // ./vcpkg.exe install openssl:x64-windows-static-md
+-            // ```
+-            #[cfg(target_env = "msvc")]
+-            vcpkg::Config::new().find_package("openssl").ok();
+-            #[cfg(target_env = "msvc")]
+-            vcpkg::Config::new().find_package("zlib").ok();
+-        } else {
+-            panic!("Not available on non windows platform")
+-        }
+-    } else if cfg!(feature = "ssl") {
+-        if windows {
+-            // For windows, spnego feature is auto on in case ssl feature is on.
+-            // Please see definition of USE_SPNEGO in curl_setup.h for more info.
+-            cfg.define("USE_WINDOWS_SSPI", None)
+-                .define("USE_SCHANNEL", None)
+-                .file("curl/lib/http_negotiate.c")
+-                .file("curl/lib/curl_sspi.c")
+-                .file("curl/lib/socks_sspi.c")
+-                .file("curl/lib/vauth/krb5_sspi.c")
+-                .file("curl/lib/vauth/spnego_sspi.c")
+-                .file("curl/lib/vauth/vauth.c")
+-                .file("curl/lib/vtls/schannel.c")
+-                .file("curl/lib/vtls/schannel_verify.c")
+-                .file("curl/lib/vtls/x509asn1.c");
+-        } else {
+-            cfg.define("USE_OPENSSL", None)
+-                .file("curl/lib/vtls/openssl.c");
+-
+-            println!("cargo:rustc-cfg=link_openssl");
+-            if let Some(path) = env::var_os("DEP_OPENSSL_INCLUDE") {
+-                cfg.include(path);
+-            }
+-        }
+-    }
+-
+-    // Configure platform-specific details.
+-    if windows {
+-        cfg.define("WIN32", None)
+-            .define("USE_THREADS_WIN32", None)
+-            .define("HAVE_IOCTLSOCKET_FIONBIO", None)
+-            .define("USE_WINSOCK", None)
+-            .file("curl/lib/bufref.c")
+-            .file("curl/lib/system_win32.c")
+-            .file("curl/lib/vauth/digest_sspi.c")
+-            .file("curl/lib/curlx/multibyte.c")
+-            .file("curl/lib/curlx/version_win32.c")
+-            .file("curl/lib/curlx/winapi.c");
+-
+-        if cfg!(feature = "spnego") {
+-            cfg.file("curl/lib/vauth/spnego_sspi.c");
+-        }
+-    } else {
+-        cfg.define("RECV_TYPE_ARG1", "int")
+-            .define("HAVE_PTHREAD_H", None)
+-            .define("HAVE_ARPA_INET_H", None)
+-            .define("HAVE_ERRNO_H", None)
+-            .define("HAVE_FCNTL_H", None)
+-            .define("HAVE_NETDB_H", None)
+-            .define("HAVE_NETINET_IN_H", None)
+-            .define("HAVE_NETINET_TCP_H", None)
+-            .define("HAVE_POLL_H", None)
+-            .define("HAVE_FCNTL_O_NONBLOCK", None)
+-            .define("HAVE_SYS_SELECT_H", None)
+-            .define("HAVE_SYS_STAT_H", None)
+-            .define("HAVE_SYS_TIME_H", None)
+-            .define("HAVE_UNISTD_H", None)
+-            .define("HAVE_RECV", None)
+-            .define("HAVE_SELECT", None)
+-            .define("HAVE_SEND", None)
+-            .define("HAVE_SOCKET", None)
+-            .define("HAVE_STERRROR_R", None)
+-            .define("HAVE_SOCKETPAIR", None)
+-            .define("HAVE_STRUCT_TIMEVAL", None)
+-            .define("HAVE_SYS_UN_H", None)
+-            .define("HAVE_THREADS_POSIX", None)
+-            .define("USE_UNIX_SOCKETS", None)
+-            .define("RECV_TYPE_ARG2", "void*")
+-            .define("RECV_TYPE_ARG3", "size_t")
+-            .define("RECV_TYPE_ARG4", "int")
+-            .define("RECV_TYPE_RETV", "ssize_t")
+-            .define("SEND_QUAL_ARG2", "const")
+-            .define("SEND_TYPE_ARG1", "int")
+-            .define("SEND_TYPE_ARG2", "void*")
+-            .define("SEND_TYPE_ARG3", "size_t")
+-            .define("SEND_TYPE_ARG4", "int")
+-            .define("SEND_TYPE_RETV", "ssize_t")
+-            .define("SIZEOF_CURL_OFF_T", "8")
+-            .define("SIZEOF_INT", "4")
+-            .define("SIZEOF_SHORT", "2");
+-
+-        if target.contains("-apple-") {
+-            cfg.define("__APPLE__", None)
+-                .define("HAVE_MACH_ABSOLUTE_TIME", None)
+-                // Rust's `std` provides the necessary symbols since:
+-                // https://github.com/rust-lang/rust/pull/138944
+-                .define("HAVE_BUILTIN_AVAILABLE", None);
+-        } else {
+-            cfg.define("HAVE_CLOCK_GETTIME_MONOTONIC", None)
+-                .define("HAVE_GETTIMEOFDAY", None)
+-                // poll() on various versions of macOS are janky, so only use it
+-                // on non-macOS unix-likes. This matches the official default
+-                // build configuration as well.
+-                .define("HAVE_POLL_FINE", None);
+-        }
+-
+-        if cfg!(feature = "spnego") {
+-            cfg.define("HAVE_GSSAPI", None)
+-                .file("curl/lib/curl_gssapi.c")
+-                .file("curl/lib/socks_gssapi.c")
+-                .file("curl/lib/vauth/spnego_gssapi.c");
+-            if let Some(path) = env::var_os("GSSAPI_ROOT") {
+-                let path = PathBuf::from(path);
+-                cfg.include(path.join("include"));
+-            }
+-
+-            // Link against the MIT gssapi library. It might be desirable to add support for
+-            // choosing between MIT and Heimdal libraries in the future.
+-            println!("cargo:rustc-link-lib=gssapi_krb5");
+-        }
+-
+-        let width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH")
+-            .unwrap()
+-            .parse::<usize>()
+-            .unwrap();
+-        cfg.define("SIZEOF_SSIZE_T", Some(&(width / 8).to_string()[..]));
+-        cfg.define("SIZEOF_SIZE_T", Some(&(width / 8).to_string()[..]));
+-        cfg.define("SIZEOF_LONG", Some(&(width / 8).to_string()[..]));
+-
+-        cfg.flag("-fvisibility=hidden");
+-    }
+-
+-    cfg.compile("curl");
+-
+-    if windows {
+-        println!("cargo:rustc-link-lib=ws2_32");
+-        println!("cargo:rustc-link-lib=crypt32");
+-        println!("cargo:rustc-link-lib=iphlpapi");
+-        println!("cargo:rustc-link-lib=advapi32");
+-        println!("cargo:rustc-link-lib=secur32");
+-        println!("cargo:rustc-link-lib=bcrypt");
+-    }
+-
+-    // Illumos/Solaris requires explicit linking with libnsl
+-    if target.contains("solaris") {
+-        println!("cargo:rustc-link-lib=nsl");
+-    }
+-
+-    if target.contains("-apple-") {
+-        println!("cargo:rustc-link-lib=framework=Security");
+-        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+-        println!("cargo:rustc-link-lib=framework=CoreServices");
+-        println!("cargo:rustc-link-lib=framework=SystemConfiguration");
+-    }
+-}
+-
+-#[cfg(not(target_env = "msvc"))]
+-fn try_vcpkg() -> bool {
+-    false
+-}
+-
+-#[cfg(target_env = "msvc")]
+-fn try_vcpkg() -> bool {
+-    // the import library for the dll is called libcurl_imp
+-    let mut successful_probe_details = match vcpkg::Config::new()
+-        .lib_names("libcurl_imp", "libcurl")
+-        .emit_includes(true)
+-        .probe("curl")
+-    {
+-        Ok(details) => Some(details),
+-        Err(e) => {
+-            println!("first run of vcpkg did not find libcurl: {}", e);
+-            None
+-        }
+-    };
+-
+-    if successful_probe_details.is_none() {
+-        match vcpkg::Config::new()
+-            .lib_name("libcurl")
+-            .emit_includes(true)
+-            .probe("curl")
+-        {
+-            Ok(details) => successful_probe_details = Some(details),
+-            Err(e) => println!("second run of vcpkg did not find libcurl: {}", e),
+-        }
+-    }
+-
+-    if successful_probe_details.is_some() {
+-        // Found libcurl which depends on openssl, libssh2 and zlib
+-        // in the a default vcpkg installation. Probe for them
+-        // but do not fail if they are not present as we may be working
+-        // with a customized vcpkg installation.
+-        vcpkg::Config::new()
+-            .lib_name("libeay32")
+-            .lib_name("ssleay32")
+-            .probe("openssl")
+-            .ok();
+-
+-        vcpkg::probe_package("libssh2").ok();
+-
+-        vcpkg::Config::new()
+-            .lib_names("zlib", "zlib1")
+-            .probe("zlib")
+-            .ok();
+-
+-        println!("cargo:rustc-link-lib=crypt32");
+-        println!("cargo:rustc-link-lib=gdi32");
+-        println!("cargo:rustc-link-lib=user32");
+-        println!("cargo:rustc-link-lib=wldap32");
+-        return true;
+-    }
+-    false
+-}
+-
+-fn try_pkg_config() -> bool {
+-    let mut cfg = pkg_config::Config::new();
+-    cfg.cargo_metadata(false);
+-    let lib = match cfg.probe("libcurl") {
+-        Ok(lib) => lib,
+-        Err(e) => {
+-            println!(
+-                "Couldn't find libcurl from pkgconfig ({:?}), \
+-                 compiling it from source...",
+-                e
+-            );
+-            return false;
+-        }
+-    };
+-
+-    // Not all system builds of libcurl have http2 features enabled, so if we've
+-    // got a http2-requested build then we may fall back to a build from source.
+-    if cfg!(feature = "http2") && !curl_config_reports_http2() {
+-        return false;
+-    }
+-
+-    // Re-find the library to print cargo's metadata, then print some extra
+-    // metadata as well.
+-    cfg.cargo_metadata(true).probe("libcurl").unwrap();
+-    for path in lib.include_paths.iter() {
+-        println!("cargo:include={}", path.display());
+-    }
+-    true
+-}
+-
+-fn curl_config_reports_http2() -> bool {
+-    let output = Command::new("curl-config").arg("--features").output();
+-    let output = match output {
+-        Ok(out) => out,
+-        Err(e) => {
+-            println!("failed to run curl-config ({}), building from source", e);
+-            return false;
+-        }
+-    };
+-    if !output.status.success() {
+-        println!("curl-config failed: {}", output.status);
+-        return false;
+-    }
+-    let stdout = String::from_utf8_lossy(&output.stdout);
+-    if !stdout.contains("HTTP2") {
+-        println!(
+-            "failed to find http-2 feature enabled in pkg-config-found \
+-             libcurl, building from source"
+-        );
+-        return false;
+-    }
+-
+-    true
+-}
++// rs2: curl is in RSCARGO.DLL (userland64/cargo).
++fn main() {}
+--- a/libgit2-sys/build.rs
++++ b/libgit2-sys/build.rs
+@@ -1,405 +1,2 @@
+-use std::env;
+-use std::fs;
+-use std::io;
+-use std::path::{Path, PathBuf};
+-use std::process::Command;
+-
+-/// Tries to use system libgit2 and emits necessary build script instructions.
+-fn try_system_libgit2(
+-    experimental_sha256: bool,
+-) -> Result<pkg_config::Library, Box<dyn std::error::Error>> {
+-    let mut cfg = pkg_config::Config::new();
+-    let range_version = "1.9.6".."1.10.0";
+-
+-    let lib = if experimental_sha256 {
+-        // Determine whether experimental SHA256 object support is enabled.
+-        //
+-        // Given the SHA256 support is ABI-incompatible,
+-        // we take a conservative approach here:
+-        //
+-        // 1. Only accept if the library name has the `-experimental` suffix
+-        // 2. The experimental library must have an `experimental.h` header file
+-        //    containing an enabled `GIT_EXPERIMENTAL_SHA256` constant.
+-        //
+-        // See how libgit2 handles experimental features:
+-        // https://github.com/libgit2/libgit2/blob/3ac4c0adb1064bad16a7f980d87e7261753fd07e/cmake/ExperimentalFeatures.cmake
+-        match cfg
+-            .range_version(range_version.clone())
+-            .probe("libgit2-experimental")
+-        {
+-            Ok(lib) => {
+-                let sha256_constant_in_header = lib.include_paths.iter().any(|path| {
+-                    let header = path.join("git2/experimental.h");
+-                    let contents = match std::fs::read_to_string(header) {
+-                        Ok(s) => s,
+-                        Err(_) => return false,
+-                    };
+-                    if contents.contains("#cmakedefine") {
+-                        // still template
+-                        return false;
+-                    }
+-                    contents
+-                        .lines()
+-                        .any(|l| l.starts_with("#define GIT_EXPERIMENTAL_SHA256 1"))
+-                });
+-                if sha256_constant_in_header {
+-                    println!("cargo:rustc-cfg=libgit2_experimental_sha256");
+-                    lib
+-                } else {
+-                    println!("cargo:warning=no GIT_EXPERIMENTAL_SHA256 constant in headers");
+-                    return Err(
+-                        "GIT_EXPERIMENTAL_SHA256 wasn't enabled for libgit2-experimental library"
+-                            .into(),
+-                    );
+-                }
+-            }
+-            Err(e) => {
+-                println!("cargo:warning=failed to probe system libgit2-experimental: {e}");
+-                return Err(e.into());
+-            }
+-        }
+-    } else {
+-        match cfg.range_version(range_version).probe("libgit2") {
+-            Ok(lib) => lib,
+-            Err(e) => {
+-                println!("cargo:warning=failed to probe system libgit2: {e}");
+-                return Err(e.into());
+-            }
+-        }
+-    };
+-
+-    for include in &lib.include_paths {
+-        println!("cargo:root={}", include.display());
+-    }
+-    Ok(lib)
+-}
+-
+-fn main() {
+-    println!(
+-        "cargo:rustc-check-cfg=cfg(\
+-            libgit2_vendored,\
+-            libgit2_experimental_sha256,\
+-        )"
+-    );
+-
+-    let https = env::var("CARGO_FEATURE_HTTPS").is_ok();
+-    let ssh = env::var("CARGO_FEATURE_SSH").is_ok();
+-    let vendored = env::var("CARGO_FEATURE_VENDORED").is_ok();
+-    let zlib_ng_compat = env::var("CARGO_FEATURE_ZLIB_NG_COMPAT").is_ok();
+-    let unstable_sha256 = env::var("CARGO_FEATURE_UNSTABLE_SHA256").is_ok();
+-
+-    // Specify `LIBGIT2_NO_VENDOR` to force to use system libgit2.
+-    // Due to the additive nature of Cargo features, if some crate in the
+-    // dependency graph activates `vendored` feature, there is no way to revert
+-    // it back. This env var serves as a workaround for this purpose.
+-    println!("cargo:rerun-if-env-changed=LIBGIT2_NO_VENDOR");
+-    let forced_no_vendor = env::var_os("LIBGIT2_NO_VENDOR").map_or(false, |s| s != "0");
+-
+-    if forced_no_vendor {
+-        if try_system_libgit2(unstable_sha256).is_err() {
+-            panic!(
+-                "\
+-The environment variable `LIBGIT2_NO_VENDOR` has been set but no compatible system libgit2 could be found.
+-The build is now aborting. To disable, unset the variable or use `LIBGIT2_NO_VENDOR=0`.
+-",
+-            );
+-        }
+-
+-        // We've reached here, implying we're using system libgit2.
+-        return;
+-    }
+-
+-    // To use zlib-ng in zlib-compat mode, we have to build libgit2 ourselves.
+-    let try_to_use_system_libgit2 = !vendored && !zlib_ng_compat;
+-    if try_to_use_system_libgit2 && try_system_libgit2(unstable_sha256).is_ok() {
+-        // using system libgit2 has worked
+-        return;
+-    }
+-
+-    println!("cargo:rustc-cfg=libgit2_vendored");
+-
+-    if !Path::new("libgit2/src").exists() {
+-        let _ = Command::new("git")
+-            .args(&["submodule", "update", "--init", "libgit2"])
+-            .status();
+-    }
+-
+-    let target = env::var("TARGET").unwrap();
+-    let windows = target.contains("windows");
+-    let dst = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+-    let include = dst.join("include");
+-    let mut cfg = cc::Build::new();
+-    fs::create_dir_all(&include).unwrap();
+-
+-    // Copy over all header files
+-    cp_r("libgit2/include", &include);
+-
+-    cfg.include(&include)
+-        .include("libgit2/src/libgit2")
+-        .include("libgit2/src/util")
+-        .out_dir(dst.join("build"))
+-        .warnings(false);
+-
+-    if unstable_sha256 {
+-        println!("cargo:rustc-cfg=libgit2_experimental_sha256");
+-        cfg.define("GIT_EXPERIMENTAL_SHA256", "1");
+-    }
+-
+-    // Include all cross-platform C files
+-    add_c_files(&mut cfg, "libgit2/src/libgit2");
+-    add_c_files(&mut cfg, "libgit2/src/util");
+-
+-    // These are activated by features, but they're all unconditionally always
+-    // compiled apparently and have internal #define's to make sure they're
+-    // compiled correctly.
+-    add_c_files(&mut cfg, "libgit2/src/libgit2/transports");
+-    add_c_files(&mut cfg, "libgit2/src/libgit2/streams");
+-
+-    // Always use bundled HTTP parser (llhttp) for now
+-    cfg.include("libgit2/deps/llhttp");
+-    add_c_files(&mut cfg, "libgit2/deps/llhttp");
+-
+-    // external/system xdiff is not yet supported
+-    cfg.include("libgit2/deps/xdiff");
+-    add_c_files(&mut cfg, "libgit2/deps/xdiff");
+-
+-    // Use the included PCRE2 regex backend.
+-    // Keep these settings aligned with libgit2's bundled PCRE2 configuration.
+-    cfg.define("GIT_REGEX_BUILTIN", "1")
+-        .include("libgit2/deps/pcre2")
+-        .define("PCRE2_STATIC", None)
+-        .define("PCRE2_EXPORT", Some(""))
+-        .define("PCRE2_EXP_DECL", Some(""))
+-        .define("PCRE2_EXP_DEFN", Some(""))
+-        .define("PCRE2_CODE_UNIT_WIDTH", Some("8"))
+-        .define("SUPPORT_PCRE2_8", Some("1"))
+-        .define("SUPPORT_UNICODE", Some("1"))
+-        .define("LINK_SIZE", Some("2"))
+-        .define("HEAP_LIMIT", Some("20000000"))
+-        .define("MATCH_LIMIT", Some("10000000"))
+-        .define("MATCH_LIMIT_DEPTH", Some("MATCH_LIMIT"))
+-        .define("MAX_VARLOOKBEHIND", Some("255"))
+-        .define("NEWLINE_DEFAULT", Some("2"))
+-        .define("PARENS_NEST_LIMIT", Some("250"))
+-        .define("MAX_NAME_SIZE", Some("128"))
+-        .define("MAX_NAME_COUNT", Some("10000"));
+-    add_pcre2_files(&mut cfg);
+-
+-    cfg.file("libgit2/src/util/allocators/failalloc.c");
+-    cfg.file("libgit2/src/util/allocators/stdalloc.c");
+-
+-    if windows {
+-        if target.contains("msvc") {
+-            cfg.define("_CRT_SECURE_NO_DEPRECATE", None);
+-            cfg.define("_CRT_SECURE_NO_WARNINGS", None);
+-        }
+-        add_c_files(&mut cfg, "libgit2/src/util/win32");
+-        cfg.define("STRSAFE_NO_DEPRECATE", None);
+-        cfg.define("WIN32", None);
+-        cfg.define("_WIN32_WINNT", Some("0x0600"));
+-
+-        // libgit2's build system claims that forks like mingw-w64 of MinGW
+-        // still want this define to use C99 stdio functions automatically.
+-        // Apparently libgit2 breaks at runtime if this isn't here? Who knows!
+-        if target.contains("gnu") {
+-            cfg.define("__USE_MINGW_ANSI_STDIO", "1");
+-        }
+-    } else {
+-        add_c_files(&mut cfg, "libgit2/src/util/unix");
+-        cfg.flag("-fvisibility=hidden");
+-    }
+-    if target.contains("solaris") || target.contains("illumos") {
+-        cfg.define("_POSIX_C_SOURCE", "200112L");
+-        cfg.define("__EXTENSIONS__", None);
+-    }
+-
+-    let mut features = String::new();
+-
+-    features.push_str("#ifndef INCLUDE_features_h\n");
+-    features.push_str("#define INCLUDE_features_h\n");
+-    features.push_str("#define GIT_THREADS 1\n");
+-    features.push_str("#define GIT_TRACE 1\n");
+-    features.push_str("#define GIT_HTTPPARSER_BUILTIN 1\n");
+-
+-    if !target.contains("android") {
+-        features.push_str("#define GIT_USE_NSEC 1\n");
+-    }
+-
+-    if windows {
+-        features.push_str("#define GIT_IO_WSAPOLL 1\n");
+-    } else {
+-        // Should we fallback to `select` as more systems have that?
+-        features.push_str("#define GIT_IO_POLL 1\n");
+-        features.push_str("#define GIT_IO_SELECT 1\n");
+-    }
+-
+-    if target.contains("apple") {
+-        features.push_str("#define GIT_USE_STAT_MTIMESPEC 1\n");
+-    } else {
+-        features.push_str("#define GIT_USE_STAT_MTIM 1\n");
+-    }
+-
+-    if env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap() == "32" {
+-        features.push_str("#define GIT_ARCH_32 1\n");
+-    } else {
+-        features.push_str("#define GIT_ARCH_64 1\n");
+-    }
+-
+-    if ssh {
+-        if let Some(path) = env::var_os("DEP_SSH2_INCLUDE") {
+-            cfg.include(path);
+-        }
+-        features.push_str("#define GIT_SSH 1\n");
+-        features.push_str("#define GIT_SSH_LIBSSH2 1\n");
+-        features.push_str("#define GIT_SSH_LIBSSH2_MEMORY_CREDENTIALS 1\n");
+-    }
+-    if https {
+-        features.push_str("#define GIT_HTTPS 1\n");
+-
+-        if windows {
+-            features.push_str("#define GIT_WINHTTP 1\n");
+-        } else if target.contains("apple") {
+-            features.push_str("#define GIT_SECURE_TRANSPORT 1\n");
+-        } else {
+-            features.push_str("#define GIT_OPENSSL 1\n");
+-            if let Some(path) = env::var_os("DEP_OPENSSL_INCLUDE") {
+-                cfg.include(path);
+-            }
+-        }
+-    }
+-
+-    // Use the CollisionDetection SHA1 implementation.
+-    features.push_str("#define GIT_SHA1_COLLISIONDETECT 1\n");
+-    cfg.define("SHA1DC_NO_STANDARD_INCLUDES", "1");
+-    cfg.define("SHA1DC_CUSTOM_INCLUDE_SHA1_C", "\"common.h\"");
+-    cfg.define("SHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C", "\"common.h\"");
+-    cfg.file("libgit2/src/util/hash/collisiondetect.c");
+-    cfg.file("libgit2/src/util/hash/sha1dc/sha1.c");
+-    cfg.file("libgit2/src/util/hash/sha1dc/ubc_check.c");
+-
+-    if https {
+-        if windows {
+-            features.push_str("#define GIT_SHA256_WIN32 1\n");
+-            cfg.file("libgit2/src/util/hash/win32.c");
+-        } else if target.contains("apple") {
+-            features.push_str("#define GIT_SHA256_COMMON_CRYPTO 1\n");
+-            cfg.file("libgit2/src/util/hash/common_crypto.c");
+-        } else {
+-            features.push_str("#define GIT_SHA256_OPENSSL 1\n");
+-            cfg.file("libgit2/src/util/hash/openssl.c");
+-        }
+-    } else {
+-        features.push_str("#define GIT_SHA256_BUILTIN 1\n");
+-        cfg.file("libgit2/src/util/hash/builtin.c");
+-        cfg.file("libgit2/src/util/hash/rfc6234/sha224-256.c");
+-    }
+-
+-    if let Some(path) = env::var_os("DEP_Z_INCLUDE") {
+-        cfg.include(path);
+-    }
+-
+-    if target.contains("apple") {
+-        features.push_str("#define GIT_USE_ICONV 1\n");
+-    }
+-
+-    features.push_str("#endif\n");
+-    fs::write(include.join("git2_features.h"), features).unwrap();
+-
+-    cfg.compile("git2");
+-
+-    println!("cargo:root={}", dst.display());
+-
+-    if target.contains("windows") {
+-        println!("cargo:rustc-link-lib=winhttp");
+-        println!("cargo:rustc-link-lib=rpcrt4");
+-        println!("cargo:rustc-link-lib=ole32");
+-        println!("cargo:rustc-link-lib=crypt32");
+-        println!("cargo:rustc-link-lib=secur32");
+-        println!("cargo:rustc-link-lib=advapi32");
+-    }
+-
+-    if target.contains("apple") {
+-        println!("cargo:rustc-link-lib=iconv");
+-        println!("cargo:rustc-link-lib=framework=Security");
+-        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+-    }
+-
+-    println!("cargo:rerun-if-changed=libgit2/include");
+-    println!("cargo:rerun-if-changed=libgit2/src");
+-    println!("cargo:rerun-if-changed=libgit2/deps");
+-}
+-
+-fn cp_r(from: impl AsRef<Path>, to: impl AsRef<Path>) {
+-    for e in from.as_ref().read_dir().unwrap() {
+-        let e = e.unwrap();
+-        let from = e.path();
+-        let to = to.as_ref().join(e.file_name());
+-        if e.file_type().unwrap().is_dir() {
+-            fs::create_dir_all(&to).unwrap();
+-            cp_r(&from, &to);
+-        } else {
+-            println!("{} => {}", from.display(), to.display());
+-            fs::copy(&from, &to).unwrap();
+-        }
+-    }
+-}
+-
+-fn add_c_files(build: &mut cc::Build, path: impl AsRef<Path>) {
+-    let path = path.as_ref();
+-    if !path.exists() {
+-        panic!("Path {} does not exist", path.display());
+-    }
+-    // sort the C files to ensure a deterministic build for reproducible builds
+-    let dir = path.read_dir().unwrap();
+-    let mut paths = dir.collect::<io::Result<Vec<_>>>().unwrap();
+-    paths.sort_by_key(|e| e.path());
+-
+-    for e in paths {
+-        let path = e.path();
+-        if e.file_type().unwrap().is_dir() {
+-            // skip dirs for now
+-        } else if path.extension().and_then(|s| s.to_str()) == Some("c") {
+-            build.file(&path);
+-        }
+-    }
+-}
+-
+-fn add_pcre2_files(build: &mut cc::Build) {
+-    // Keep this list in sync with libgit2's PCRE2_SOURCES:
+-    // https://github.com/libgit2/libgit2/blob/f7a4071c766ceea3915415e22134cbe3e581c420/deps/pcre2/CMakeLists.txt#L65-L96
+-    let root = Path::new("libgit2/deps/pcre2");
+-    for file in &[
+-        "pcre2_auto_possess.c",
+-        "pcre2_chartables.c",
+-        "pcre2_chkdint.c",
+-        "pcre2_compile.c",
+-        "pcre2_compile_cgroup.c",
+-        "pcre2_compile_class.c",
+-        "pcre2_config.c",
+-        "pcre2_context.c",
+-        "pcre2_convert.c",
+-        "pcre2_dfa_match.c",
+-        "pcre2_error.c",
+-        "pcre2_extuni.c",
+-        "pcre2_find_bracket.c",
+-        "pcre2_maketables.c",
+-        "pcre2_match.c",
+-        "pcre2_match_data.c",
+-        "pcre2_match_next.c",
+-        "pcre2_newline.c",
+-        "pcre2_ord2utf.c",
+-        "pcre2_pattern_info.c",
+-        "pcre2_script_run.c",
+-        "pcre2_serialize.c",
+-        "pcre2_string_utils.c",
+-        "pcre2_study.c",
+-        "pcre2_substitute.c",
+-        "pcre2_substring.c",
+-        "pcre2_tables.c",
+-        "pcre2_ucd.c",
+-        "pcre2_valid_utf.c",
+-        "pcre2_xclass.c",
+-    ] {
+-        build.file(root.join(file));
+-    }
+-}
++// rs2: libgit2 is in RSCARGO.DLL (userland64/cargo).
++fn main() {}
+--- a/libsqlite3-sys/build.rs
++++ b/libsqlite3-sys/build.rs
+@@ -1,824 +1,5 @@
+-use std::env;
+-use std::path::Path;
+-
+-#[cfg(all(feature = "loadable_extension", feature = "preupdate_hook"))]
+-compile_error!("feature \"loadable_extension\" and feature \"preupdate_hook\" cannot be enabled at the same time");
+-
+-/// Tells whether we're building for Windows. This is more suitable than a plain
+-/// `cfg!(windows)`, since the latter does not properly handle cross-compilation
+-///
+-/// Note that there is no way to know at compile-time which system we'll be
+-/// targeting, and this test must be made at run-time (of the build script) See
+-/// <https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts>
+-fn win_target() -> bool {
+-    env::var("CARGO_CFG_WINDOWS").is_ok()
+-}
+-
+-/// Tells whether we're building for Android.
+-/// See [`win_target`]
+-#[cfg(any(feature = "bundled", feature = "bundled-windows"))]
+-fn android_target() -> bool {
+-    env::var("CARGO_CFG_TARGET_OS").is_ok_and(|v| v == "android")
+-}
+-
+-/// Tells whether a given compiler will be used `compiler_name` is compared to
+-/// the content of `CARGO_CFG_TARGET_ENV` (and is always lowercase)
+-///
+-/// See [`win_target`]
+-fn is_compiler(compiler_name: &str) -> bool {
+-    env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|v| v == compiler_name)
+-}
+-
+-/// Copy bindgen file from `dir` to `out_path`.
+-fn copy_bindings<T: AsRef<Path>>(dir: &str, bindgen_name: &str, out_path: T) {
+-    let from = if cfg!(feature = "loadable_extension") {
+-        format!("{dir}/{bindgen_name}_ext.rs")
+-    } else {
+-        format!("{dir}/{bindgen_name}.rs")
+-    };
+-    std::fs::copy(from, out_path).expect("Could not copy bindings to output directory");
+-}
+-
++// rs2: SQLite is in RSCARGO.DLL (userland64/cargo).
+ fn main() {
+-    let out_dir = env::var("OUT_DIR").unwrap();
+-    let out_path = Path::new(&out_dir).join("bindgen.rs");
+-    if cfg!(feature = "in_gecko") {
+-        // When inside mozilla-central, we are included into the build with
+-        // sqlite3.o directly, so we don't want to provide any linker arguments.
+-        copy_bindings("sqlite3", "bindgen_bundled_version", out_path);
+-        return;
+-    }
+-
+-    println!("cargo:rerun-if-env-changed=LIBSQLITE3_SYS_USE_PKG_CONFIG");
+-    if env::var_os("LIBSQLITE3_SYS_USE_PKG_CONFIG").is_some_and(|s| s != "0")
+-        || cfg!(feature = "loadable_extension")
+-    {
+-        build_linked::main(&out_dir, &out_path);
+-    } else if cfg!(all(
+-        feature = "sqlcipher",
+-        not(feature = "bundled-sqlcipher")
+-    )) {
+-        if cfg!(feature = "bundled") || (win_target() && cfg!(feature = "bundled-windows")) {
+-            println!(
+-                "cargo:warning=For backwards compatibility, feature 'sqlcipher' overrides
+-                features 'bundled' and 'bundled-windows'. If you want a bundled build of
+-                SQLCipher (available for the moment only on Unix), use feature 'bundled-sqlcipher'
+-                or 'bundled-sqlcipher-vendored-openssl' to also bundle OpenSSL crypto."
+-            );
+-        }
+-        build_linked::main(&out_dir, &out_path);
+-    } else if cfg!(feature = "bundled")
+-        || (win_target() && cfg!(feature = "bundled-windows"))
+-        || cfg!(feature = "bundled-sqlcipher")
+-    {
+-        #[cfg(any(
+-            feature = "bundled",
+-            feature = "bundled-windows",
+-            feature = "bundled-sqlcipher"
+-        ))]
+-        build_bundled::main(&out_dir, &out_path);
+-        #[cfg(not(any(
+-            feature = "bundled",
+-            feature = "bundled-windows",
+-            feature = "bundled-sqlcipher"
+-        )))]
+-        panic!("The runtime test should not run this branch, which has not compiled any logic.")
+-    } else {
+-        build_linked::main(&out_dir, &out_path);
+-    }
+-}
+-
+-#[cfg(any(
+-    feature = "bundled",
+-    feature = "bundled-windows",
+-    feature = "bundled-sqlcipher"
+-))]
+-mod build_bundled {
+-    use std::env;
+-    use std::ffi::OsString;
+-    use std::path::{Path, PathBuf};
+-
+-    use super::{is_compiler, win_target};
+-
+-    pub fn main(out_dir: &str, out_path: &Path) {
+-        let lib_name = super::lib_name();
+-
+-        // This is just a sanity check, the top level `main` should ensure this.
+-        assert!(!(cfg!(feature = "bundled-windows") && !cfg!(feature = "bundled") && !win_target()),
+-            "This module should not be used: we're not on Windows and the bundled feature has not been enabled");
+-
+-        cfg_select! {
+-            feature = "buildtime_bindgen" => {
+-                use super::{bindings, HeaderLocation};
+-                let header = HeaderLocation::FromPath(lib_name.to_owned());
+-                bindings::write_to_out_dir(header, out_path);
+-            }
+-            _ => {
+-                super::copy_bindings(lib_name, "bindgen_bundled_version", out_path);
+-            }
+-        }
+-        println!("cargo:include={}/{lib_name}", env!("CARGO_MANIFEST_DIR"));
+-        println!("cargo:rerun-if-changed={lib_name}/sqlite3.c");
+-        println!("cargo:rerun-if-changed=sqlite3/wasm32-wasi-vfs.c");
+-        let mut cfg = cc::Build::new();
+-        cfg.file(format!("{lib_name}/sqlite3.c"))
+-            .flag("-DSQLITE_CORE")
+-            .flag("-DSQLITE_DEFAULT_FOREIGN_KEYS=1")
+-            .flag("-DSQLITE_ENABLE_API_ARMOR")
+-            .flag("-DSQLITE_ENABLE_COLUMN_METADATA")
+-            .flag("-DSQLITE_ENABLE_DBSTAT_VTAB")
+-            .flag("-DSQLITE_ENABLE_FTS3")
+-            .flag("-DSQLITE_ENABLE_FTS3_PARENTHESIS")
+-            .flag("-DSQLITE_ENABLE_FTS5")
+-            .flag("-DSQLITE_ENABLE_JSON1")
+-            .flag("-DSQLITE_ENABLE_LOAD_EXTENSION=1")
+-            .flag("-DSQLITE_ENABLE_MEMORY_MANAGEMENT")
+-            .flag("-DSQLITE_ENABLE_RTREE")
+-            .flag("-DSQLITE_ENABLE_STAT4")
+-            .flag("-DSQLITE_SOUNDEX")
+-            .flag("-DSQLITE_THREADSAFE=1")
+-            .flag("-DSQLITE_USE_URI")
+-            .flag("-DHAVE_USLEEP=1")
+-            .flag("-DHAVE_ISNAN")
+-            .flag("-D_POSIX_THREAD_SAFE_FUNCTIONS") // cross compile with MinGW
+-            .warnings(false);
+-
+-        if cfg!(feature = "bundled-sqlcipher") {
+-            cfg.flag("-DSQLITE_HAS_CODEC")
+-                .flag("-DSQLITE_TEMP_STORE=2")
+-                .flag("-DSQLITE_EXTRA_INIT=sqlcipher_extra_init")
+-                .flag("-DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown")
+-                .flag("-DHAVE_STDINT_H=1");
+-
+-            let target = env::var("TARGET").unwrap();
+-            let host = env::var("HOST").unwrap();
+-
+-            let is_windows = host.contains("windows") && target.contains("windows");
+-            let is_apple = host.contains("apple") && target.contains("apple");
+-
+-            let lib_dir = env("OPENSSL_LIB_DIR").map(PathBuf::from);
+-            let inc_dir = env("OPENSSL_INCLUDE_DIR").map(PathBuf::from);
+-            let mut use_openssl = false;
+-
+-            let (lib_dir, inc_dir) = match (lib_dir, inc_dir) {
+-                (Some(lib_dir), Some(inc_dir)) => {
+-                    use_openssl = true;
+-                    (vec![lib_dir], inc_dir)
+-                }
+-                (lib_dir, inc_dir) => match find_openssl_dir(&host, &target) {
+-                    None => {
+-                        if is_windows && !cfg!(feature = "bundled-sqlcipher-vendored-openssl") {
+-                            panic!("Missing environment variable OPENSSL_DIR or OPENSSL_DIR is not set")
+-                        } else {
+-                            (vec![PathBuf::new()], PathBuf::new())
+-                        }
+-                    }
+-                    Some(openssl_dir) => {
+-                        let lib_dir = lib_dir.map(|d| vec![d]).unwrap_or_else(|| {
+-                            let mut lib_dirs = vec![];
+-                            // OpenSSL 3.0 now puts its libraries in lib64/ by default,
+-                            // check for both it and lib/.
+-                            if openssl_dir.join("lib64").exists() {
+-                                lib_dirs.push(openssl_dir.join("lib64"));
+-                            }
+-                            if openssl_dir.join("lib").exists() {
+-                                lib_dirs.push(openssl_dir.join("lib"));
+-                            }
+-                            lib_dirs
+-                        });
+-                        let inc_dir = inc_dir.unwrap_or_else(|| openssl_dir.join("include"));
+-
+-                        if !lib_dir.iter().all(|p| p.exists()) {
+-                            panic!("OpenSSL library directory does not exist: {lib_dir:?}");
+-                        }
+-
+-                        if !Path::new(&inc_dir).exists() {
+-                            panic!(
+-                                "OpenSSL include directory does not exist: {}",
+-                                inc_dir.to_string_lossy()
+-                            );
+-                        }
+-
+-                        use_openssl = true;
+-                        (lib_dir, inc_dir)
+-                    }
+-                },
+-            };
+-
+-            if cfg!(feature = "bundled-sqlcipher-vendored-openssl") {
+-                cfg.include(env::var("DEP_OPENSSL_INCLUDE").unwrap());
+-                // cargo will resolve downstream to the static lib in
+-                // openssl-sys
+-            } else if use_openssl {
+-                cfg.include(inc_dir.to_string_lossy().as_ref());
+-                let lib_name = if is_windows { "libcrypto" } else { "crypto" };
+-                println!("cargo:rustc-link-lib=dylib={lib_name}");
+-                for lib_dir_item in &lib_dir {
+-                    println!("cargo:rustc-link-search={}", lib_dir_item.to_string_lossy());
+-                }
+-            } else if is_apple {
+-                cfg.flag("-DSQLCIPHER_CRYPTO_CC");
+-                println!("cargo:rustc-link-lib=framework=Security");
+-                println!("cargo:rustc-link-lib=framework=CoreFoundation");
+-            } else {
+-                // branch not taken on Windows, just `crypto` is fine.
+-                println!("cargo:rustc-link-lib=dylib=crypto");
+-            }
+-        }
+-
+-        // on android sqlite can't figure out where to put the temp files.
+-        // the bundled sqlite on android also uses `SQLITE_TEMP_STORE=3`.
+-        // https://android.googlesource.com/platform/external/sqlite/+/2c8c9ae3b7e6f340a19a0001c2a889a211c9d8b2/dist/Android.mk
+-        if super::android_target() {
+-            cfg.flag("-DSQLITE_TEMP_STORE=3");
+-        }
+-
+-        if cfg!(feature = "with-asan") {
+-            cfg.flag("-fsanitize=address");
+-        }
+-
+-        // If explicitly requested: enable static linking against the Microsoft Visual
+-        // C++ Runtime to avoid dependencies on vcruntime140.dll and similar libraries.
+-        if env::var("CARGO_CFG_TARGET_FEATURE")
+-            .is_ok_and(|v| v.split(',').any(|tf| tf == "crt-static"))
+-            && is_compiler("msvc")
+-        {
+-            cfg.static_crt(true);
+-        }
+-
+-        if !win_target() {
+-            cfg.flag("-DHAVE_LOCALTIME_R");
+-        }
+-        if env::var("TARGET").is_ok_and(|v| v.starts_with("wasm32-wasi")) {
+-            cfg.flag("-USQLITE_THREADSAFE")
+-                .flag("-DSQLITE_THREADSAFE=0")
+-                // https://github.com/rust-lang/rust/issues/74393
+-                .flag("-DLONGDOUBLE_TYPE=double")
+-                .flag("-D_WASI_EMULATED_MMAN")
+-                .flag("-D_WASI_EMULATED_GETPID")
+-                .flag("-D_WASI_EMULATED_SIGNAL")
+-                .flag("-D_WASI_EMULATED_PROCESS_CLOCKS");
+-
+-            if cfg!(feature = "wasm32-wasi-vfs") {
+-                cfg.file("sqlite3/wasm32-wasi-vfs.c");
+-            }
+-        }
+-        if cfg!(feature = "unlock_notify") {
+-            cfg.flag("-DSQLITE_ENABLE_UNLOCK_NOTIFY");
+-        }
+-        if cfg!(feature = "column_metadata") {
+-            cfg.flag("-DSQLITE_ENABLE_COLUMN_METADATA");
+-        }
+-        if cfg!(feature = "preupdate_hook") {
+-            cfg.flag("-DSQLITE_ENABLE_PREUPDATE_HOOK");
+-        }
+-        if cfg!(feature = "session") {
+-            cfg.flag("-DSQLITE_ENABLE_SESSION");
+-        }
+-
+-        if let Ok(limit) = env::var("SQLITE_MAX_VARIABLE_NUMBER") {
+-            cfg.flag(format!("-DSQLITE_MAX_VARIABLE_NUMBER={limit}"));
+-        }
+-        println!("cargo:rerun-if-env-changed=SQLITE_MAX_VARIABLE_NUMBER");
+-
+-        if let Ok(limit) = env::var("SQLITE_MAX_EXPR_DEPTH") {
+-            cfg.flag(format!("-DSQLITE_MAX_EXPR_DEPTH={limit}"));
+-        }
+-        println!("cargo:rerun-if-env-changed=SQLITE_MAX_EXPR_DEPTH");
+-
+-        if let Ok(limit) = env::var("SQLITE_MAX_COLUMN") {
+-            cfg.flag(format!("-DSQLITE_MAX_COLUMN={limit}"));
+-        }
+-        println!("cargo:rerun-if-env-changed=SQLITE_MAX_COLUMN");
+-
+-        if let Ok(extras) = env::var("LIBSQLITE3_FLAGS") {
+-            for extra in extras.split_whitespace() {
+-                if extra.starts_with("-D") || extra.starts_with("-U") {
+-                    cfg.flag(extra);
+-                } else if extra.starts_with("SQLITE_") {
+-                    cfg.flag(format!("-D{extra}"));
+-                } else {
+-                    panic!("Don't understand {extra} in LIBSQLITE3_FLAGS");
+-                }
+-            }
+-        }
+-        println!("cargo:rerun-if-env-changed=LIBSQLITE3_FLAGS");
+-
+-        cfg.compile(lib_name);
+-
+-        println!("cargo:lib_dir={out_dir}");
+-    }
+-
+-    fn env(name: &str) -> Option<OsString> {
+-        let prefix = env::var("TARGET").unwrap().to_uppercase().replace('-', "_");
+-        let prefixed = format!("{prefix}_{name}");
+-        let var = env::var_os(prefixed);
+-
+-        match var {
+-            None => env::var_os(name),
+-            _ => var,
+-        }
+-    }
+-
+-    fn find_openssl_dir(_host: &str, _target: &str) -> Option<PathBuf> {
+-        let openssl_dir = env("OPENSSL_DIR");
+-        openssl_dir.map(PathBuf::from)
+-    }
+-}
+-
+-fn env_prefix() -> &'static str {
+-    if cfg!(any(feature = "sqlcipher", feature = "bundled-sqlcipher")) {
+-        "SQLCIPHER"
+-    } else {
+-        "SQLITE3"
+-    }
+-}
+-
+-fn lib_name() -> &'static str {
+-    if cfg!(any(feature = "sqlcipher", feature = "bundled-sqlcipher")) {
+-        "sqlcipher"
+-    } else {
+-        "sqlite3"
+-    }
+-}
+-
+-pub enum HeaderLocation {
+-    FromEnvironment,
+-    Wrapper,
+-    FromPath(String),
+-}
+-
+-impl From<HeaderLocation> for String {
+-    fn from(header: HeaderLocation) -> Self {
+-        match header {
+-            HeaderLocation::FromEnvironment => {
+-                let prefix = env_prefix();
+-                let mut header = env::var(format!("{prefix}_INCLUDE_DIR")).unwrap_or_else(|_| {
+-                    panic!("{prefix}_INCLUDE_DIR must be set if {prefix}_LIB_DIR is set")
+-                });
+-                header.push_str(if cfg!(feature = "loadable_extension") {
+-                    "/sqlite3ext.h"
+-                } else {
+-                    "/sqlite3.h"
+-                });
+-                header
+-            }
+-            HeaderLocation::Wrapper => if cfg!(feature = "loadable_extension") {
+-                "wrapper_ext.h"
+-            } else {
+-                "wrapper.h"
+-            }
+-            .into(),
+-            HeaderLocation::FromPath(path) => format!(
+-                "{}/{}",
+-                path,
+-                if cfg!(feature = "loadable_extension") {
+-                    "sqlite3ext.h"
+-                } else {
+-                    "sqlite3.h"
+-                }
+-            ),
+-        }
+-    }
+-}
+-
+-mod build_linked {
+-    #[cfg(feature = "vcpkg")]
+-    extern crate vcpkg;
+-
+-    use super::{bindings, env_prefix, is_compiler, lib_name, win_target, HeaderLocation};
+-    use std::env;
+-    use std::path::Path;
+-
+-    pub fn main(_out_dir: &str, out_path: &Path) {
+-        let header = find_sqlite();
+-        if (cfg!(any(
+-            feature = "bundled_bindings",
+-            feature = "bundled",
+-            feature = "bundled-sqlcipher"
+-        )) || (win_target() && cfg!(feature = "bundled-windows")))
+-            && !cfg!(feature = "buildtime_bindgen")
+-        {
+-            // Generally means the `bundled_bindings` feature is enabled.
+-            // Most users are better off with turning
+-            // on buildtime_bindgen instead, but this is still supported as we
+-            // have runtime version checks and there are good reasons to not
+-            // want to run bindgen.
+-            super::copy_bindings(lib_name(), "bindgen_bundled_version", out_path);
+-        } else {
+-            bindings::write_to_out_dir(header, out_path);
+-        }
+-    }
+-
+-    #[cfg(not(feature = "loadable_extension"))]
+-    fn find_link_mode() -> &'static str {
+-        // If the user specifies SQLITE3_STATIC (or SQLCIPHER_STATIC), do static
+-        // linking, unless it's explicitly set to 0.
+-        match &env::var(format!("{}_STATIC", env_prefix())) {
+-            Ok(v) if v != "0" => "static",
+-            _ => "dylib",
+-        }
+-    }
+-    // Prints the necessary cargo link commands and returns the path to the header.
+-    fn find_sqlite() -> HeaderLocation {
+-        let link_lib = lib_name();
+-
+-        println!("cargo:rerun-if-env-changed={}_INCLUDE_DIR", env_prefix());
+-        println!("cargo:rerun-if-env-changed={}_LIB_DIR", env_prefix());
+-        println!("cargo:rerun-if-env-changed={}_STATIC", env_prefix());
+-        if cfg!(feature = "vcpkg") && is_compiler("msvc") {
+-            println!("cargo:rerun-if-env-changed=VCPKGRS_DYNAMIC");
+-        }
+-
+-        // dependents can access `DEP_SQLITE3_LINK_TARGET` (`sqlite3` being the
+-        // `links=` value in our Cargo.toml) to get this value. This might be
+-        // useful if you need to ensure whatever crypto library sqlcipher relies
+-        // on is available, for example.
+-        #[cfg(not(feature = "loadable_extension"))]
+-        println!("cargo:link-target={link_lib}");
+-
+-        // Allow users to specify where to find SQLite.
+-        if let Ok(dir) = env::var(format!("{}_LIB_DIR", env_prefix())) {
+-            // Try to use pkg-config to determine link commands
+-            let pkgconfig_path = Path::new(&dir).join("pkgconfig");
+-            env::set_var("PKG_CONFIG_PATH", pkgconfig_path);
+-            #[cfg(not(feature = "loadable_extension"))]
+-            if pkg_config::Config::new()
+-                .atleast_version("3.34.1")
+-                .probe(link_lib)
+-                .is_err()
+-            {
+-                // Otherwise just emit the bare minimum link commands.
+-                println!("cargo:rustc-link-lib={}={link_lib}", find_link_mode());
+-                println!("cargo:rustc-link-search={dir}");
+-            }
+-            return HeaderLocation::FromEnvironment;
+-        }
+-
+-        if let Some(header) = try_vcpkg() {
+-            return header;
+-        }
+-
+-        // See if pkg-config can do everything for us.
+-        if let Ok(mut lib) = pkg_config::Config::new()
+-            .atleast_version("3.34.1")
+-            .print_system_libs(false)
+-            .probe(link_lib)
+-        {
+-            if let Some(header) = lib.include_paths.pop() {
+-                HeaderLocation::FromPath(header.to_string_lossy().into())
+-            } else {
+-                HeaderLocation::Wrapper
+-            }
+-        } else {
+-            // No env var set and pkg-config couldn't help; just output the link-lib
+-            // request and hope that the library exists on the system paths. We used to
+-            // output /usr/lib explicitly, but that can introduce other linking problems;
+-            // see https://github.com/rusqlite/rusqlite/issues/207.
+-            #[cfg(not(feature = "loadable_extension"))]
+-            println!("cargo:rustc-link-lib={}={link_lib}", find_link_mode());
+-            HeaderLocation::Wrapper
+-        }
+-    }
+-
+-    fn try_vcpkg() -> Option<HeaderLocation> {
+-        if cfg!(feature = "vcpkg") && is_compiler("msvc") {
+-            // See if vcpkg can find it.
+-            if let Ok(mut lib) = vcpkg::Config::new().probe(lib_name()) {
+-                if let Some(header) = lib.include_paths.pop() {
+-                    return Some(HeaderLocation::FromPath(header.to_string_lossy().into()));
+-                }
+-            }
+-            None
+-        } else {
+-            None
+-        }
+-    }
+-}
+-
+-#[cfg(not(feature = "buildtime_bindgen"))]
+-#[allow(dead_code)]
+-mod bindings {
+-    use super::HeaderLocation;
+-
+-    use std::path::Path;
+-
+-    static PREBUILT_BINDGENS: &[&str] = &["bindgen_3.34.1"];
+-
+-    pub fn write_to_out_dir(_header: HeaderLocation, out_path: &Path) {
+-        let name = PREBUILT_BINDGENS[PREBUILT_BINDGENS.len() - 1];
+-        super::copy_bindings("bindgen-bindings", name, out_path);
+-    }
+-}
+-
+-#[cfg(feature = "buildtime_bindgen")]
+-mod bindings {
+-    use super::HeaderLocation;
+-    use bindgen::callbacks::{IntKind, ParseCallbacks};
+-
+-    use std::path::Path;
+-    #[derive(Debug)]
+-    struct SqliteTypeChooser;
+-
+-    impl ParseCallbacks for SqliteTypeChooser {
+-        fn int_macro(&self, name: &str, _value: i64) -> Option<IntKind> {
+-            if name == "SQLITE_SERIALIZE_NOCOPY"
+-                || name.starts_with("SQLITE_DESERIALIZE_")
+-                || name.starts_with("SQLITE_PREPARE_")
+-                || name.starts_with("SQLITE_TRACE_")
+-            {
+-                Some(IntKind::UInt)
+-            } else {
+-                None
+-            }
+-        }
+-    }
+-
+-    // Are we generating the bundled bindings? Used to avoid emitting things
+-    // that would be problematic in bundled builds. This env var is set by
+-    // `upgrade.sh`.
+-    fn generating_bundled_bindings() -> bool {
+-        // Hacky way to know if we're generating the bundled bindings
+-        println!("cargo:rerun-if-env-changed=LIBSQLITE3_SYS_BUNDLING");
+-        match std::env::var("LIBSQLITE3_SYS_BUNDLING") {
+-            Ok(v) => v != "0",
+-            Err(_) => false,
+-        }
+-    }
+-
+-    pub fn write_to_out_dir(header: HeaderLocation, out_path: &Path) {
+-        let header: String = header.into();
+-        let mut bindings = bindgen::builder()
+-            .default_macro_constant_type(bindgen::MacroTypeVariation::Signed)
+-            .disable_nested_struct_naming()
+-            .generate_cstr(true)
+-            .use_core()
+-            .trust_clang_mangling(false)
+-            .header(header.clone())
+-            .parse_callbacks(Box::new(SqliteTypeChooser));
+-        if cfg!(feature = "loadable_extension") {
+-            bindings = bindings.ignore_functions(); // see generate_functions
+-        } else {
+-            bindings = bindings
+-                .blocklist_function("sqlite3_auto_extension")
+-                .raw_line(
+-                    r#"extern "C" {
+-    pub fn sqlite3_auto_extension(
+-        xEntryPoint: ::core::option::Option<
+-            unsafe extern "C" fn(
+-                db: *mut sqlite3,
+-                pzErrMsg: *mut *mut ::core::ffi::c_char,
+-                _: *const sqlite3_api_routines,
+-            ) -> ::core::ffi::c_int,
+-        >,
+-    ) -> ::core::ffi::c_int;
+-}"#,
+-                )
+-                .blocklist_function("sqlite3_cancel_auto_extension")
+-                .raw_line(
+-                    r#"extern "C" {
+-    pub fn sqlite3_cancel_auto_extension(
+-        xEntryPoint: ::core::option::Option<
+-            unsafe extern "C" fn(
+-                db: *mut sqlite3,
+-                pzErrMsg: *mut *mut ::core::ffi::c_char,
+-                _: *const sqlite3_api_routines,
+-            ) -> ::core::ffi::c_int,
+-        >,
+-    ) -> ::core::ffi::c_int;
+-}"#,
+-                )
+-                .blocklist_function(".*16.*")
+-                .blocklist_function("sqlite3_close_v2")
+-                .blocklist_function("sqlite3_create_collation")
+-                .blocklist_function("sqlite3_create_function")
+-                .blocklist_function("sqlite3_create_module")
+-                .blocklist_function("sqlite3_prepare");
+-        }
+-
+-        if cfg!(any(feature = "sqlcipher", feature = "bundled-sqlcipher")) {
+-            bindings = bindings.clang_arg("-DSQLITE_HAS_CODEC");
+-        }
+-        if cfg!(feature = "unlock_notify") {
+-            bindings = bindings.clang_arg("-DSQLITE_ENABLE_UNLOCK_NOTIFY");
+-        }
+-        if cfg!(feature = "preupdate_hook") {
+-            bindings = bindings.clang_arg("-DSQLITE_ENABLE_PREUPDATE_HOOK");
+-        }
+-        if cfg!(feature = "session") {
+-            bindings = bindings.clang_arg("-DSQLITE_ENABLE_SESSION");
+-        }
+-
+-        // When cross compiling unless effort is taken to fix the issue, bindgen
+-        // will find the wrong headers. There's only one header included by the
+-        // amalgamated `sqlite.h`: `stdarg.h`.
+-        //
+-        // Thankfully, there's almost no case where rust code needs to use
+-        // functions taking `va_list` (It's nearly impossible to get a `va_list`
+-        // in Rust unless you get passed it by C code for some reason).
+-        //
+-        // Arguably, we should never be including these, but we include them for
+-        // the cases where they aren't totally broken...
+-        let target_arch = std::env::var("TARGET").unwrap();
+-        let host_arch = std::env::var("HOST").unwrap();
+-        let is_cross_compiling = target_arch != host_arch;
+-
+-        // Note that when generating the bundled file, we're essentially always
+-        // cross compiling.
+-        if generating_bundled_bindings() || is_cross_compiling {
+-            // Get rid of va_list, as it's not
+-            bindings = bindings
+-                .blocklist_function("sqlite3_vmprintf")
+-                .blocklist_function("sqlite3_vsnprintf")
+-                .blocklist_function("sqlite3_str_vappendf")
+-                .blocklist_type("va_list")
+-                .blocklist_item("__.*");
+-        }
+-
+-        let bindings = bindings
+-            .layout_tests(false)
+-            .generate()
+-            .unwrap_or_else(|_| panic!("could not run bindgen on header {header}"));
+-
+-        cfg_select! {
+-            feature = "loadable_extension" => {
+-                let mut output = Vec::new();
+-                bindings
+-                    .write(Box::new(&mut output))
+-                    .expect("could not write output of bindgen");
+-                let mut output = String::from_utf8(output).expect("bindgen output was not UTF-8?!");
+-                super::loadable_extension::generate_functions(&mut output);
+-                std::fs::write(out_path, output.as_bytes())
+-                    .unwrap_or_else(|_| panic!("Could not write to {out_path:?}"));
+-            }
+-            _ => bindings
+-                .write_to_file(out_path)
+-                .unwrap_or_else(|_| panic!("Could not write to {out_path:?}"))
+-        }
+-    }
+-}
+-
+-#[cfg(all(feature = "buildtime_bindgen", feature = "loadable_extension"))]
+-mod loadable_extension {
+-    /// try to generate similar rust code for all `#define sqlite3_xyz
+-    /// sqlite3_api->abc` macros` in sqlite3ext.h
+-    pub fn generate_functions(output: &mut String) {
+-        // (1) parse sqlite3_api_routines fields from bindgen output
+-        let ast: syn::File = syn::parse_str(output).expect("could not parse bindgen output");
+-        let sqlite3_api_routines: syn::ItemStruct = ast
+-            .items
+-            .into_iter()
+-            .find_map(|i| {
+-                if let syn::Item::Struct(s) = i {
+-                    if s.ident == "sqlite3_api_routines" {
+-                        Some(s)
+-                    } else {
+-                        None
+-                    }
+-                } else {
+-                    None
+-                }
+-            })
+-            .expect("could not find sqlite3_api_routines");
+-        let sqlite3_api_routines_ident = sqlite3_api_routines.ident;
+-        let p_api = quote::format_ident!("p_api");
+-        let mut stores = Vec::new();
+-        let mut malloc = Vec::new();
+-        // (2) `#define sqlite3_xyz sqlite3_api->abc` => `pub unsafe fn
+-        // sqlite3_xyz(args) -> ty {...}` for each `abc` field:
+-        for field in sqlite3_api_routines.fields {
+-            let ident = field.ident.expect("unnamed field");
+-            let span = ident.span();
+-            let name = ident.to_string();
+-            if name.contains("16") {
+-                continue; // skip UTF-16 api as rust uses UTF-8
+-            } else if name == "vmprintf" || name == "xvsnprintf" || name == "str_vappendf" {
+-                continue; // skip va_list
+-            } else if name == "aggregate_count"
+-                || name == "expired"
+-                || name == "global_recover"
+-                || name == "thread_cleanup"
+-                || name == "transfer_bindings"
+-                || name == "create_collation"
+-                || name == "create_function"
+-                || name == "create_module"
+-                || name == "prepare"
+-                || name == "close_v2"
+-            {
+-                continue; // omit deprecated
+-            }
+-            let sqlite3_name = match name.as_ref() {
+-                "xthreadsafe" => "sqlite3_threadsafe".to_owned(),
+-                "interruptx" => "sqlite3_interrupt".to_owned(),
+-                _ => {
+-                    format!("sqlite3_{name}")
+-                }
+-            };
+-            let ptr_name =
+-                syn::Ident::new(format!("__{}", sqlite3_name.to_uppercase()).as_ref(), span);
+-            let sqlite3_fn_name = syn::Ident::new(&sqlite3_name, span);
+-            let method =
+-                extract_method(&field.ty).unwrap_or_else(|| panic!("unexpected type for {name}"));
+-            let arg_names: syn::punctuated::Punctuated<&syn::Ident, syn::token::Comma> = method
+-                .inputs
+-                .iter()
+-                .map(|i| &i.name.as_ref().unwrap().0)
+-                .collect();
+-            let args = &method.inputs;
+-            // vtab_config/sqlite3_vtab_config: ok
+-            let varargs = &method.variadic;
+-            if varargs.is_some() && "db_config" != name && "log" != name && "vtab_config" != name {
+-                continue; // skip ...
+-            }
+-            let ty = &method.output;
+-            let tokens = if "db_config" == name {
+-                quote::quote! {
+-                    static #ptr_name: ::core::sync::atomic::AtomicPtr<()> = ::core::sync::atomic::AtomicPtr::new(::core::ptr::null_mut());
+-                    pub unsafe fn #sqlite3_fn_name(#args arg3: ::core::ffi::c_int, arg4: *mut ::core::ffi::c_int) #ty {
+-                        let ptr = #ptr_name.load(::core::sync::atomic::Ordering::Acquire);
+-                        assert!(!ptr.is_null(), "SQLite API not initialized");
+-                        let fun: unsafe extern "C" fn(#args #varargs) #ty = ::core::mem::transmute(ptr);
+-                        (fun)(#arg_names, arg3, arg4)
+-                    }
+-                }
+-            } else if "log" == name {
+-                quote::quote! {
+-                    static #ptr_name: ::core::sync::atomic::AtomicPtr<()> = ::core::sync::atomic::AtomicPtr::new(::core::ptr::null_mut());
+-                    pub unsafe fn #sqlite3_fn_name(#args arg3: *const ::core::ffi::c_char) #ty {
+-                        let ptr = #ptr_name.load(::core::sync::atomic::Ordering::Acquire);
+-                        assert!(!ptr.is_null(), "SQLite API not initialized");
+-                        let fun: unsafe extern "C" fn(#args #varargs) #ty = ::core::mem::transmute(ptr);
+-                        (fun)(#arg_names, arg3)
+-                    }
+-                }
+-            } else {
+-                quote::quote! {
+-                    static #ptr_name: ::core::sync::atomic::AtomicPtr<()> = ::core::sync::atomic::AtomicPtr::new(::core::ptr::null_mut());
+-                    pub unsafe fn #sqlite3_fn_name(#args) #ty {
+-                        let ptr = #ptr_name.load(::core::sync::atomic::Ordering::Acquire);
+-                        assert!(!ptr.is_null(), "SQLite API not initialized or SQLite feature omitted");
+-                        let fun: unsafe extern "C" fn(#args #varargs) #ty = ::core::mem::transmute(ptr);
+-                        (fun)(#arg_names)
+-                    }
+-                }
+-            };
+-            output.push_str(&prettyplease::unparse(
+-                &syn::parse2(tokens).expect("could not parse quote output"),
+-            ));
+-            output.push('\n');
+-            if name == "malloc" {
+-                &mut malloc
+-            } else {
+-                &mut stores
+-            }
+-            .push(quote::quote! {
+-                if let Some(fun) = (*#p_api).#ident {
+-                    #ptr_name.store(
+-                        fun as usize as *mut (),
+-                        ::core::sync::atomic::Ordering::Release,
+-                    );
+-                }
+-            });
+-        }
+-        // (3) generate rust code similar to SQLITE_EXTENSION_INIT2 macro
+-        let tokens = quote::quote! {
+-            /// Like SQLITE_EXTENSION_INIT2 macro
+-            pub unsafe fn rusqlite_extension_init2(#p_api: *mut #sqlite3_api_routines_ident) -> ::core::result::Result<(), crate::InitError> {
+-                #(#malloc)* // sqlite3_malloc needed by to_sqlite_error
+-                if let Some(fun) = (*#p_api).libversion_number {
+-                    let version = fun();
+-                    if SQLITE_VERSION_NUMBER > version {
+-                        return Err(crate::InitError::VersionMismatch{compile_time: SQLITE_VERSION_NUMBER, runtime: version});
+-                    }
+-                } else {
+-                    return Err(crate::InitError::NullFunctionPointer);
+-                }
+-                #(#stores)*
+-                Ok(())
+-            }
+-        };
+-        output.push_str(&prettyplease::unparse(
+-            &syn::parse2(tokens).expect("could not parse quote output"),
+-        ));
+-        output.push('\n');
+-    }
+-
+-    fn extract_method(ty: &syn::Type) -> Option<&syn::TypeBareFn> {
+-        match ty {
+-            syn::Type::Path(tp) => tp.path.segments.last(),
+-            _ => None,
+-        }
+-        .map(|seg| match &seg.arguments {
+-            syn::PathArguments::AngleBracketed(args) => args.args.first(),
+-            _ => None,
+-        })?
+-        .map(|arg| match arg {
+-            syn::GenericArgument::Type(t) => Some(t),
+-            _ => None,
+-        })?
+-        .map(|ty| match ty {
+-            syn::Type::BareFn(r) => Some(r),
+-            _ => None,
+-        })?
+-    }
++    let out = std::env::var_os("OUT_DIR").unwrap();
++    std::fs::copy("sqlite3/bindgen_bundled_version.rs", std::path::Path::new(&out).join("bindgen.rs")).unwrap();
+ }
+--- a/libz-sys/build.rs
++++ b/libz-sys/build.rs
+@@ -1,256 +1,2 @@
+-use std::env;
+-use std::fs;
+-use std::path::PathBuf;
+-
+-fn main() {
+-    println!("cargo:rerun-if-env-changed=LIBZ_SYS_STATIC");
+-    println!("cargo:rerun-if-changed=build.rs");
+-    println!("cargo:rerun-if-changed=zng/cmake.rs");
+-    println!("cargo:rerun-if-changed=zng/cc.rs");
+-
+-    let host = env::var("HOST").unwrap();
+-    let target = env::var("TARGET").unwrap();
+-
+-    let host_and_target_contain = |s| host.contains(s) && target.contains(s);
+-
+-    let want_ng = cfg!(any(
+-        feature = "zlib-ng",
+-        feature = "zlib-ng-no-cmake-experimental-community-maintained"
+-    )) && !cfg!(feature = "stock-zlib");
+-
+-    if want_ng && target != "wasm32-unknown-unknown" {
+-        return build_zlib_ng(&target, true);
+-    }
+-
+-    // All android compilers should come with libz by default, so let's just use
+-    // the one already there. Likewise, Haiku and OpenHarmony always ship with libz,
+-    // so we can link to it even when cross-compiling.
+-    if target.contains("android") || target.contains("haiku") || target.ends_with("-ohos") {
+-        println!("cargo:rustc-link-lib=z");
+-        return;
+-    }
+-
+-    let want_static = should_link_static();
+-    // Don't run pkg-config if we're linking statically (we'll build below) and
+-    // also don't run pkg-config on FreeBSD/DragonFly. That'll end up printing
+-    // `-L /usr/lib` which wreaks havoc with linking to an OpenSSL in /usr/local/lib
+-    // (Ports, etc.)
+-    if !(want_static
+-        // pkg-config just never works here
+-        || target.contains("msvc")
+-        || host_and_target_contain("freebsd")
+-        || host_and_target_contain("dragonfly"))
+-    {
+-        // Don't print system lib dirs to cargo since this interferes with other
+-        // packages adding non-system search paths to link against libraries
+-        // that are also found in a system-wide lib dir.
+-        let zlib = pkg_config::Config::new()
+-            .cargo_metadata(true)
+-            .print_system_libs(false)
+-            .probe("zlib");
+-        match zlib {
+-            Ok(zlib) => {
+-                if !zlib.include_paths.is_empty() {
+-                    let paths = zlib
+-                        .include_paths
+-                        .iter()
+-                        .map(|s| s.display().to_string())
+-                        .collect::<Vec<_>>();
+-                    println!("cargo:include={}", paths.join(","));
+-                }
+-            }
+-            Err(e) => {
+-                println!(
+-                    "cargo:warning=Could not find zlib include paths via pkg-config: {}",
+-                    e
+-                )
+-            }
+-        }
+-    }
+-
+-    if target.contains("windows") && try_vcpkg() {
+-        return;
+-    }
+-
+-    let mut cfg = cc::Build::new();
+-
+-    // Situations where we build unconditionally.
+-    //
+-    // - MSVC basically never has zlib preinstalled
+-    // - MinGW picks up a bunch of weird paths we don't like
+-    // - Explicit opt-in via `want_static`
+-    if target.contains("msvc") || target.contains("pc-windows-gnu") || want_static {
+-        return build_zlib(&mut cfg, &target);
+-    }
+-
+-    // If we've gotten this far we're probably a pretty standard platform.
+-    // Almost all platforms here ship libz by default, but some don't have
+-    // pkg-config files that we would find above.
+-    //
+-    // In any case test if zlib is actually installed and if so we link to it,
+-    // otherwise continue below to build things.
+-    if zlib_installed(&mut cfg) {
+-        println!("cargo:rustc-link-lib=z");
+-        return;
+-    }
+-
+-    // For convenience fallback to building zlib if attempting to link zlib failed
+-    build_zlib(&mut cfg, &target)
+-}
+-
+-fn build_zlib(cfg: &mut cc::Build, target: &str) {
+-    let dst = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+-    let lib = dst.join("lib");
+-
+-    cfg.warnings(false).out_dir(&lib).include("src/zlib");
+-
+-    cfg.file("src/zlib/adler32.c")
+-        .file("src/zlib/compress.c")
+-        .file("src/zlib/crc32.c")
+-        .file("src/zlib/deflate.c")
+-        .file("src/zlib/infback.c")
+-        .file("src/zlib/inffast.c")
+-        .file("src/zlib/inflate.c")
+-        .file("src/zlib/inftrees.c")
+-        .file("src/zlib/trees.c")
+-        .file("src/zlib/uncompr.c")
+-        .file("src/zlib/zutil.c");
+-
+-    if target.starts_with("wasm32") {
+-        cfg.define("Z_SOLO", None);
+-        // zlib 1.3.2 uses `NULL` directly in compress.c/uncompr.c, but the
+-        // Z_SOLO config path doesn't pull in headers that always define it.
+-        cfg.define("NULL", Some("0"));
+-    } else {
+-        cfg.file("src/zlib/gzclose.c")
+-            .file("src/zlib/gzlib.c")
+-            .file("src/zlib/gzread.c")
+-            .file("src/zlib/gzwrite.c");
+-    }
+-
+-    // zlib's zconf.h gates standard headers on `STDC` (not `__STDC__`), and
+-    // 1.3.2 uses `NULL` directly in compress.c/uncompr.c.
+-    cfg.define("STDC", None);
+-
+-    if !target.contains("windows") {
+-        cfg.define("_LARGEFILE64_SOURCE", None);
+-        cfg.flag("-fvisibility=hidden");
+-    }
+-
+-    cfg.compile("z");
+-
+-    fs::create_dir_all(dst.join("include")).unwrap();
+-    fs::copy("src/zlib/zlib.h", dst.join("include/zlib.h")).unwrap();
+-    fs::copy("src/zlib/zconf.h", dst.join("include/zconf.h")).unwrap();
+-
+-    fs::create_dir_all(lib.join("pkgconfig")).unwrap();
+-    let zlib_h = fs::read_to_string(dst.join("include/zlib.h")).unwrap();
+-    let version = zlib_h
+-        .lines()
+-        .find(|l| l.contains("ZLIB_VERSION"))
+-        .unwrap()
+-        .split("\"")
+-        .nth(1)
+-        .unwrap();
+-    fs::write(
+-        lib.join("pkgconfig/zlib.pc"),
+-        fs::read_to_string("src/zlib/zlib.pc.in")
+-            .unwrap()
+-            .replace("@prefix@", dst.to_str().unwrap())
+-            .replace("@includedir@", "${prefix}/include")
+-            .replace("@libdir@", "${prefix}/lib")
+-            .replace("@VERSION@", version),
+-    )
+-    .unwrap();
+-
+-    println!("cargo:root={}", dst.to_str().unwrap());
+-    println!("cargo:rustc-link-search=native={}", lib.to_str().unwrap());
+-    println!("cargo:include={}/include", dst.to_str().unwrap());
+-}
+-
+-#[cfg(any(
+-    feature = "zlib-ng",
+-    feature = "zlib-ng-no-cmake-experimental-community-maintained"
+-))]
+-mod zng {
+-    #[cfg_attr(feature = "zlib-ng", path = "cmake.rs")]
+-    #[cfg_attr(
+-        all(
+-            feature = "zlib-ng-no-cmake-experimental-community-maintained",
+-            not(feature = "zlib-ng")
+-        ),
+-        path = "cc.rs"
+-    )]
+-    mod build_zng;
+-
+-    pub(super) use build_zng::build_zlib_ng;
+-}
+-
+-fn build_zlib_ng(_target: &str, _compat: bool) {
+-    #[cfg(any(
+-        feature = "zlib-ng",
+-        feature = "zlib-ng-no-cmake-experimental-community-maintained"
+-    ))]
+-    zng::build_zlib_ng(_target, _compat);
+-}
+-
+-fn try_vcpkg() -> bool {
+-    // see if there is a vcpkg tree with zlib installed
+-    match vcpkg::Config::new()
+-        .emit_includes(true)
+-        .find_package("zlib")
+-    {
+-        Ok(zlib) => {
+-            if !zlib.include_paths.is_empty() {
+-                let paths = zlib
+-                    .include_paths
+-                    .iter()
+-                    .map(|s| s.display().to_string())
+-                    .collect::<Vec<_>>();
+-                println!("cargo:include={}", paths.join(","));
+-            }
+-            true
+-        }
+-        Err(e) => {
+-            println!("note, vcpkg did not find zlib: {}", e);
+-            false
+-        }
+-    }
+-}
+-
+-fn zlib_installed(cfg: &mut cc::Build) -> bool {
+-    let mut cmd = cfg.get_compiler().to_command();
+-    cmd.arg("src/smoke.c")
+-        .arg("-g0")
+-        .arg("-o")
+-        .arg("/dev/null")
+-        .arg("-lz");
+-
+-    println!("running {:?}", cmd);
+-    if let Ok(status) = cmd.status() {
+-        if status.success() {
+-            return true;
+-        }
+-    }
+-
+-    false
+-}
+-
+-/// The environment variable `LIBZ_SYS_STATIC` is first checked for a value of `0` (false) or `1` (true),
+-/// before considering the `static` feature when no explicit ENV value was detected.
+-/// When `libz-sys` is a transitive dependency from a crate that forces static linking via the `static` feature,
+-/// this enables the build environment to revert that preference via `LIBZ_SYS_STATIC=0`.
+-/// The default is otherwise `false`.
+-fn should_link_static() -> bool {
+-    let has_static_env: Option<&'static str> = option_env!("LIBZ_SYS_STATIC");
+-    let has_static_cfg = cfg!(feature = "static");
+-
+-    has_static_env
+-        .and_then(|s: &str| s.parse::<u8>().ok())
+-        .and_then(|b| match b {
+-            0 => Some(false),
+-            1 => Some(true),
+-            _ => None,
+-        })
+-        .unwrap_or(has_static_cfg)
+-}
++// rs2: only for curl and libgit2, in RSCARGO.DLL (userland64/cargo).
++fn main() {}
