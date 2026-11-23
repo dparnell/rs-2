@@ -1134,7 +1134,9 @@ const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
     (&["c/samples/clibtest.c"], &[], "RS2\\CLIBTEST.EXE"),
     // The same, with the C library linked in (cc64.sh --static).
     (&["c/samples/clibtest.c"], &["--static"], "RS2\\CLIBTSTS.EXE"),
-    (&["c/samples/cxxtest.cpp"], &[], "RS2\\CXXTEST.EXE"),
+    // A C++ DLL that CXXTEST is linked against.
+    (&["c/samples/cxxtdl2.cpp"], &["--dll"], "RS2\\DLL64\\CXXTDL2.DLL"),
+    (&["c/samples/cxxtest.cpp"], &["work/userland/64/CXXTDL2.DLL"], "RS2\\CXXTEST.EXE"),
     (&["c/samples/cxxtest.cpp"], &["--static"], "RS2\\CXXTSTS.EXE"),
     (&["c/samples/cxxtdll.cpp"], &["--dll"], "RS2\\DLL64\\CXXTDLL.DLL"),
     (&["c/samples/clibtdll.c"], &["--dll"], "RS2\\DLL64\\CLIBTDLL.DLL"),
@@ -1169,9 +1171,15 @@ fn build_userland64() -> Option<image::FileList> {
         eprintln!("cc64.sh failed to build the C library");
         return None;
     }
-    let libc_dll = out_dir.join("LIBC64.DLL");
-    std::fs::copy(root().join("target/libc64/LIBC64.DLL"), &libc_dll).ok()?;
-    files.push((libc_dll, "RS2\\DLL64\\LIBC64.DLL".to_string()));
+    if !Command::new(dir.join("c/cc64.sh")).current_dir(root()).arg("--libcxx").status().ok()?.success() {
+        eprintln!("cc64.sh failed to build the C++ library");
+        return None;
+    }
+    for name in ["LIBC64.DLL", "LIBCXX64.DLL"] {
+        let dll = out_dir.join(name);
+        std::fs::copy(root().join("target/libc64").join(name), &dll).ok()?;
+        files.push((dll, format!("RS2\\DLL64\\{name}")));
+    }
     // The C samples (userland64/c/cc64.sh: clang and rust-lld).
     for (srcs, flags, dest) in C_PROGRAMS64 {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());

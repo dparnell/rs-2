@@ -666,6 +666,21 @@ static void test_dll_ctors(const char *self) {
     check("destructors at exit", r == 5 && file_says("CLIBTDLL.FIN", "constructed") && file_says("CLIBTDL2.FIN", "constructed"));
 }
 
+/* A C++ DLL in a C program: its C++ library comes and goes with it. */
+static void test_cxx_dll(void) {
+    for (int i = 0; i < 2; i++) {
+        HMODULE h;
+        char failed[64];
+        int (*lookup)(const char *) = 0;
+        remove("CXXTDLL.FIN");
+        APIRET rc = DosLoadModule((PSZ)failed, sizeof failed, (PCSZ) "CXXTDLL", &h);
+        if (rc == 0)
+            DosQueryProcAddr(h, 0, (PCSZ) "dll_lookup", (PPVOID)&lookup);
+        check(i ? "C++ DLL loaded again" : "C++ DLL in a C program", lookup && lookup("two") == 2 && lookup("x") == -1);
+        check("its static destructor", DosFreeModule(h) == 0 && file_says("CXXTDLL.FIN", "destroyed"));
+    }
+}
+
 static int child(int argc, char **argv) {
     if (!strcmp(argv[1], "child-dll")) {
         HMODULE h;
@@ -707,6 +722,7 @@ int main(int argc, char **argv) {
     test_env_threads(argv[0]);
     test_shared_dll();
     test_dll_ctors(argv[0]);
+    test_cxx_dll();
     printf("clibtest: %d checks, %d failures\n", checks, failures);
     return failures;
 }

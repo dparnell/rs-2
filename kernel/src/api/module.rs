@@ -220,6 +220,23 @@ fn in_use(p: &Process) -> Vec<Arc<Module>> {
     order
 }
 
+/// A module and all it imports, imports first (the module itself last).
+fn imports_first(m: &Arc<Module>) -> Vec<Arc<Module>> {
+    fn visit(m: &Arc<Module>, seen: &mut Vec<u16>, order: &mut Vec<Arc<Module>>) {
+        if seen.contains(&m.hmte) {
+            return;
+        }
+        seen.push(m.hmte);
+        for imp in &m.deps() {
+            visit(imp, seen, order);
+        }
+        order.push(m.clone());
+    }
+    let mut order = Vec::new();
+    visit(m, &mut Vec::new(), &mut order);
+    order
+}
+
 fn needs_term(m: &Module, p: &Process) -> bool {
     m.is_dll
         && m.per_process_term
@@ -468,23 +485,38 @@ pub fn dos_free_module(c: &mut Ctx) -> u32 {
     };
     // The last reference in this process: run its termination routine,
     // unless the module is still in use through the program's imports.
-    let still_used = in_use(&c.process).iter().any(|m| Arc::ptr_eq(m, &freed));
-    if still_used {
+    let used = in_use(&c.process);
+    if used.iter().any(|m| Arc::ptr_eq(m, &freed)) {
         return 0;
     }
-    let term = needs_term(&freed, &c.process);
+    let mut calls = Vec::new();
+    if needs_term(&freed, &c.process) {
+        calls.push(InitCall { module: freed.clone(), flag: 1 });
+    }
+    // 64-bit DLLs only it imported go too, and so must be told: loaded
+    // again, they come back with fresh data.
+    if freed.format == loader::Format::Elf64 {
+        let mut gone = imports_first(&freed);
+        gone.pop();
+        for m in gone.into_iter().rev().filter(|m| m.format == loader::Format::Elf64 && !used.iter().any(|u| Arc::ptr_eq(u, m))) {
+            if needs_term(&m, &c.process) {
+                calls.push(InitCall { module: m.clone(), flag: 1 });
+            }
+            c.process.inited.lock().retain(|&x| x != m.hmte);
+        }
+    }
     // Loaded again, it initialises again in this process, whether or not
     // it has a termination routine (a Windows DLL's LibMain: W16TEST
     // loads W16DLL, frees it, and loads it again).
     if freed.per_process_init {
         c.process.inited.lock().retain(|&x| x != freed.hmte);
     }
-    if !term {
+    if calls.is_empty() {
         return 0;
     }
     c.complete_return(0);
     let (p, t) = (c.process.clone(), c.thread.clone());
-    start(&p, &t, c.f, alloc::vec![InitCall { module: freed, flag: 1 }], false, None);
+    start(&p, &t, c.f, calls, false, None);
     c.no_return = true;
     0
 }
