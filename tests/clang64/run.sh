@@ -17,7 +17,7 @@ rm -rf "$t"
 mkdir -p "$t/src/libc" "$t/host/libc"
 userland64/llvm/sdk.sh "$t/sdk" > /dev/null
 userland64/c/cc64.sh -o "$t/CMP64.EXE" tests/lld64/cmp.c
-cp "$here"/*.c userland64/c/samples/cxxtest.cpp userland64/c/samples/cxxtdl2.cpp userland64/c/samples/pmhello.c userland64/c/samples/cxxtdl2.h "$t/src/"
+cp "$here"/*.c "$here"/*.cpp userland64/c/samples/cxxtest.cpp userland64/c/samples/cxxtdl2.cpp userland64/c/samples/pmhello.c userland64/c/samples/cxxtdl2.h "$t/src/"
 cp userland64/libc/*.c userland64/libc/*.S userland64/libc/*.h "$t/src/libc/"
 clang="$llvm/host/bin/clang --target=x86_64-unknown-rs2 --sysroot=$t/sdk -resource-dir $t/sdk/lib/clang/21"
 cmd=$t/src/build.cmd
@@ -47,6 +47,10 @@ for f in "$t"/src/libc/*.c; do
     step "-O2 -std=gnu11 -ffreestanding -fno-builtin -D_RS2_BUILDING_LIBC -fvisibility=default -c libc/$b.c" "libc/$b.o"
     n=$((n + 1))
 done
+say 'set TMP='
+say 'set TMPDIR='
+say 'clang++ -fno-exceptions "-DWHAT=clang++ ok" plus.cpp -o PLUS.EXE'
+say 'PLUS.EXE'
 say 'echo int foo(); int main(){return foo();} > u.c'
 say 'clang u.c -o U.EXE'
 say 'echo end'
@@ -60,7 +64,7 @@ trap '[ ! -f $t/disk.save ] || cp $t/disk.save work/disk.txt' EXIT
     (cd "$t" && find src host -type f) | while read -r f; do printf '%s -> %s\n' "$t/$f" "$(echo "$f" | tr / '\\')"; done
 } > work/disk.txt
 cargo xtask disk --hpfs --size 400 -o "$t/d.img" > /dev/null
-cargo xtask run --headless --timeout "${TIMEOUT:-240}" --mem 4G --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\src\build.cmd' > "$t/log" 2>&1
-grep -aE 'same|differ|cannot|hello|cxxtest:|error|LLD|FAIL|begin|^end' "$t/log"
+cargo xtask run --headless --timeout "${TIMEOUT:-360}" --mem 4G --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\src\build.cmd' > "$t/log" 2>&1
+grep -aE 'same|differ|cannot|hello|cxxtest:|clang\+\+ ok|error|LLD|FAIL|begin|^end' "$t/log"
 [ "$(grep -ac 'are the same' "$t/log")" = "$n" ] && grep -aq 'linked on rs2, 2 arg' "$t/log" && grep -aq ' 0 failures' "$t/log" &&
-    grep -aq 'undefined symbol: foo' "$t/log"
+    grep -aq 'undefined symbol: foo' "$t/log" && grep -aq '^clang++ ok 2' "$t/log"

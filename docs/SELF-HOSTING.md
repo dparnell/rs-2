@@ -94,15 +94,47 @@ programs of rs2's own as well.
    `userland64/cmake/rs2.cmake`, on LIBC64.DLL and LIBCXX64.DLL. LLD.EXE on
    rs2 links CHELLO64-like C programs and CXXTEST with the same bytes as
    on the host (`tests/lld64/run.sh`).
-   Next `clang`, from the same tree. Milestone: compile and link a C
-   program on rs2. (Its heap: LIBC64's malloc stays below 4 GB, in the
-   low arena's 512 MB.)
+   `clang`: done, from the same tree, which adds the target
+   `x86_64-unknown-rs2` to it (`__RS2__`, emulated TLS; the driver compiles
+   and links as cc64.sh does) and to lld `--rs2-imports` (an undefined
+   symbol that is not `MODULE.name` is an error). See "The C and C++
+   toolchain" below.
 4. `rustc`: LLVM in a DLL of its own, behind the C interface of rustc's
    LLVM wrapper (each module has its own C library), `rustc_driver`, proc
    macros. Milestone: `rustc hello.rs` on rs2.
 5. `cargo`, offline and without curl and libgit2 as far as it goes.
    Milestone: `cargo build` of a host-tested crate.
 6. `cargo xtask iso` on rs2, with the shell scripts gone.
+
+## The C and C++ toolchain
+
+`userland64/llvm/build.sh` cross-builds CLANG.EXE (65 MB) and LLD.EXE, and
+`userland64/llvm/sdk.sh` puts them with the headers and libraries into one
+tree (target/sdk64; target/sdk64.txt is it as a manifest for
+`cargo xtask disk --hpfs`). The C++ headers' names need HPFS or JFS. With
+`\sdk\bin` in PATH:
+
+```text
+clang hello.c -o HELLO.EXE                  a program (LIBC64.DLL)
+clang++ -std=c++20 prog.cpp -o PROG.EXE     C++ (LIBCXX64.DLL)
+clang -mwindows pmprog.c -o PMPROG.EXE      a PM program
+clang -shared lib.c -o LIB.DLL              a DLL (visible symbols exported)
+clang prog.c LIB.DLL -o PROG.EXE            uses that DLL
+clang -static prog.c -o PROG.EXE            no library DLLs
+```
+
+clang finds the tree relative to itself. Temporary files go to TMPDIR, TMP
+or TEMP, else the current directory. clang++.EXE runs CLANG.EXE. The same
+tree is a cross SDK for the host's build of this clang:
+`work/llvm/host/bin/clang --target=x86_64-unknown-rs2
+--sysroot=target/sdk64`. Resources (`cc64.sh --rc`) are not in it yet:
+os2-rc has to run on rs2 for that.
+
+`tests/clang64/run.sh` builds a C program, a PM program, a C++ DLL,
+CXXTEST and the C library's sources on rs2 and compares each result with
+the host clang's: all the same bytes, and the programs run. An 8 MB
+preprocessed file of clang's own (ExprConstant.cpp, about 500 MB of heap)
+gives the same object too.
 
 ## Needed by either route
 

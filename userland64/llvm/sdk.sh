@@ -4,7 +4,7 @@
 #
 #   sdk.sh [DIR]              (target/sdk64 by default)
 #
-#   DIR/bin      CLANG.EXE, LLD.EXE, clang++.cmd
+#   DIR/bin      CLANG.EXE, LLD.EXE, clang++.EXE (runs CLANG.EXE)
 #   DIR/include  rs2's C headers and OS/2 headers; c++/: libc++'s
 #   DIR/lib      start-up code, import library, LIBCXX64.DLL, link64.ld,
 #                static libraries; clang/VER/include: clang's headers
@@ -30,7 +30,7 @@ mkdir -p "$out/bin" "$out/lib" "$out/include/c++/config" "$out/include/c++/v1" "
 for f in CLANG LLD; do
     [ ! -f "$root/target/llvm64/$f.EXE" ] || cp "$root/target/llvm64/$f.EXE" "$out/bin/"
 done
-printf '@clang --driver-mode=g++ %%1 %%2 %%3 %%4 %%5 %%6 %%7 %%8 %%9\r\n' > "$out/bin/clang++.cmd"
+$cc -o "$out/bin/clang++.EXE" "$here/clangxx.c"
 cp -R "$ul/include/." "$out/include/"
 cp "$ul"/cxx/config/* "$out/include/c++/config/"
 cp -R "$cxx/libcxx/include/." "$out/include/c++/v1/"

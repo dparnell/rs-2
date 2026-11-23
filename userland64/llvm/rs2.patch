@@ -160,6 +160,19 @@
      if (pw && pw->pw_dir)
        RequestedDir = pw->pw_dir;
    }
+@@ -1475,7 +1483,12 @@
+   if (getDarwinConfDir(ErasedOnReboot, Result))
+     return;
+ 
++#if defined(__RS2__)
++  // No TMP or the like: the current directory.
++  const char *RequestedDir = ".";
++#else
+   const char *RequestedDir = getDefaultTempDir(ErasedOnReboot);
++#endif
+   Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+ }
+ 
 --- a/llvm/lib/Support/Unix/Program.inc
 +++ b/llvm/lib/Support/Unix/Program.inc
 @@ -32,6 +32,9 @@

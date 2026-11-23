@@ -115,13 +115,19 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
   text. Handles 0-2 are also text at the handle level, for `read` and
   `write`. stdout is line buffered on a console (DosQueryHType says
   "device") and fully buffered otherwise. stderr is unbuffered.
-- **Memory.** malloc keeps chunks with boundary tags in 4 MB regions
-  from DosAllocMem. Free chunks sit in size-class bins and are merged
-  with their neighbours when freed. Blocks of 1 MB or more get regions
-  of their own, which are given back by `free`. All of it is below
-  4 GB (no OBJ_ANY), so any malloc pointer can be passed to any OS/2
-  call (API64.md, "Memory"). One spin-then-yield lock covers all
-  threads.
+- **Memory.** malloc keeps chunks with boundary tags in regions from
+  DosAllocMem. Free chunks sit in size-class bins and are merged with
+  their neighbours when freed. Blocks of 1 MB or more get regions of their
+  own, which are given back by `free`. The first 96 MB of regions are
+  below 4 GB (4 MB each), so a program of ordinary size can pass any
+  malloc pointer to any OS/2 call (API64.md, "Memory"). After that, and
+  for single blocks of 16 MB or more, memory comes from above 4 GB (16 MB
+  regions); whichever side is full, the other is tried. The library's own
+  functions take pointers from anywhere: they copy names and argument
+  blocks below 4 GB for the calls that need it. A program that uses a lot
+  of memory and calls the OS/2 API itself passes memory from the stack,
+  static data or DosAllocMem without OBJ_ANY. One block is at most
+  4 GB - 64 KB. One spin-then-yield lock covers all threads.
 - **Threads.** Per-thread state (errno, strtok, the gmtime and asctime
   buffers, tmpnam, the signal save area) lives in a page per thread. One
   dword of thread-local memory (DosAllocThreadLocalMemory) points to it.
@@ -238,7 +244,7 @@ loads one DLL and imports the other leaves both files when it calls
 `C:\RS2\DLL64\CLIBTDLL.DLL` (clibtdll.c, a C DLL), frees a string the
 DLL malloc'd, has the DLL print into the same `stdout` buffer, and sees
 the `errno` the DLL set. It prints one line per check and
-`clibtest: N checks, M failures` (179 and 175), and exits with M:
+`clibtest: N checks, M failures` (195 and 191), and exits with M:
 
 ```text
 cargo xtask run --headless --timeout 120 --init "RS2\CLIBTEST.EXE"
