@@ -37,9 +37,9 @@ programs unmodified, natively, on 64-bit PCs.
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
-![The rs2 live system: the command interpreter running ver and dir](docs/images/rs2-shell.png)
+![The rs2 live system: the Workplace Shell desktop with the Programs folder and an OS/2 window running ver and dir](docs/images/rs2-live.png)
 
-*The live ISO booted in QEMU.*
+*The live ISO booted in QEMU: the Workplace Shell, the WarpCenter (top) and the LaunchPad (bottom), all rs2's own.*
 
 ![The OS/2 Toolkit's PM hello sample running on rs2's own PMWIN.DLL](docs/images/rs2-pm-hello.png)
 
@@ -120,7 +120,7 @@ cargo xtask iso --dist --release -o rs2.iso
 
 This builds everything in release mode (loader, kernel, the OS/2
 programs and DLLs listed in `dist/manifest.txt`) and writes `rs2.iso`,
-about 22 MB. Without `-o` it goes to `work/rs2.iso`. The first build
+about 66 MB. Without `-o` it goes to `work/rs2.iso`. The first build
 takes a few minutes; later ones only rebuild what changed.
 
 The image is a hybrid: attach it to a virtual machine as a CD (see
@@ -182,9 +182,9 @@ programs are tested.
 
 ## Using the desktop
 
-![The rs2 desktop (the Workplace Shell): Drives and Drive C open](docs/images/rs2-desktop.png)
+![The rs2 desktop (the Workplace Shell): the Programs folder open](docs/images/rs2-desktop.png)
 
-*The live ISO's desktop (the Workplace Shell) with Drives and Drive C open.*
+*The live ISO's desktop (the Workplace Shell) with the Programs folder open.*
 
 Text is drawn anti-aliased in the Liberation fonts (rs2 has its own
 TrueType and Type 1 renderer); installing "OS/2 fonts" with APPINST
