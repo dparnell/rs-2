@@ -330,13 +330,21 @@ pub unsafe extern "C" fn pause() -> c_int {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mmap64(addr: *mut c_void, len: size_t, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void {
-    let _ = (addr, prot);
+    let _ = addr;
     if len == 0 {
         fail(libc::EINVAL);
         return libc::MAP_FAILED;
     }
     let mut p = null_mut();
-    let rc = unsafe { alloc_any(&mut p, len as u32) };
+    // Memory reserved without access becomes a stack (the stacker crate):
+    // the OS/2 API takes what is on the stack only below 4 GB.
+    let rc = unsafe {
+        if cfg!(target_arch = "x86_64") && prot == libc::PROT_NONE && flags & libc::MAP_ANONYMOUS != 0 {
+            DosAllocMem(&mut p, len as u32, PAG_READ | PAG_WRITE | PAG_COMMIT)
+        } else {
+            alloc_any(&mut p, len as u32)
+        }
+    };
     if rc != 0 {
         fail_os2(rc);
         return libc::MAP_FAILED;
@@ -614,4 +622,74 @@ pub unsafe extern "C" fn killpg(_pgrp: c_int, _sig: c_int) -> c_int {
 pub unsafe extern "C" fn mremap(_p: *mut c_void, _old: size_t, _new: size_t, _flags: c_int, _to: *mut c_void) -> *mut c_void {
     fail(libc::ENOSYS);
     libc::MAP_FAILED
+}
+
+/// Whose code is at `addr`: always the program (its file name is all that
+/// is given).
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dladdr(_addr: *const c_void, info: *mut libc::Dl_info) -> c_int {
+    static NAME: SpinLock<[u8; 264]> = SpinLock::new([0; 264]);
+    let mut name = NAME.lock();
+    if name[0] == 0 {
+        let p = crate::start::program_path();
+        let n = p.len().min(263);
+        for (d, &c) in name.iter_mut().zip(&p[..n]) {
+            *d = if c == b'\\' { b'/' } else { c };
+        }
+    }
+    unsafe {
+        core::ptr::write_bytes(info, 0, 1);
+        (*info).dli_fname = name.as_ptr() as *const c_char;
+    }
+    1
+}
+
+// ---- No backtraces, no signals to threads ----
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn backtrace(_buf: *mut *mut c_void, _n: c_int) -> c_int {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn backtrace_symbols_fd(_buf: *const *mut c_void, _n: c_int, _fd: c_int) {}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pthread_kill(_t: libc::pthread_t, _sig: c_int) -> c_int {
+    0
+}
+
+// ---- Semaphores (a count, waited for as a futex) ----
+
+unsafe fn sem_count<'a>(s: *mut libc::sem_t) -> &'a core::sync::atomic::AtomicU32 {
+    unsafe { &*(s as *const core::sync::atomic::AtomicU32) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sem_init(s: *mut libc::sem_t, _shared: c_int, value: u32) -> c_int {
+    unsafe { sem_count(s) }.store(value, core::sync::atomic::Ordering::Relaxed);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sem_post(s: *mut libc::sem_t) -> c_int {
+    let c = unsafe { sem_count(s) };
+    c.fetch_add(1, core::sync::atomic::Ordering::Release);
+    crate::futex::wake(c, 1);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sem_wait(s: *mut libc::sem_t) -> c_int {
+    use core::sync::atomic::Ordering::*;
+    let c = unsafe { sem_count(s) };
+    loop {
+        let n = c.load(Relaxed);
+        if n == 0 {
+            crate::futex::wait(c, 0, None);
+        } else if c.compare_exchange(n, n - 1, Acquire, Relaxed).is_ok() {
+            return 0;
+        }
+    }
 }

@@ -25,6 +25,8 @@
 //!   `string` (mem*/str*), `unwind` (the `unwinding` crate provides the
 //!   `_Unwind_*` functions std's panics use).
 
+// open is not variadic here (the third argument is passed the same way).
+#![allow(unknown_lints, invalid_runtime_symbol_definitions)]
 #![no_std]
 #![allow(clippy::missing_safety_doc, non_camel_case_types)]
 

@@ -148,11 +148,11 @@ handle is: a handle should be closed by the module that opened it.
 - Linking with C code that uses LIBC64.DLL: both define `malloc`, `open`
   and the rest. Through a DLL with a C interface it works, since each
   module has its own.
-- Proc macros as DLLs: nothing known to be missing, but untried (cross
-  builds make them for the host).
 - A target of its own: to the compiler it is Linux (`cfg!(unix)`,
-  `target_os = "linux"`), `std::path` uses `/` (rs2libc takes both `/` and
-  `\`, but `Path` does not split at `\` or know drives).
+  `target_os = "linux"`), `std::path` uses `/`: rs2libc takes both `/` and
+  `\` and gives `/` (`current_dir`, `current_exe`, `canonicalize`), but
+  `Path` does not split at `\` or know drives. `dir/C:/x`, from joining, is
+  taken as `C:\x`.
 - `fork`, symbolic and hard links, Unix sockets, `socketpair`, signals
   (Ctrl+C ends the process), IPv6, non-blocking pipes.
 - Backtraces show no function names (`dl_iterate_phdr` finds nothing).
@@ -164,7 +164,7 @@ cargo xtask run --headless --timeout 150 --mem 6G --init "RS2\STDTST64.EXE"
 cargo xtask run --headless --timeout 60 --init "RS2\PMSTD64.EXE /SELFTEST C:\OS2"
 ```
 
-STDTST64 (userland-std/stdtest, also built as the 32-bit STDTEST) makes 107
+STDTST64 (userland-std/stdtest, also built as the 32-bit STDTEST) makes 108
 checks: threads, synchronisation, thread-locals and their destructors,
 files, directories, locks, times, the environment, panics, TCP and UDP,
 child processes, memory, DLLs (STDTDLL.DLL, and STDTRUST.EXE on

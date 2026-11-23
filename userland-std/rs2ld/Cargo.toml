@@ -1,0 +1,13 @@
+[package]
+name = "rs2ld"
+description = "RS2-LD.EXE: the linker that rustc on rs2 runs (LLD.EXE with rs2's arguments)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rs2-ld"
+path = "src/main.rs"
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }
