@@ -288,9 +288,14 @@ fn fs(t: &mut T, root: &str) {
     let c = std::fs::canonicalize(format!("{dir}/SUB/../DATA.BIN"));
     t.check(
         "canonicalize",
-        matches!(&c, Ok(p) if p.to_string_lossy().eq_ignore_ascii_case(&format!("{}\\STDTEST.TMP\\DATA.BIN", root.trim_end_matches('/')))),
+        matches!(&c, Ok(p) if p.to_string_lossy().replace('/', "\\").eq_ignore_ascii_case(&format!("{}\\STDTEST.TMP\\DATA.BIN", root.trim_end_matches('/')))),
         format!("{c:?}"),
     );
+    if cfg!(target_pointer_width = "64") {
+        // Path joins drives like any other name; rs2libc makes sense of it.
+        let j = std::path::Path::new("C:/OS2").join(format!("{dir}/DATA.BIN"));
+        t.check("path with a drive in it", j.exists(), format!("{j:?}"));
+    }
     let before = std::env::current_dir();
     let r = std::env::set_current_dir(&dir).and_then(|_| std::fs::read_to_string("DATA.BIN"));
     t.check("set_current_dir + relative path", matches!(&r, Ok(s) if s.starts_with("line one")), format!("{r:?}"));
