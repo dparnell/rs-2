@@ -230,12 +230,30 @@ int gettimeofday(struct timeval *__restrict tv, void *__restrict tz) {
     return 0;
 }
 
+/* The wall clock has 10 ms steps: in between, the fine clock carries it
+ * on from where the two last met. They meet again when they are apart by
+ * more than 20 ms (the clock was set, or drifted). */
 int timespec_get(struct timespec *ts, int base) {
     if (base != TIME_UTC)
         return 0;
+    static volatile int lock;
+    static long long offset;   /* wall - fine, in nanoseconds */
+    static int anchored;
     int h;
-    ts->tv_sec = now(&h);
-    ts->tv_nsec = h * 10000000L;
+    struct timespec m;
+    _rs2_spin_lock(&lock);
+    long long wall = now(&h) * 1000000000LL;
+    wall += h * 10000000LL;
+    clock_gettime(CLOCK_MONOTONIC, &m);
+    long long fine = m.tv_sec * 1000000000LL + m.tv_nsec, t = fine + offset;
+    if (!anchored || t < wall - 20000000 || t > wall + 30000000) {
+        offset = wall - fine;
+        anchored = 1;
+        t = wall;
+    }
+    _rs2_spin_unlock(&lock);
+    ts->tv_sec = (time_t)(t / 1000000000);
+    ts->tv_nsec = (long)(t % 1000000000);
     return base;
 }
 

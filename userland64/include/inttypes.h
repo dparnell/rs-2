@@ -8,6 +8,8 @@ intmax_t imaxabs(intmax_t);
 imaxdiv_t imaxdiv(intmax_t, intmax_t);
 intmax_t strtoimax(const char *__restrict, char **__restrict, int);
 uintmax_t strtoumax(const char *__restrict, char **__restrict, int);
+intmax_t wcstoimax(const wchar_t *__restrict, wchar_t **__restrict, int);
+uintmax_t wcstoumax(const wchar_t *__restrict, wchar_t **__restrict, int);
 _RS2_END
 #define __PRI64 "l"
 #define PRId8 "d"

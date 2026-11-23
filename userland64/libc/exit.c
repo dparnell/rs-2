@@ -80,6 +80,7 @@ int at_quick_exit(void (*fn)(void)) {
 }
 
 void exit(int code) {
+    _rs2_thread_dtors();
     __cxa_finalize(0);
     _rs2_stdio_exit();
     DosExit(EXIT_PROCESS, (ULONG)code);

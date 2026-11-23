@@ -1,10 +1,11 @@
 #!/bin/sh
-# Build a 64-bit rs2 program or DLL from C (docs/API64.md, "Building
-# 64-bit programs in C"; the C library: docs/LIBC64.md):
+# Build a 64-bit rs2 program or DLL from C or C++ (docs/API64.md, "Building
+# 64-bit programs in C"; the C library: docs/LIBC64.md; C++: docs/CXX64.md):
 #
-#   cc64.sh -o OUT.EXE [--pm] [--dll] [--static] [--rc FILE.RC] [CFLAGS...] FILE.c|FILE.o|FILE.a...
-#   cc64.sh -c [--static] [CFLAGS...] FILE.c [-o FILE.o]
+#   cc64.sh -o OUT.EXE [--pm] [--dll] [--static] [--rc FILE.RC] [CFLAGS...] FILE.c|.cpp|.o|.a...
+#   cc64.sh -c [--static] [CFLAGS...] FILE.c|.cpp [-o FILE.o]
 #   cc64.sh --libc            (just build the C library)
+#   cc64.sh --libcxx          (just build the C++ library)
 #
 # clang (any recent one: Apple's will do) compiles for x86-64 System V
 # with userland64/include as the only system headers; rust-lld links with
@@ -14,15 +15,20 @@
 # get crt1.o, their own start-up code), with --static libc.a. Objects for
 # one way must not be linked the other way (-D_RS2_LIBC_DLL decides how
 # the headers declare the library's data).
+# C++ sources (.cpp .cc .cxx) get userland64/cxx: LLVM's libc++, libc++abi
+# and libunwind, linked into the module; --cxx links them without C++
+# sources on the command line (objects only).
 # --pm marks a Presentation Manager program, --rc compiles an .RC script
 # into the module's resources (os2-rc's table64).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 ul=$(dirname "$here")
 root=$(dirname "$ul")
-out= pm= dll= rc= compile_only= libc_only= static=
+out= pm= dll= rc= compile_only= libc_only= libcxx_only= static= cxx=
 cflags= inputs=
-while [ $# -gt 0 ]; do
+internal=
+[ "$1" = --internal-cxx ] && { internal=1; shift; }
+while [ -z "$internal" ] && [ $# -gt 0 ]; do
     case "$1" in
         -o) out=$2; shift 2 ;;
         -c) compile_only=1; shift ;;
@@ -30,7 +36,10 @@ while [ $# -gt 0 ]; do
         --dll) dll=1; shift ;;
         --rc) rc=$2; shift 2 ;;
         --libc) libc_only=1; shift ;;
+        --libcxx) libcxx_only=1; shift ;;
+        --cxx) cxx=1; shift ;;
         --static) static=1; shift ;;
+        *.cpp|*.cc|*.cxx) cxx=1; inputs="$inputs $1"; shift ;;
         *.c|*.o|*.a|*.s|*.S) inputs="$inputs $1"; shift ;;
         *) cflags="$cflags $1"; shift ;;
     esac
@@ -43,10 +52,38 @@ usage() {
 lld=${RUST_LLD:-$(ls -d "$(rustc --print sysroot)"/lib/rustlib/*/bin/rust-lld 2>/dev/null | head -1)}
 ar=${LLVM_AR:-$(ls -d "$(rustc --print sysroot)"/lib/rustlib/*/bin/llvm-ar 2>/dev/null | head -1)}
 nm=${LLVM_NM:-$(ls -d "$(rustc --print sysroot)"/lib/rustlib/*/bin/llvm-nm 2>/dev/null | head -1)}
+# Stacks grow over a guard page, so frames of a page or more must touch
+# every page (clang's stack-clash protection).
+# clang, or $CLANG; C++ needs 19 or newer (libc++ 21).
+clang=${CLANG:-clang}
+# Not the Linux target: __linux__ would mislead portable programs.
+target=x86_64-unknown-none-elf
+common="--target=$target -D__RS2__ -D__OS2__ -nostdinc -fno-stack-protector -fPIC -fvisibility=hidden -fno-plt \
+    -femulated-tls -Xclang -fstack-clash-protection -O2"
 cc() {
-    clang --target=x86_64-unknown-linux-gnu -nostdinc -isystem "$ul/include" -fno-stack-protector -fPIC \
-        -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-plt -O2 -std=gnu11 -Wall -Wno-pointer-sign "$@"
+    $clang $common -isystem "$ul/include" -fno-asynchronous-unwind-tables -std=gnu11 -Wall -Wno-pointer-sign "$@"
 }
+llvm=$ul/cxx/llvm
+cxxc() {
+    $clang --driver-mode=g++ $common -nostdinc++ -isystem "$ul/cxx/config" -isystem "$llvm/libcxx/include" \
+        -isystem "$llvm/libcxxabi/include" -isystem "$ul/include" \
+        -fexceptions -frtti -fasynchronous-unwind-tables -fvisibility-inlines-hidden -std=gnu++20 "$@"
+}
+# One source, by its extension.
+compile() {
+    case "$1" in
+        *.cpp|*.cc|*.cxx) cxxc -Wall $cflags -c "$1" -o "$2" ;;
+        *) cc $cflags -c "$1" -o "$2" ;;
+    esac
+}
+
+if [ -n "$internal" ]; then
+    case "$1" in
+        *.cpp) src=$1; obj=$2; shift 2; cxxc "$@" -c "$src" -o "$CC64_OBJ/$obj" ;;
+        *) src=$1; obj=$2; shift 2; cc "$@" -c "$src" -o "$CC64_OBJ/$obj" ;;
+    esac
+    exit
+fi
 
 # The C library: rebuilt when a source or header is newer than it.
 #   libc.a        the library, static (with crt1.o)
@@ -66,6 +103,16 @@ LIBC64_BASE=0x18100000
 link() {
     "$lld" -flavor gnu -shared -T "$ul/link64.ld" --no-rosegment -nostdlib -z now -z norelro -Bsymbolic \
         --hash-style=sysv --gc-sections "$@"
+}
+# Imports are named MODULE.name: anything else undefined cannot load.
+check_imports() {
+    bad=$("$nm" -D --undefined-only "$1" | awk '$2 !~ /[.]/ { print "    " $2 }')
+    if [ -n "$bad" ]; then
+        echo "cc64.sh: $1: undefined:" >&2
+        echo "$bad" >&2
+        rm -f "$1"
+        exit 1
+    fi
 }
 build_libc() {
     if [ -f "$lib" ] && [ -f "$implib" ] && [ -f "$dllfile" ] && [ -f "$crt1" ] && [ -f "$crtdll" ] &&
@@ -90,8 +137,9 @@ build_libc() {
     rm -f "$lib" "$implib"
     "$ar" rcs "$lib" "$libdir"/obj/*.o
     printf '.text\n.globl _start\n_start: ret\n' > "$libdir/dllstart.s"
-    clang --target=x86_64-unknown-linux-gnu -c "$libdir/dllstart.s" -o "$libdir/dllstart.o"
+    $clang --target=$target -c "$libdir/dllstart.s" -o "$libdir/dllstart.o"
     link --defsym=__image_base=$LIBC64_BASE "$libdir/dllstart.o" "$libdir"/dll/*.o -o "$dllfile"
+    check_imports "$dllfile"
     # The import library: a stub for each exported function (in its own
     # member, so a program takes only what it calls). Data is imported
     # through the headers' asm labels instead.
@@ -100,11 +148,53 @@ build_libc() {
         printf '.section .text.%s,"ax",@progbits\n.globl %s\n.hidden %s\n.type %s,@function\n%s:\n    jmp *"LIBC64.%s"@GOTPCREL(%%rip)\n' \
             "$f" "$f" "$f" "$f" "$f" "$f" > "$libdir/stubs/$f.s"
     done < "$libdir/exports.txt"
-    (cd "$libdir/stubs" && clang --target=x86_64-unknown-linux-gnu -c ./*.s)
+    (cd "$libdir/stubs" && $clang --target=$target -c ./*.s)
     "$ar" rcs "$implib" "$libdir"/stubs/*.o
+}
+# The C++ library, for programs that use LIBC64.DLL or (static) libc.a:
+# the two differ in how the C library's data is declared.
+#   libcxx64.a / libcxx64s.a    libc++, libc++abi and libunwind
+cxxlib=$libdir/libcxx64${static:+s}.a
+build_libcxx() {
+    if [ -f "$cxxlib" ] && [ -z "$(find "$ul/cxx" "$ul/include" "$here/cc64.sh" -newer "$cxxlib" -type f | head -1)" ]; then
+        return
+    fi
+    o=$libdir/cxxobj${static:+s}
+    rm -rf "$o"
+    mkdir -p "$o"
+    d=
+    [ -n "$static" ] || d=-D_RS2_LIBC_DLL
+    cf="-ffunction-sections -fdata-sections -DNDEBUG -w $d"
+    {
+        for f in "$llvm"/libcxx/src/*.cpp "$llvm"/libcxx/src/ryu/*.cpp "$llvm"/libcxx/src/filesystem/*.cpp; do
+            case "$f" in */libcxx/src/new.cpp) continue ;; */int128_builtins.cpp) ;; esac
+            echo "$f cxx-$(basename "$f" .cpp).o $cf -std=c++23 -D_LIBCPP_BUILDING_LIBRARY -DLIBCXX_BUILDING_LIBCXXABI" \
+                "-D_LIBCPP_HAS_CLOCK_GETTIME -DLIBC_NAMESPACE=__llvm_libc_common_utils -I$llvm/libcxx/src -I$llvm/libc"
+        done
+        for f in "$llvm"/libcxxabi/src/*.cpp; do
+            case "$f" in */cxa_noexception.cpp|*/cxa_thread_atexit.cpp) continue ;; esac
+            echo "$f abi-$(basename "$f" .cpp).o $cf -std=c++23 -D_LIBCXXABI_BUILDING_LIBRARY -D_LIBCPP_BUILDING_LIBRARY" \
+                "-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS -DLIBCXXABI_USE_LLVM_UNWINDER" \
+                "-I$llvm/libcxxabi/src -I$llvm/libcxx/src -I$llvm/libunwind/include"
+        done
+        u="$cf -D_LIBUNWIND_IS_BAREMETAL -D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS -I$llvm/libunwind/include -I$llvm/libunwind/src"
+        echo "$llvm/libunwind/src/libunwind.cpp unw-libunwind.o $u -std=c++17 -fno-exceptions -fno-rtti"
+        for f in UnwindLevel1.c UnwindLevel1-gcc-ext.c UnwindRegistersRestore.S UnwindRegistersSave.S; do
+            echo "$llvm/libunwind/src/$f unw-${f%.*}.o $u -fexceptions -fasynchronous-unwind-tables"
+        done
+    } > "$o/list"
+    n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+    # Each line of the list is one compilation.
+    CC64_OBJ=$o xargs -P "$n" -L 1 "$here/cc64.sh" --internal-cxx < "$o/list"
+    rm -f "$cxxlib"
+    "$ar" rcs "$cxxlib" "$o"/*.o
 }
 build_libc
 [ -n "$libc_only" ] && exit 0
+if [ -n "$libcxx_only" ]; then
+    build_libcxx
+    exit 0
+fi
 
 [ -n "$static" ] || cflags="-D_RS2_LIBC_DLL $cflags"
 if [ -n "$compile_only" ]; then
@@ -112,8 +202,8 @@ if [ -n "$compile_only" ]; then
     set -- $inputs
     [ $# -eq 1 ] || [ -z "$out" ] || usage
     for s in $inputs; do
-        o=${out:-$(basename "$s" | sed 's/\.[cSs]$/.o/')}
-        cc $cflags -c "$s" -o "$o"
+        o=${out:-$(basename "${s%.*}").o}
+        compile "$s" "$o"
     done
     exit 0
 fi
@@ -127,7 +217,7 @@ for s in $inputs; do
         *.o|*.a) objs="$objs $s" ;;
         *)
             i=$((i + 1))
-            cc $cflags -c "$s" -o "$tmp/$i.o"
+            compile "$s" "$tmp/$i.o"
             objs="$objs $tmp/$i.o"
             ;;
     esac
@@ -147,7 +237,7 @@ done
         printf '.text\n.globl _start\n_start: ret\n'
     fi
 } > "$tmp/meta.s"
-clang --target=x86_64-unknown-linux-gnu -c "$tmp/meta.s" -o "$tmp/meta.o"
+$clang --target=$target -c "$tmp/meta.s" -o "$tmp/meta.o"
 if [ -n "$static" ]; then
     libs=$lib
 else
@@ -155,6 +245,16 @@ else
     # A program's own start-up code.
     [ -n "$dll" ] || objs="$crt1 $objs"
 fi
+if [ -z "$cxx" ]; then
+    eh=
+else
+    # None of it is exported, so what is not used goes; the unwinder reads
+    # this module's own unwind tables.
+    build_libcxx
+    libs="$cxxlib $libs"
+    eh="--eh-frame-hdr --exclude-libs=ALL"
+fi
 # A DLL's: _DLL_InitTerm runs its constructors.
 [ -n "$dll" ] && objs="$crtdll $objs"
-link --export-dynamic-symbol=RS2_APPTYPE --export-dynamic-symbol=RS2_RESOURCES "$tmp/meta.o" $objs $libs -o "$out"
+link $eh --export-dynamic-symbol=RS2_APPTYPE --export-dynamic-symbol=RS2_RESOURCES "$tmp/meta.o" $objs $libs -o "$out"
+check_imports "$out"

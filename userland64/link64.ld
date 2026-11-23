@@ -7,6 +7,17 @@ SECTIONS {
     . = DEFINED(__image_base) ? __image_base : 0x10000;
     .text : { *(.text.start) *(.text .text.*) }
     .rodata : { *(.rodata .rodata.*) }
+    /* C++ exceptions (cc64.sh links C++ with --eh-frame-hdr; nothing else
+       has unwind tables worth keeping). */
+    .gcc_except_table : { *(.gcc_except_table .gcc_except_table.*) }
+    .eh_frame_hdr : { *(.eh_frame_hdr) }
+    .eh_frame : {
+        PROVIDE_HIDDEN(__eh_frame_start = .);
+        *(.eh_frame)
+        PROVIDE_HIDDEN(__eh_frame_end = .);
+    }
+    PROVIDE_HIDDEN(__eh_frame_hdr_start = ADDR(.eh_frame_hdr));
+    PROVIDE_HIDDEN(__eh_frame_hdr_end = ADDR(.eh_frame_hdr) + SIZEOF(.eh_frame_hdr));
     .dynsym : { *(.dynsym) }
     .dynstr : { *(.dynstr) }
     .hash : { *(.hash) }
@@ -32,5 +43,5 @@ SECTIONS {
     /* DLL data shared by all processes (#[link_section = ".shared"]). */
     . = ALIGN(0x10000);
     .shared : { *(.shared .shared.*) }
-    /DISCARD/ : { *(.eh_frame*) *(.note*) *(.comment) }
+    /DISCARD/ : { *(.note*) *(.comment) }
 }

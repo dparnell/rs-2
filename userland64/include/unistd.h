@@ -29,6 +29,15 @@ int chdir(const char *);
 char *getcwd(char *, size_t);
 int ftruncate(int, off_t);
 int fsync(int);
+int truncate(const char *, off_t);
+/* OS/2 has no links: these fail with ENOSYS (EINVAL for readlink). */
+int link(const char *, const char *);
+int symlink(const char *, const char *);
+ssize_t readlink(const char *__restrict, char *__restrict, size_t);
+int getentropy(void *, size_t);
+#define _SC_PAGESIZE 30
+#define _SC_NPROCESSORS_ONLN 84
+long sysconf(int);
 unsigned sleep(unsigned);
 int usleep(unsigned long);
 pid_t getpid(void);

@@ -45,8 +45,11 @@ void _rs2_thread_done(void) {
     ULONG *s = tls_slot;
     if (s && *s) {
         PVOID p = (PVOID)(uintptr_t)*s;
+        HEV ev = ((struct _rs2_thread *)p)->event;
         *s = 0;
         DosFreeMem(p);
+        if (ev)
+            DosCloseEventSem(ev);
     }
 }
 
@@ -122,7 +125,7 @@ int _beginthread(void (*fn)(void *), void *stack, unsigned stack_size, void *arg
 }
 
 void _endthread(void) {
-    _rs2_thread_done();
+    _rs2_thread_exit();
     DosExit(EXIT_THREAD, 0);
     __builtin_unreachable();
 }

@@ -1,6 +1,7 @@
 #ifndef _SYS_STAT_H
 #define _SYS_STAT_H
 #include <sys/types.h>
+#include <time.h>
 _RS2_BEGIN
 struct stat {
     dev_t st_dev;          /* the drive: 0 = A: */
@@ -11,9 +12,12 @@ struct stat {
     gid_t st_gid;
     dev_t st_rdev;
     off_t st_size;
-    time_t st_atime, st_mtime, st_ctime;
+    struct timespec st_atim, st_mtim, st_ctim;
     unsigned int st_attr;  /* the OS/2 attributes, FILE_* */
 };
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
 #define S_IFMT 0170000
 #define S_IFDIR 0040000
 #define S_IFCHR 0020000
@@ -23,7 +27,12 @@ struct stat {
 #define S_ISCHR(m) (((m) & S_IFMT) == S_IFCHR)
 #define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#define S_ISLNK(m) 0
+#define S_IFLNK 0120000
+#define S_IFBLK 0060000
+#define S_IFSOCK 0140000
+#define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
+#define S_ISBLK(m) (((m) & S_IFMT) == S_IFBLK)
+#define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
 #define S_IRWXU 0700
 #define S_IRUSR 0400
 #define S_IWUSR 0200
@@ -43,6 +52,7 @@ int stat(const char *__restrict, struct stat *__restrict);
 int fstat(int, struct stat *);
 int lstat(const char *__restrict, struct stat *__restrict);
 int chmod(const char *, mode_t);
+int fchmod(int, mode_t);
 int mkdir(const char *, mode_t);
 mode_t umask(mode_t);
 _RS2_END

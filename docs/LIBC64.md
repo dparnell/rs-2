@@ -87,8 +87,8 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
 
 | Header | Contents |
 | --- | --- |
-| `assert.h`, `ctype.h`, `errno.h`, `float.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h` | C11 (no threads.h, wchar.h, uchar.h, complex.h, fenv.h yet) |
-| `strings.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/stat.h`, `sys/time.h`, `dirent.h`, `alloca.h` | the POSIX subset that portable programs use most |
+| `assert.h`, `ctype.h`, `errno.h`, `float.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`, `fenv.h`, `wchar.h`, `wctype.h`, `uchar.h` | C11 (no threads.h, complex.h yet) |
+| `strings.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/stat.h`, `sys/time.h`, `sys/statvfs.h`, `sys/random.h`, `dirent.h`, `alloca.h`, `pthread.h`, `sched.h` | the POSIX subset that portable programs use most |
 | `io.h`, `direct.h`, `process.h`, `malloc.h` | what OS/2 and DOS C compilers provide: `setmode`, `filelength`, drives, `_beginthread`, `spawnv`/`spawnvp`, `cwait` |
 
 ## How it maps onto OS/2
@@ -184,10 +184,19 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
   use Lanczos. Domain and range errors set errno (`math_errhandling` is
   MATH_ERRNO). fma is not fused.
 
+## Threads, thread_local
+
+`pthread.h` (threads, mutexes, condition variables, read-write locks,
+once, keys) is built on a futex, `__rs2_wait`/`__rs2_wake`
+(userland64/libc/pthread.c). `thread_local` variables work (emulated TLS)
+and are freed, with their destructors run, when a thread ends by
+`_endthread` or `pthread_exit` or returns. C++ is in
+[CXX64.md](CXX64.md).
+
 ## Not there yet
 
-- wide characters beyond `mbtowc`/`wctomb` in the "C" locale (wchar.h,
-  wctype.h); other locales.
+- other locales than "C": multibyte text is single bytes, and wide
+  formatted I/O goes through the narrow functions.
 - threads.h and C11 atomics headers (clang's `__atomic` builtins work).
 - with `--static`, a DLL has no `environ` (getenv asks DosScanEnv), and
   its destructors run at its termination, after the program's `exit` has

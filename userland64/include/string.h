@@ -37,6 +37,7 @@ char *strdup(const char *);
 char *strndup(const char *, size_t);
 char *strsep(char **, const char *);
 char *strsignal(int);
+void *memmem(const void *, size_t, const void *, size_t);
 /* Common in OS/2 and DOS compilers. */
 int stricmp(const char *, const char *);
 int strnicmp(const char *, const char *, size_t);

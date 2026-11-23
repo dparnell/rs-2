@@ -22,6 +22,7 @@ _RS2_NORETURN void abort(void);
 int atexit(void (*)(void));
 int at_quick_exit(void (*)(void));
 /* The Itanium C++ ABI's exit list (a module's destructors). */
+int __cxa_thread_atexit(void (*)(void *), void *, void *);
 int __cxa_atexit(void (*)(void *), void *, void *);
 void __cxa_finalize(void *);
 _RS2_NORETURN void exit(int);
