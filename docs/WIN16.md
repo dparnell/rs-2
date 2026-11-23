@@ -1039,9 +1039,10 @@ What the installer needed (each has a W16TEST check):
   drops below the field whatever the combo box's height.
 - **GetModuleHandle finds this program's modules only**: rs2's loader
   keeps a DLL registered after the programs that used it end, and
-  DosQueryModuleHandle finds it there; GetModuleHandle takes a module
-  from it only when this process uses it (Rs2Win16Selector 11: its
-  program, what it imports or loaded, and their imports). Delphi asks
+  DosQueryModuleHandle finds it there and loads it into the caller;
+  GetModuleHandle and LoadLibrary look only among the modules this
+  process uses (Rs2Win16Selector 11: its program, what it imports or
+  loaded, and their imports). Delphi asks
   for COMPLIB.DCL before loading it and, finding the one of a Delphi
   that ended, said it was "already loaded" until the system was
   restarted.
