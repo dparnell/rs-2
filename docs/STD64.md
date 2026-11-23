@@ -148,11 +148,11 @@ handle is: a handle should be closed by the module that opened it.
 - Linking with C code that uses LIBC64.DLL: both define `malloc`, `open`
   and the rest. Through a DLL with a C interface it works, since each
   module has its own.
-- Proc macros as DLLs: nothing known to be missing, but untried (cross
-  builds make them for the host).
 - A target of its own: to the compiler it is Linux (`cfg!(unix)`,
-  `target_os = "linux"`), `std::path` uses `/` (rs2libc takes both `/` and
-  `\`, but `Path` does not split at `\` or know drives).
+  `target_os = "linux"`), `std::path` uses `/`: rs2libc takes both `/` and
+  `\` and gives `/` (`current_dir`, `current_exe`, `canonicalize`), but
+  `Path` does not split at `\` or know drives. `dir/C:/x`, from joining, is
+  taken as `C:\x`.
 - `fork`, symbolic and hard links, Unix sockets, `socketpair`, signals
   (Ctrl+C ends the process), IPv6, non-blocking pipes.
 - Backtraces show no function names (`dl_iterate_phdr` finds nothing).

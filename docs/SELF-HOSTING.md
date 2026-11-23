@@ -99,9 +99,7 @@ programs of rs2's own as well.
    and links as cc64.sh does) and to lld `--rs2-imports` (an undefined
    symbol that is not `MODULE.name` is an error). See "The C and C++
    toolchain" below.
-4. `rustc`: LLVM in a DLL of its own, behind the C interface of rustc's
-   LLVM wrapper (each module has its own C library), `rustc_driver`, proc
-   macros. Milestone: `rustc hello.rs` on rs2.
+4. `rustc`: done (1.100.0, with its own LLVM 23). See "rustc" below.
 5. `cargo`, offline and without curl and libgit2 as far as it goes.
    Milestone: `cargo build` of a host-tested crate.
 6. `cargo xtask iso` on rs2, with the shell scripts gone.
@@ -135,6 +133,46 @@ CXXTEST and the C library's sources on rs2 and compares each result with
 the host clang's: all the same bytes, and the programs run. An 8 MB
 preprocessed file of clang's own (ExprConstant.cpp, about 500 MB of heap)
 gives the same object too.
+
+## rustc
+
+`userland64/rustc/build.sh` fetches rustc's source (the installed rustc's
+version), applies `rs2.patch` and cross-builds it; `userland64/rustc/sdk.sh`
+adds it to the toolchain tree of userland64/llvm/sdk.sh. Then on rs2, with
+`\sdk\bin` in PATH and BEGINLIBPATH (for RSLLVM.DLL):
+
+```text
+rustc -O hello.rs -o HELLO.EXE
+rustc --crate-type proc-macro pm.rs
+rustc --crate-type cdylib lib.rs          (libname.so: the DLL NAME)
+```
+
+- **RUSTC.EXE** (79 MB) is rustc's crates in one program, built with the
+  installed stable rustc for `x86_64-unknown-linux-gnu` on rs2libc, as
+  other std programs are (STD64.md). There is no rustc_driver DLL.
+- **RSLLVM.DLL** (37 MB) is LLVM and rustc's C++ wrapper on LIBC64.DLL and
+  LIBCXX64.DLL, behind the C functions rustc calls. What one side
+  allocates it frees itself; the wrapper gets the function that writes
+  into Rust strings as a pointer.
+- **The target is still `x86_64-unknown-linux-gnu`**, and the standard
+  library is rustup's, as it is: RUSTC.EXE says it is the same compiler
+  (the same version string, so the same crate hashes).
+- **RS2-LD.EXE** (userland-std/rs2ld) is the default linker for it: lld.sh
+  in Rust. It links rs2libc in as `libc.a`, which std asks for, so programs
+  need not name rs2libc, and runs LLD.EXE.
+- **Paths.** std's `Path` is Unix's. rs2libc gives 64-bit programs their
+  directories and program names with `/`, and takes `dir/C:/x`, which is
+  what joining an absolute OS/2 path gives, as `C:\x`. rustc turns `\` in
+  its arguments into `/`. It leaves PATH alone for the linker.
+- **Stacks** that the stacker crate makes are mapped below 4 GB, as the
+  OS/2 API takes no pointers above.
+
+Not there yet: `dylib` crates that share std (userland-std/dyn64.sh) and
+linkers for the other targets (kernel, boot loader, 32-bit userland).
+
+`tests/rustc64/run.sh` compiles, links and runs programs there, a proc
+macro and its user, and a cdylib and its user, and compares objects with
+the installed rustc's: the same bytes, regex-syntax's 690 KB included.
 
 ## Needed by either route
 
