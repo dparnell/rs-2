@@ -152,6 +152,7 @@ macro_rules! entry {
     };
 }
 
+#[cfg(feature = "runtime")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("panic: {}", info);
@@ -164,6 +165,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 // Volatile accesses keep LLVM from turning these loops back into calls to
 // themselves.
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
@@ -173,6 +175,7 @@ pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
     d
 }
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
@@ -182,6 +185,7 @@ pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
     d
 }
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
@@ -197,6 +201,7 @@ pub unsafe extern "C" fn memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8 
     d
 }
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
@@ -209,12 +214,14 @@ pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     0
 }
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn bcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     unsafe { memcmp(a, b, n) }
 }
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 #[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
@@ -226,9 +233,11 @@ pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
 }
 
 /// Referenced by the precompiled `core`; never called with panic=abort.
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_eh_personality() {}
 
+#[cfg(feature = "runtime")]
 #[unsafe(no_mangle)]
 pub extern "C" fn _Unwind_Resume() -> ! {
     loop {}

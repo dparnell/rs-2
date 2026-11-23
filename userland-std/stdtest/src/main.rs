@@ -9,6 +9,7 @@
 //! - `panic`: catch_unwind, drops during unwinding, a panicking thread
 //! - `mem`: a large HashMap and Vec, then the address space limit (how many
 //!   MB can be allocated in 16 MB pieces; more than 512 with high memory)
+//! - `mem64` (64-bit): memory above 4 GB and calls with data there
 //! - `net`: loopback TCP (1 MB echoed), UDP, a refused connection, timeouts,
 //!   name lookup
 //! - `process`: Command with piped output (CMD /C ECHO)
@@ -295,6 +296,46 @@ fn fs(t: &mut T, root: &str) {
     if let Ok(b) = before {
         let _ = std::env::set_current_dir(b);
     }
+    // Positional I/O, locks, times.
+    use std::os::unix::fs::FileExt;
+    let pos = format!("{dir}/POS.BIN");
+    let r = (|| -> std::io::Result<bool> {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&pos)?;
+        f.write_all(b"0123456789")?;
+        f.write_all_at(b"XY", 4)?;
+        let mut b = [0; 4];
+        f.read_exact_at(&mut b, 3)?;
+        Ok(&b == b"3XY6" && f.stream_position()? == 10)
+    })();
+    t.ok("read_at/write_at", r);
+    let r = (|| -> std::io::Result<bool> {
+        let a = std::fs::OpenOptions::new().read(true).write(true).open(&pos)?;
+        a.lock()?;
+        // Another process: OS/2's locks are a process's.
+        let exe = std::env::current_exe()?;
+        let try_it = || std::process::Command::new(&exe).args(["child-lock", &pos]).status().map(|s| s.code());
+        let held = try_it()?;
+        let readable = std::fs::read(&pos)?.len() == 10;
+        a.unlock()?;
+        let free = try_it()?;
+        a.lock_shared()?;
+        let shared = try_it()?;
+        a.unlock()?;
+        if (held, readable, free, shared) != (Some(1), true, Some(0), Some(1)) {
+            println!("     held {held:?} readable {readable} free {free:?} shared {shared:?}");
+            return Ok(false);
+        }
+        Ok(true)
+    })();
+    t.ok("File::lock, try_lock in another process", r);
+    let r = (|| -> std::io::Result<bool> {
+        let f = std::fs::OpenOptions::new().write(true).open(&pos)?;
+        let when = SystemTime::UNIX_EPOCH + Duration::from_secs(1_500_000_000);
+        f.set_modified(when)?;
+        drop(f);
+        Ok(std::fs::metadata(&pos)?.modified()? == when)
+    })();
+    t.ok("set_modified", r);
     t.ok("remove_dir_all", std::fs::remove_dir_all(&dir).map(|_| true));
     t.check("gone", std::fs::metadata(&dir).is_err(), "");
 }
@@ -411,6 +452,57 @@ fn mem(t: &mut T) {
     let mut v: Vec<u8> = Vec::new();
     let r = v.try_reserve_exact(64 << 20);
     t.check("memory reusable after free", r.is_ok(), format!("{r:?}"));
+}
+
+/// 64-bit programs: memory above 4 GB, and std working from it (paths,
+/// I/O buffers, sockets, program arguments).
+#[cfg(target_pointer_width = "64")]
+fn mem64(t: &mut T) {
+    let mut big: Vec<u64> = Vec::new();
+    let r = big.try_reserve_exact((1 << 30) / 8);
+    t.check("Vec of 1 GB", r.is_ok(), format!("{r:?}"));
+    if r.is_ok() {
+        // A page in each 16 MB.
+        big.resize((1 << 30) / 8, 0);
+        for i in (0..big.len()).step_by(2 << 20) {
+            big[i] = i as u64 * 3;
+        }
+        let ok = (0..big.len()).step_by(2 << 20).all(|i| big[i] == i as u64 * 3);
+        t.check("1 GB above 4 GB", ok && big.as_ptr() as usize >= 1 << 32, format!("{:p}", big.as_ptr()));
+    }
+    // Fill the heap's share of low memory: small blocks come from above.
+    let mut fill: Vec<Vec<u8>> = Vec::new();
+    while fill.last().is_none_or(|v| (v.as_ptr() as usize) < 1 << 32) && fill.len() < 4096 {
+        fill.push(Vec::with_capacity(1 << 20));
+    }
+    let mut keep = Vec::new();
+    let high = loop {
+        let s = String::from("C:/STD64HI.TMP");
+        if s.as_ptr() as usize >= 1 << 32 || keep.len() > 100_000 {
+            break s;
+        }
+        keep.push(s);
+    };
+    t.check("small blocks above 4 GB", high.as_ptr() as usize >= 1 << 32, format!("{:p}", high.as_ptr()));
+    let data: Vec<u8> = (0..3 << 20).map(|i: u32| (i % 253) as u8).collect();
+    t.check("3 MB above 4 GB", data.as_ptr() as usize >= 1 << 32, format!("{:p}", data.as_ptr()));
+    t.ok("file I/O from there", std::fs::write(&high, &data).and_then(|_| std::fs::read(&high)).map(|d| d == data));
+    t.ok("directory from there", std::fs::read_dir("C:/").map(|d| d.flatten().any(|e| e.file_name().eq_ignore_ascii_case("STD64HI.TMP"))));
+    let to = String::from("C:/STD64HJ.TMP");
+    t.ok("rename, remove", std::fs::rename(&high, &to).and_then(|_| std::fs::remove_file(&to)).map(|_| true));
+    let r = (|| -> std::io::Result<bool> {
+        let l = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let a = l.local_addr()?;
+        let d = data.clone();
+        let h = std::thread::spawn(move || std::net::TcpStream::connect(a)?.write_all(&d));
+        let mut got = Vec::new();
+        l.accept()?.0.read_to_end(&mut got)?;
+        h.join().unwrap()?;
+        Ok(got == data)
+    })();
+    t.ok("sockets from there", r);
+    process(t);
+    drop((fill, keep));
 }
 
 fn net(t: &mut T) {
@@ -547,6 +639,10 @@ fn main() {
     // Child processes of the process section.
     match want.first() {
         Some(&"child-exit") => std::process::exit(want.get(1).and_then(|c| c.parse().ok()).unwrap_or(1)),
+        Some(&"child-lock") => {
+            let f = std::fs::OpenOptions::new().read(true).write(true).open(want[1]).unwrap();
+            std::process::exit(f.try_lock().is_err() as i32);
+        }
         Some(&"child-echo") => {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line).unwrap();
@@ -581,6 +677,10 @@ fn main() {
     }
     if on("mem") {
         mem(&mut t);
+    }
+    #[cfg(target_pointer_width = "64")]
+    if on("mem64") {
+        mem64(&mut t);
     }
     if let Some(i) = want.iter().position(|&w| w == "host") {
         host(&mut t, want.get(i + 1).copied().unwrap_or("10.0.2.2:8000"));

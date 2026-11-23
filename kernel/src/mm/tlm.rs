@@ -169,7 +169,8 @@ pub fn enable(p: &Process) {
 /// page directory entry the process has since added, copy it. Returns true
 /// if the access can be retried.
 pub fn sync_fault(addr: u64) -> bool {
-    if addr >= 1 << 32 {
+    // The 64-bit arena above 4 GB is in the copied PDPT too.
+    if addr >= 1 << 39 {
         return false;
     }
     let Some(t) = crate::task::sched::current_opt() else { return false };
@@ -181,7 +182,7 @@ pub fn sync_fault(addr: u64) -> bool {
     if cr3 != tables.pml4 {
         return false;
     }
-    // High memory (above 1 GB): the copied PDPT points at the process's
+    // Above 1 GB (high memory, the 64-bit arena): the copied PDPT points at the process's
     // own page directories there, but lacks those it added since.
     if addr >= 1 << 30 {
         let gi = (addr >> 30) as usize;

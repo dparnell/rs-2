@@ -1267,7 +1267,7 @@ const STD_PROGRAMS: &[(&str, &str, bool)] = &[
 
 /// The 64-bit programs of userland-std/ (docs/STD64.md): cargo package,
 /// destination. They stay ELF.
-const STD_PROGRAMS64: &[(&str, &str)] = &[("stdtest", "RS2\\STDTST64.EXE")];
+const STD_PROGRAMS64: &[(&str, &str)] = &[("stdtest", "RS2\\STDTST64.EXE"), ("pmstd64", "RS2\\PMSTD64.EXE")];
 
 /// Build userland-std's 64-bit programs.
 fn build_userland_std64() -> Option<image::FileList> {
