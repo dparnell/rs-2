@@ -332,7 +332,7 @@
        TC = std::make_unique<toolchains::Managarm>(*this, Target, Args);
 --- a/clang/lib/Driver/ToolChains/RS2.cpp
 +++ b/clang/lib/Driver/ToolChains/RS2.cpp
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,164 @@
 +//===--- RS2.cpp - rs2 (64-bit OS/2 API) ToolChain --------------*- C++ -*-===//
 +//
 +// Part of rs2's LLVM patch (userland64/llvm/rs2.patch). Compiles and links
@@ -449,7 +449,9 @@
 +
 +std::string RS2::sysRootPath(StringRef A, StringRef B, StringRef C) const {
 +  SmallString<128> P(computeSysRoot());
-+  llvm::sys::path::append(P, A, B, C);
++  for (StringRef S : {A, B, C})
++    if (!S.empty())
++      llvm::sys::path::append(P, S);
 +  return std::string(P);
 +}
 +
