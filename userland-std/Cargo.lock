@@ -1244,6 +1244,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs2ld"
+version = "0.1.0"
+dependencies = [
+ "rs2libc",
+]
+
+[[package]]
 name = "rs2libc"
 version = "0.1.0"
 dependencies = [

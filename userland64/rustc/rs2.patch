@@ -1,0 +1,449 @@
+--- a/compiler/rustc/Cargo.toml
++++ b/compiler/rustc/Cargo.toml
+@@ -10,6 +10,7 @@
+ # crate is intended to be used by codegen backends, which may not be in-tree.
+ rustc_codegen_ssa = { path = "../rustc_codegen_ssa" }
+ 
++rs2libc = { path = "../../../rs2libc" }
+ rustc_driver = { path = "../rustc_driver" }
+ rustc_driver_impl = { path = "../rustc_driver_impl" }
+ 
+--- a/compiler/rustc/src/main.rs
++++ b/compiler/rustc/src/main.rs
+@@ -3,6 +3,7 @@
+ // Several crates are depended upon but unused so that they are present in the sysroot
+ #![expect(unused_crate_dependencies)]
+ 
++use rs2libc as _;
+ use std::process::ExitCode;
+ 
+ // A note about jemalloc: rustc uses jemalloc when built for CI and
+--- a/compiler/rustc_codegen_llvm/src/llvm/enzyme_ffi.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/enzyme_ffi.rs
+@@ -33,7 +33,7 @@
+     pub(crate) inner: CTypeTreeRef,
+ }
+ 
+-#[link(name = "llvm-wrapper", kind = "static")]
++// rs2: in RSLLVM.DLL.
+ unsafe extern "C" {
+     // Enzyme
+     pub(crate) safe fn LLVMRustHasMetadata(I: &Value, KindID: MetadataKindId) -> bool;
+--- a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
+@@ -1963,7 +1963,7 @@
+     ) -> &'ll Metadata;
+ }
+ 
+-#[link(name = "llvm-wrapper", kind = "static")]
++// rs2: in RSLLVM.DLL.
+ unsafe extern "C" {
+     pub(crate) fn LLVMRustInstallErrorHandlers();
+     pub(crate) fn LLVMRustDisableSystemDialogsOnCrash();
+--- a/compiler/rustc_codegen_llvm/src/llvm/mod.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/mod.rs
+@@ -393,7 +393,8 @@
+         } else {
+             let err = CStr::from_ptr(cstr).to_bytes();
+             let err = String::from_utf8_lossy(err).to_string();
+-            libc::free(cstr as *mut _);
++            // rs2: from the C library of RSLLVM.DLL, not ours.
++            LLVMDisposeMessage(cstr as *mut _);
+             Some(err)
+         }
+     }
+--- a/compiler/rustc_codegen_ssa/src/back/link.rs
++++ b/compiler/rustc_codegen_ssa/src/back/link.rs
+@@ -1615,7 +1615,7 @@
+     if let Some(path) = env::var_os("PATH") {
+         new_path.extend(env::split_paths(&path));
+     }
+-    cmd.env("PATH", env::join_paths(new_path).unwrap());
++    let _ = new_path; // rs2: see get_linker
+ 
+     let prog = cmd.arg(out_filename).output();
+     match prog {
+--- a/compiler/rustc_codegen_ssa/src/back/linker.rs
++++ b/compiler/rustc_codegen_ssa/src/back/linker.rs
+@@ -77,6 +77,10 @@
+             {
+                 Command::new(msvc_tool.as_ref().map_or(linker, |t| t.path()))
+             }
++            // rs2: its own linker is next to rustc.
++            _ if linker == Path::new("rs2-ld") => {
++                Command::new(sess.opts.sysroot.default.join("bin").join("RS2-LD.EXE"))
++            }
+             _ => Command::new(linker),
+         },
+     };
+@@ -132,7 +136,9 @@
+     if !msvc_changed_path && let Some(path) = env::var_os("PATH") {
+         new_path.extend(env::split_paths(&path));
+     }
+-    cmd.env("PATH", env::join_paths(new_path).unwrap());
++    // rs2: PATH has drives and semicolons, which Unix's split_paths does
++    // not know.
++    let _ = new_path;
+ 
+     // FIXME: Move `/LIBPATH` addition for uwp targets from the linker construction
+     // to the linker args construction.
+--- a/compiler/rustc_driver/Cargo.toml
++++ b/compiler/rustc_driver/Cargo.toml
+@@ -4,7 +4,7 @@
+ edition = "2024"
+ 
+ [lib]
+-crate-type = ["dylib"]
++crate-type = ["rlib"]
+ 
+ [dependencies]
+ # tidy-alphabetical-start
+--- a/compiler/rustc_driver_impl/src/args.rs
++++ b/compiler/rustc_driver_impl/src/args.rs
+@@ -121,6 +121,8 @@
+     let mut guar = Ok(());
+     for (i, arg) in env::args_os().enumerate() {
+         match arg.into_string() {
++            // rs2: std::path (of a Unix target) splits at / only.
++            Ok(arg) if arg.contains('\\') && !arg.contains(['"', '\'']) => args.push(arg.replace('\\', "/")),
+             Ok(arg) => args.push(arg),
+             Err(arg) => {
+                 guar =
+--- a/compiler/rustc_llvm/build.rs
++++ b/compiler/rustc_llvm/build.rs
+@@ -180,6 +180,13 @@
+         return;
+     }
+ 
++    // rs2: the C++ side is in RSLLVM.DLL (userland64/rustc/build.sh).
++    if tracked_env_var_os("RS2_LLVM").is_some() {
++        for component in REQUIRED_COMPONENTS.iter().chain(["x86"].iter()) {
++            println!("cargo:rustc-cfg=llvm_component=\"{component}\"");
++        }
++        return;
++    }
+     restore_library_path();
+ 
+     let llvm_config =
+--- a/compiler/rustc_llvm/src/lib.rs
++++ b/compiler/rustc_llvm/src/lib.rs
+@@ -16,6 +16,14 @@
+ 
+ impl RustString {
+     pub fn build_byte_buffer(closure: impl FnOnce(&Self)) -> Vec<u8> {
++        // rs2: the C++ side is in a DLL of its own (RSLLVM.DLL), which is
++        // told where to write strings.
++        unsafe extern "C" {
++            fn LLVMRustRS2SetStringWrite(
++                f: unsafe extern "C" fn(&RustString, *const u8, size_t),
++            );
++        }
++        unsafe { LLVMRustRS2SetStringWrite(LLVMRustStringWriteImpl) };
+         let buf = RustStringInner::default();
+         closure(buf.as_opaque());
+         buf.into_inner()
+--- a/compiler/rustc_target/src/spec/base/linux_gnu.rs
++++ b/compiler/rustc_target/src/spec/base/linux_gnu.rs
+@@ -4,6 +4,9 @@
+     let mut base = TargetOptions {
+         env: Env::Gnu,
+         static_position_independent_executables: true,
++        // rs2: RS2-LD.EXE (userland-std/rs2ld) links its programs.
++        linker: Some("rs2-ld".into()),
++        linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::No),
+         ..base::linux::opts()
+     };
+ 
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1286,6 +1286,17 @@
+ checksum = "8975ffdaa0ef3661bfe02dbdcc06c9f829dfafe6a3c474de366a8d5e44276921"
+ 
+ [[package]]
++name = "dlmalloc"
++version = "0.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
++dependencies = [
++ "cfg-if",
++ "libc",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
+ name = "dyn-clone"
+ version = "1.0.20"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3473,6 +3484,16 @@
+ ]
+ 
+ [[package]]
++name = "rs2libc"
++version = "0.1.0"
++dependencies = [
++ "dlmalloc",
++ "libc",
++ "libm",
++ "unwinding",
++]
++
++[[package]]
+ name = "run_make_support"
+ version = "0.0.0"
+ dependencies = [
+@@ -3531,6 +3552,7 @@
+ version = "0.0.0"
+ dependencies = [
+  "getrandom 0.3.3",
++ "rs2libc",
+  "rustc_codegen_ssa",
+  "rustc_driver",
+  "rustc_driver_impl",
+@@ -6247,6 +6269,15 @@
+ ]
+ 
+ [[package]]
++name = "unwinding"
++version = "0.2.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4b134ada16dda9e435abe2a6d76a01d497bc60707357845a15f9b0ed42dc88ce"
++dependencies = [
++ "gimli 0.34.0",
++]
++
++[[package]]
+ name = "url"
+ version = "2.5.7"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+--- a/src/llvm-project/llvm/include/llvm/Support/Path.h
++++ b/src/llvm-project/llvm/include/llvm/Support/Path.h
+@@ -39,7 +39,7 @@
+     return true;
+   if (S != Style::native)
+     return false;
+-#if defined(_WIN32)
++#if defined(_WIN32) || defined(__RS2__)
+   return false;
+ #else
+   return true;
+--- a/src/llvm-project/llvm/include/llvm/Support/Program.h
++++ b/src/llvm-project/llvm/include/llvm/Support/Program.h
+@@ -29,9 +29,9 @@
+ 
+ /// This is the OS-specific separator for PATH like environment variables:
+ // a colon on Unix or a semicolon on Windows.
+-#if defined(LLVM_ON_UNIX)
++#if defined(LLVM_ON_UNIX) && !defined(__RS2__)
+ const char EnvPathSeparator = ':';
+-#elif defined(_WIN32)
++#elif defined(_WIN32) || defined(__RS2__)
+ const char EnvPathSeparator = ';';
+ #endif
+ 
+--- a/src/llvm-project/llvm/lib/Support/LockFileManager.cpp
++++ b/src/llvm-project/llvm/lib/Support/LockFileManager.cpp
+@@ -113,7 +113,7 @@
+ }
+ 
+ bool LockFileManager::processStillExecuting(StringRef HostID, int PID) {
+-#if LLVM_ON_UNIX && !defined(__ANDROID__)
++#if LLVM_ON_UNIX && !defined(__ANDROID__) && !defined(__RS2__)
+   SmallString<256> StoredHostID;
+   if (getHostID(StoredHostID))
+     return true; // Conservatively assume it's executing on error.
+--- a/src/llvm-project/llvm/lib/Support/Path.cpp
++++ b/src/llvm-project/llvm/lib/Support/Path.cpp
+@@ -53,6 +53,9 @@
+       return style;
+     if (is_style_posix(style))
+       return Style::posix;
++#if defined(__RS2__)
++    return Style::windows_slash;
++#endif
+     return prefer_forward_slash() ? Style::windows_slash
+                                   : Style::windows_backslash;
+   }
+@@ -188,8 +191,10 @@
+   // different name) or for the whole directory (retry would always fail).
+   // Checking which is racy, so we try a number of times, then give up.
+   std::error_code EC;
++  SmallString<128> UseModel;
++  Model.toVector(UseModel);
+   for (int Retries = 128; Retries > 0; --Retries) {
+-    sys::fs::createUniquePath(Model, ResultPath, MakeAbsolute);
++    sys::fs::createUniquePath(UseModel, ResultPath, MakeAbsolute);
+     // Try to open + create the file.
+     switch (Type) {
+     case FS_File: {
+@@ -200,6 +205,15 @@
+         // that has been marked for deletion.
+         if (EC == errc::file_exists || EC == errc::permission_denied)
+           continue;
++#if defined(__RS2__)
++        // FAT: a name of 8 characters and an extension of 3.
++        if (EC == errc::filename_too_long &&
++            !StringRef(UseModel).ends_with(".TMP")) {
++          sys::path::remove_filename(UseModel);
++          sys::path::append(UseModel, "%%%%%%%%.TMP");
++          continue;
++        }
++#endif
+         return EC;
+       }
+ 
+@@ -1336,6 +1350,12 @@
+       remove(TmpName);
+   }
+ #else
++#if defined(__RS2__)
++  // An open file cannot be renamed.
++  if (close(FD) == -1)
++    return errorCodeToError(errnoAsErrorCode());
++  FD = -1;
++#endif
+   std::error_code RenameEC = fs::rename(TmpName, Name);
+   if (RenameEC) {
+     // If we can't rename, try to copy to work around cross-device link issues.
+@@ -1350,7 +1370,7 @@
+   if (!RenameEC)
+     TmpName = "";
+ 
+-  if (close(FD) == -1)
++  if (FD != -1 && close(FD) == -1)
+     return errorCodeToError(errnoAsErrorCode());
+   FD = -1;
+ 
+--- a/src/llvm-project/llvm/lib/Support/Unix/Path.inc
++++ b/src/llvm-project/llvm/lib/Support/Unix/Path.inc
+@@ -194,7 +194,9 @@
+ std::string getMainExecutable(const char *argv0, void *MainAddr) {
+   auto BypassSandbox = sandbox::scopedDisable();
+ 
+-#if defined(__APPLE__)
++#if defined(__RS2__)
++  return ::getexecname();
++#elif defined(__APPLE__)
+   // On OS X the executable path is saved to the stack by dyld. Reading it
+   // from there is much faster than calling dladdr, especially for large
+   // binaries with symbols.
+@@ -569,6 +571,8 @@
+   // The file system can have an arbitrary structure on z/OS; must go with the
+   // conservative answer.
+   return false;
++#elif defined(__RS2__)
++  return true;
+ #else
+   return !!(STATVFS_F_FLAG(Vfs) & MNT_LOCAL);
+ #endif
+@@ -712,7 +716,9 @@
+   struct passwd Pwd;
+   std::string User = Expr.str();
+   struct passwd *Entry = nullptr;
++#if !defined(__RS2__)
+   getpwnam_r(User.c_str(), &Pwd, Buf.get(), BufSize, &Entry);
++#endif
+ 
+   if (!Entry || !Entry->pw_dir) {
+     // Unable to look up the entry, just return back the original path.
+@@ -1500,7 +1506,9 @@
+     Buf = std::make_unique<char[]>(BufSize);
+     struct passwd Pwd;
+     struct passwd *pw = nullptr;
++#if !defined(__RS2__)
+     getpwuid_r(getuid(), &Pwd, Buf.get(), BufSize, &pw);
++#endif
+     if (pw && pw->pw_dir)
+       RequestedDir = pw->pw_dir;
+   }
+@@ -1618,7 +1626,12 @@
+   if (getDarwinConfDir(ErasedOnReboot, Result))
+     return;
+ 
++#if defined(__RS2__)
++  // No TMP or the like: the current directory.
++  const char *RequestedDir = ".";
++#else
+   const char *RequestedDir = getDefaultTempDir(ErasedOnReboot);
++#endif
+   Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+ }
+ 
+--- a/src/llvm-project/llvm/lib/Support/Unix/Program.inc
++++ b/src/llvm-project/llvm/lib/Support/Unix/Program.inc
+@@ -31,6 +31,9 @@
+ #include <signal.h>
+ #include <sys/resource.h>
+ #include <sys/stat.h>
++#if defined(__RS2__)
++#include <io.h>
++#endif
+ #if HAVE_UNISTD_H
+ #include <unistd.h>
+ #endif
+@@ -66,11 +69,20 @@
+   // the behavior of sh(1) and friends.
+   if (Name.contains('/'))
+     return std::string(Name);
++#if defined(__RS2__)
++  if (Name.contains('\\') || Name.contains(':'))
++    return std::string(Name);
++  std::string WithExt = Name.str();
++  if (!Name.contains('.')) {
++    WithExt += ".EXE";
++    Name = WithExt;
++  }
++#endif
+ 
+   SmallVector<StringRef, 16> EnvironmentPaths;
+   if (Paths.empty())
+     if (const char *PathEnv = std::getenv("PATH")) {
+-      SplitString(PathEnv, EnvironmentPaths, ":");
++      SplitString(PathEnv, EnvironmentPaths, StringRef(&EnvPathSeparator, 1));
+       Paths = EnvironmentPaths;
+     }
+ 
+@@ -523,6 +535,9 @@
+ }
+ 
+ std::error_code llvm::sys::ChangeStdoutToBinary() {
++#if defined(__RS2__)
++  ::setmode(STDOUT_FILENO, O_BINARY);
++#endif
+   // Do nothing, as Unix doesn't differentiate between text and binary.
+   return std::error_code();
+ }
+@@ -547,6 +562,13 @@
+ 
+ bool llvm::sys::commandLineFitsWithinSystemLimits(StringRef Program,
+                                                   ArrayRef<StringRef> Args) {
++#if defined(__RS2__)
++  // DosExecPgm's arguments and the environment share 64 KB.
++  size_t Total = Program.size();
++  for (StringRef Arg : Args)
++    Total += Arg.size() + 3;
++  return Total < 30000;
++#else
+   static long ArgMax = sysconf(_SC_ARG_MAX);
+   // POSIX requires that _POSIX_ARG_MAX is 4096, which is the lowest possible
+   // value for ARG_MAX on a POSIX compliant system.
+@@ -584,4 +606,5 @@
+   }
+ 
+   return true;
++#endif
+ }
+--- a/src/llvm-project/llvm/lib/Support/raw_socket_stream.cpp
++++ b/src/llvm-project/llvm/lib/Support/raw_socket_stream.cpp
+@@ -11,6 +11,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++#ifndef __RS2__ // no Unix sockets
+ #include "llvm/Support/raw_socket_stream.h"
+ #include "llvm/Config/config.h"
+ #include "llvm/Support/Error.h"
+@@ -382,3 +383,4 @@
+   }
+   return raw_fd_stream::read(Ptr, Size);
+ }
++#endif // __RS2__
