@@ -41,34 +41,80 @@ static ld exp2_ld(ld t) {
     return x87_scale(x87_2xm1(t - i) + 1, i);
 }
 
-/* fprem1 until done: x mod 2pi, near zero. */
-static ld reduce(ld x) {
-    static const ld twopi = 6.283185307179586476925286766559L;
-    ld r;
-    unsigned short sw;
-    do {
-        __asm__("fprem1; fnstsw %%ax" : "=t"(r), "=a"(sw) : "0"(x), "u"(twopi));
-        x = r;
-    } while (sw & 0x400);
-    return x;
+/* 1/(2 pi) in binary, 64 bits each, after 128 zero bits. */
+static const uint64_t inv2pi[22] = {
+    0, 0, 0x28be60db9391054a, 0x7f09d5f47d4d3770,
+    0x36d8a5664f10e410, 0x7f9458eaf7aef158, 0x6dc91b8e909374b8, 0x01924bba82746487,
+    0x3f877ac72c4a69cf, 0xba208d7d4baed121, 0x3a671c09ad17df90, 0x4e64758e60d4ce7d,
+    0x272117e2ef7e4a0e, 0xc7fe25fff7816603, 0xfbcbc462d6829b47, 0xdb4d9fb3c9f2c26d,
+    0xd3d18fd9a797fa8b, 0x5d49eeb1faf97c5e, 0xcf41ce7de294a4ba, 0x9afed7ec47e35742,
+    0x1580cc11bf1edaea, 0xfc33ef0826bd0d87,
+};
+
+/* x as q quarter turns and a rest within an eighth, in radians (Payne and
+ * Hanek): x is m * 2^e, and only the bits of 1/(2 pi) worth less than 2^-e
+ * matter, as m times the others is whole turns. Finite x below 2^1024. */
+static ld reduce(ld x, int *q) {
+    union { ld v; struct { uint64_t m; uint16_t se; } b; } u = {x};
+    int e = (u.b.se & 0x7fff) - 16383 - 63;
+    if ((u.b.se & 0x7fff) < 16383 - 1 || e > 960) { /* |x| < 1/2 */
+        *q = 0;
+        return x;
+    }
+    /* w: 256 bits of 1/(2 pi) after its first e; f: m * w, turns. */
+    int at = 128 + e, limb = at / 64, sh = at % 64;
+    uint64_t f[4];
+    unsigned __int128 carry = 0;
+    for (int i = 3; i >= 0; i--) {
+        uint64_t w = inv2pi[limb + i] << sh | (sh ? inv2pi[limb + i + 1] >> (64 - sh) : 0);
+        carry += (unsigned __int128)u.b.m * w;
+        f[i] = (uint64_t)carry;
+        carry >>= 64;
+    }
+    /* The nearest quarter, and what is left as a signed fraction. */
+    *q = (int)((f[0] + (1ULL << 61)) >> 62);
+    f[0] -= (uint64_t)*q << 62;
+    int neg = f[0] >> 63;
+    if (neg) {
+        unsigned __int128 c = 1;
+        for (int i = 3; i >= 0; i--) {
+            c += (uint64_t)~f[i];
+            f[i] = (uint64_t)c;
+            c >>= 64;
+        }
+    }
+    ld r = 0;
+    for (int i = 0; i < 4; i++)
+        r += x87_scale((ld)f[i], -64 * (i + 1));
+    r *= 6.283185307179586476925286766559L;
+    if (neg)
+        r = -r;
+    if (u.b.se & 0x8000) {
+        *q = -*q & 3;
+        r = -r;
+    }
+    return r;
 }
 
+static ld x87_sin(ld x) { ld r; __asm__("fsin" : "=t"(r) : "0"(x)); return r; }
+static ld x87_cos(ld x) { ld r; __asm__("fcos" : "=t"(r) : "0"(x)); return r; }
+
 static ld sin_ld(ld x) {
-    ld r;
-    unsigned short sw;
-    __asm__("fsin; fnstsw %%ax" : "=t"(r), "=a"(sw) : "0"(x));
-    if (sw & 0x400)
-        __asm__("fsin" : "=t"(r) : "0"(reduce(x)));
-    return r;
+    int q;
+    if (x != x)
+        return x;
+    x = reduce(x, &q);
+    ld r = q & 1 ? x87_cos(x) : x87_sin(x);
+    return q & 2 ? -r : r;
 }
 
 static ld cos_ld(ld x) {
-    ld r;
-    unsigned short sw;
-    __asm__("fcos; fnstsw %%ax" : "=t"(r), "=a"(sw) : "0"(x));
-    if (sw & 0x400)
-        __asm__("fcos" : "=t"(r) : "0"(reduce(x)));
-    return r;
+    int q;
+    if (x != x)
+        return x;
+    x = reduce(x, &q);
+    ld r = q & 1 ? x87_sin(x) : x87_cos(x);
+    return (q + 1) & 2 ? -r : r;
 }
 
 /* ---- exponentials and logarithms ---- */
@@ -346,7 +392,7 @@ double erf(double x) {
         for (int n = 0; n < 200; n++) {
             ld t = term / (2 * n + 1);
             sum += t;
-            if (t < 1e-22L * sum)
+            if (fabsl(t) < 1e-22L * sum)
                 break;
             term *= -x2 / (n + 1);
         }
