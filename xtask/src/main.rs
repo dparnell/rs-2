@@ -471,7 +471,8 @@ fn main() -> ExitCode {
         eprintln!("usage: cargo xtask build|run|iso [options]");
         return ExitCode::FAILURE;
     };
-    let o = parse(&args[1..]);
+    let words = if cmd == "diskget" { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
+    let o = parse(&args[1 + words..]);
     let ok = match cmd.as_str() {
         "build" => build(&o).is_some(),
         "ir" => !interface_repositories().is_empty(),
@@ -510,6 +511,27 @@ fn main() -> ExitCode {
             };
             std::fs::write(&out, img).unwrap();
             println!("wrote {}", out.display());
+            true
+        }
+        "diskget" => {
+            // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
+            // (as `disk --hpfs` makes), by their names into DIR.
+            let names = &args[1..1 + words];
+            let dir = o.output.clone().unwrap_or_else(|| ".".into());
+            std::fs::create_dir_all(&dir).unwrap();
+            let Some((img, paths)) = names.split_first() else {
+                eprintln!("usage: cargo xtask diskget IMAGE PATH... -o DIR");
+                return ExitCode::FAILURE;
+            };
+            for p in paths {
+                match hpfsimg::get(Path::new(img), p) {
+                    Some(d) => std::fs::write(dir.join(p.rsplit(['\\', '/']).next().unwrap()), d).unwrap(),
+                    None => {
+                        eprintln!("{p}: not in {img}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             true
         }
         _ => {

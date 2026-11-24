@@ -70,21 +70,37 @@ fn quoted(a: &str) -> String {
     s + "\"\n"
 }
 
-/// Paths as cargo writes them (rs2libc's rooted_paths): /C:/dir is C:/dir.
+/// Paths as cargo writes them (rs2libc's rooted_paths): /C:/dir is C:/dir,
+/// and so is x/C:/dir. What an option has before its path stays.
 fn unrooted(a: &str) -> String {
     let b = a.as_bytes();
-    let at = |i: usize| b.get(i) == Some(&b'/') && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) && b.get(i + 2) == Some(&b':');
-    // At the start, after -L or after =; and the last drive counts.
-    match (0..a.len()).rev().find(|&i| at(i)) {
-        Some(i) => {
-            let keep = match a.find(['=']) {
-                Some(e) if e < i => e + 1,
-                _ if a.starts_with("-L") => 2,
-                _ => 0,
-            };
-            format!("{}{}", &a[..keep], &a[i + 1..])
-        }
-        None => a.to_string(),
+    let at = |i: &usize| {
+        b[*i] == b'/' && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) && b.get(i + 2) == Some(&b':') && b.get(i + 3) == Some(&b'/')
+    };
+    let Some(first) = (0..b.len()).find(at) else { return a.to_string() };
+    let last = (0..b.len()).rev().find(at).unwrap_or(first);
+    // -Tpath, -L path, --script=path; /OUT:path (lld-link's options)
+    let keep = if a.starts_with(['-', '/']) { first } else { 0 };
+    format!("{}{}", &a[..keep], &a[last + 1..])
+}
+
+/// As rust-lld.exe, which rustc runs for other targets: LLD with the paths
+/// put right.
+fn plain(bin: &Path, args: Vec<String>) -> ! {
+    // "-flavor X" has to be on the command line; the rest may be long.
+    let (flavor, rest) = match args.first().map(String::as_str) {
+        Some("-flavor") if args.len() > 1 => args.split_at(2),
+        _ => args.split_at(0),
+    };
+    let out = std::env::temp_dir().join(format!("rs2ld{}.rsp", std::process::id()));
+    let text: String = rest.iter().map(|a| quoted(a)).collect();
+    std::fs::write(&out, text).unwrap_or_else(|e| die(format_args!("{}: {e}", out.display())));
+    let lld = bin.join("LLD.EXE");
+    let r = Command::new(&lld).args(flavor).arg(format!("@{}", out.display())).status();
+    let _ = std::fs::remove_file(&out);
+    match r {
+        Ok(s) => exit(s.code().unwrap_or(1)),
+        Err(e) => die(format_args!("{}: {e}", lld.display())),
     }
 }
 
@@ -108,6 +124,9 @@ fn main() {
     expand(std::env::args().skip(1), &mut args);
     for a in &mut args {
         *a = unrooted(a);
+    }
+    if exe.file_stem().is_some_and(|n| n.eq_ignore_ascii_case("rust-lld")) {
+        plain(bin, args);
     }
     if args.first().is_some_and(|a| a == "-flavor") {
         args.drain(..2.min(args.len()));
