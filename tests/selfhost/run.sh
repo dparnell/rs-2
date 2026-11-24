@@ -37,7 +37,16 @@ trap '[ ! -f $t/disk.save ] || cp $t/disk.save work/disk.txt' EXIT
     (cd "$t" && find rs2 -type f) | while read -r f; do printf '%s -> %s\n' "$t/$f" "$(echo "$f" | tr / '\\')"; done
 } > work/disk.txt
 cargo xtask disk --hpfs --size 1500 -o "$t/d.img" > /dev/null
-cargo xtask run --headless --timeout "${TIMEOUT:-3000}" --mem 8G --smp "${SMP:-4}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
+cargo xtask run --headless --timeout "${TIMEOUT:-3600}" --mem 8G --smp "${SMP:-4}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building
 cargo xtask diskget "$t/d.img" 'rs2\target\x86_64-unknown-uefi\checked\rs2-boot.efi' 'rs2\target\x86_64-unknown-none\checked\rs2-kernel' -o "$t/out"
 ls -l "$t/out"
+# rs2 on what it built.
+boot() {
+    cargo xtask run --prebuilt "$t/out" --headless --timeout "$2" --mem 6G --init "RS2\\$1.EXE" > "$t/$1.log" 2>&1
+    grep -aE '^FAIL|passed|checks,|w16test done' "$t/$1.log"
+    grep -aq "$3" "$t/$1.log"
+}
+boot CLIBTEST 100 ' 0 failures'
+boot STDTST64 200 ' 0 failed'
+boot W16TEST 200 'done: 0 failure'

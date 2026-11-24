@@ -151,6 +151,9 @@ struct Opts {
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
     hpfs: bool,
+    /// The directory with the rs2-boot.efi and rs2-kernel to use instead
+    /// of building them.
+    prebuilt: Option<PathBuf>,
     fat32: bool,
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
     usb_kbd: bool,
@@ -232,6 +235,7 @@ fn parse(args: &[String]) -> Opts {
         boot_usb: false,
         dist: false,
         hpfs: false,
+        prebuilt: None,
         fat32: false,
         usb_kbd: false,
         bare: false,
@@ -308,6 +312,10 @@ fn parse(args: &[String]) -> Opts {
             "--boot-usb" => o.boot_usb = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
+            "--prebuilt" => {
+                i += 1;
+                o.prebuilt = Some(PathBuf::from(&args[i]));
+            }
             "--fat32" => o.fat32 = true,
             "--usb-kbd" => o.usb_kbd = true,
             "--bare" => {
@@ -563,8 +571,13 @@ fn copy(from: &Path, to: &Path) {
 const CMDLINE_MAX: usize = 1024;
 
 fn build(o: &Opts) -> Option<PathBuf> {
-    let boot = cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?;
-    let kernel = cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?;
+    let (boot, kernel) = match &o.prebuilt {
+        Some(d) => (d.clone(), d.clone()),
+        None => (
+            cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?,
+            cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?,
+        ),
+    };
     let esp = root().join("work/esp");
     let _ = std::fs::remove_dir_all(&esp);
     copy(&boot.join("rs2-boot.efi"), &esp.join("EFI/BOOT/BOOTX64.EFI"));

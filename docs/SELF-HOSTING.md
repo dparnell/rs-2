@@ -101,7 +101,11 @@ programs of rs2's own as well.
    toolchain" below.
 4. `rustc`: done (1.100.0, with its own LLVM 23). See "rustc" below.
 5. `cargo`: done, offline. See "cargo" below.
-6. `cargo xtask iso` on rs2, with the shell scripts gone.
+6. The boot loader and the kernel built on rs2: done. See "rs2 on rs2"
+   below.
+7. `cargo xtask iso` on rs2, with the shell scripts gone: the 32-bit
+   userland (RS2-LD.EXE knows 64-bit programs only), userland-std's
+   dependencies vendored, the 64-bit C libraries.
 
 ## The C and C++ toolchain
 
@@ -202,6 +206,24 @@ network and git.
 
 `tests/cargo64/run.sh` builds, runs, tests, changes and cleans a workspace
 with crates/inifile in it, on rs2.
+
+## rs2 on rs2
+
+`tests/selfhost/run.sh` puts the toolchain and the committed sources on an
+HPFS disk, with the dependencies in vendor (`cargo vendor`; the main
+workspace has one, libm), and on rs2 runs
+
+```text
+cargo build --offline --locked -p rs2-boot --target x86_64-unknown-uefi --profile checked
+cargo build --offline --locked -p rs2-kernel --target x86_64-unknown-none --profile checked
+```
+
+then boots rs2 with the results (`xtask run --prebuilt DIR`) and runs
+CLIBTEST, STDTST64 and W16TEST on it. The linker for these targets is
+rust-lld.exe, which is RS2-LD.EXE under that name: LLD.EXE with cargo's
+paths put right. In QEMU without hardware virtualisation (4 CPUs emulated
+on an Apple silicon Mac, where the same build takes 13 seconds) the boot
+loader takes 19 seconds and the kernel 51 minutes.
 
 ## Needed by either route
 
