@@ -387,7 +387,10 @@ fn write_handle(h: u32, b: &[u8]) -> ssize_t {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn write(fd: c_int, buf: *const c_void, n: size_t) -> ssize_t {
     match classify(fd) {
-        Some(Fd::File(h)) => write_handle(h, unsafe { core::slice::from_raw_parts(buf as *const u8, n.min(MAX_IO)) }),
+        Some(Fd::File(h)) => {
+            let b = unsafe { core::slice::from_raw_parts(buf as *const u8, n.min(MAX_IO)) };
+            if h <= 2 { crate::process::not_spawning(|| write_handle(h, b)) } else { write_handle(h, b) }
+        }
         Some(Fd::Socket(_)) => unsafe { crate::net::send(fd, buf, n, 0) },
         Some(Fd::Dir(_)) => fail(libc::EISDIR) as ssize_t,
         None => fail(libc::EBADF) as ssize_t,

@@ -184,6 +184,14 @@ fn quote(out: &mut Vec<u8>, a: &[u8]) {
 }
 
 static SPAWN: SpinLock<()> = SpinLock::new(());
+static SPAWNED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Runs `f`, which writes to a standard handle, not while `spawn` has
+/// redirected it for a child: another thread's output would go there.
+pub fn not_spawning<T>(f: impl FnOnce() -> T) -> T {
+    let _g = SPAWNED.load(core::sync::atomic::Ordering::Acquire).then(|| SPAWN.lock());
+    f()
+}
 
 unsafe fn spawn(
     pid: *mut c_int,
@@ -229,6 +237,7 @@ unsafe fn spawn(
         return libc::E2BIG;
     }
 
+    SPAWNED.store(true, core::sync::atomic::Ordering::Release);
     let _g = SPAWN.lock();
     // Apply the file actions to this process, remembering how to undo them.
     let mut saved: Vec<(c_int, Option<u32>)> = Vec::new();
