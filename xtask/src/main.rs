@@ -479,7 +479,7 @@ fn main() -> ExitCode {
         eprintln!("usage: cargo xtask build|run|iso [options]");
         return ExitCode::FAILURE;
     };
-    let words = if cmd == "diskget" { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
+    let words = if cmd == "diskget" || cmd == "userland" { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
     let o = parse(&args[1 + words..]);
     let ok = match cmd.as_str() {
         "build" => build(&o).is_some(),
@@ -520,6 +520,12 @@ fn main() -> ExitCode {
             std::fs::write(&out, img).unwrap();
             println!("wrote {}", out.display());
             true
+        }
+        "userland" => {
+            // userland [PACKAGE...]: the 32-bit programs (LX, work/userland);
+            // with no names userland-std's too.
+            let only = &args[1..1 + words];
+            build_userland32(only).is_some() && (!only.is_empty() || build_userland_std().is_some())
         }
         "diskget" => {
             // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
@@ -996,10 +1002,72 @@ const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsr
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
+    let mut files = build_userland32(&[])?;
+    let ul = root().join("userland");
+    let out_dir = root().join("work/userland");
+    check_dll_ranges(&ul)?;
+    // rs2's COMMAND.COM for DOS sessions: the stub of crates/dos.
+    let command = out_dir.join("COMMAND.COM");
+    std::fs::write(&command, dos::shell::command_com()).unwrap();
+    files.push((command, "OS2\\MDOS\\COMMAND.COM".to_string()));
+    for (src, dest) in HELP_FILES {
+        let path = ul.join(src);
+        let text = std::fs::read(&path).ok()?;
+        // `:artwork.` files: beside the IPF source, or made here.
+        let dir = path.parent().unwrap().to_path_buf();
+        let load = |name: &[u8]| -> Option<Vec<u8>> {
+            let name = String::from_utf8_lossy(name).into_owned();
+            if name.eq_ignore_ascii_case("HMART.MET") {
+                return Some(hmtest_metafile());
+            }
+            std::fs::read(dir.join(&name)).ok()
+        };
+        let help = match ipf::compile::compile_with(&text, !dest.ends_with(".INF"), &load) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
+        std::fs::write(&out, help).unwrap();
+        files.push((out, dest.to_string()));
+    }
+    for (src, dest, cps, lang) in MSG_FILES {
+        let path = ul.join("msg").join(src);
+        let text = std::fs::read(&path).ok()?;
+        let name = dest.rsplit('\\').next().unwrap();
+        let opts = msgf::Options { code_pages: cps.to_vec(), language: *lang, dbcs: Vec::new(), name: name.to_ascii_lowercase().into_bytes() };
+        let msg = match msgf::compile(&text, &opts) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(name);
+        std::fs::write(&out, msg).unwrap();
+        files.push((out, dest.to_string()));
+    }
+    let ini = out_dir.join("MMPMMMIO.INI");
+    std::fs::write(&ini, mmio_ini(&std::fs::read_to_string(ul.join("mmio/ioprocs.txt")).ok()?)).unwrap();
+    files.push((ini, "MMOS2\\MMPMMMIO.INI".to_string()));
+    for (src, dest) in APP_DATA {
+        files.push((ul.join(src), dest.to_string()));
+    }
+    files.extend(build_userland_std()?);
+    files.extend(build_userland_std64()?);
+    files.extend(build_userland64()?);
+    Some(files)
+}
+
+/// The 32-bit programs of userland/ (all, or the packages named) as LX.
+fn build_userland32(only: &[String]) -> Option<image::FileList> {
     let ul = root().join("userland");
     let status = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
         .current_dir(&ul)
         .args(["build", "--release"])
+        .args(only.iter().flat_map(|p| ["-p", p]))
         .env_remove("CARGO_TARGET_DIR")
         .status()
         .ok()?;
@@ -1010,6 +1078,9 @@ fn build_userland() -> Option<image::FileList> {
     std::fs::create_dir_all(&out_dir).unwrap();
     let mut files = Vec::new();
     for (bin, dest) in USER_PROGRAMS {
+        if !only.is_empty() && !only.iter().any(|o| o == bin) {
+            continue;
+        }
         let elf = ul.join("target/i686-unknown-linux-gnu/release").join(bin);
         let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
         let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
@@ -1098,59 +1169,6 @@ fn build_userland() -> Option<image::FileList> {
             files.push((lx, "RS2\\TESTDLLN.DLL".to_string()));
         }
     }
-    check_dll_ranges(&ul)?;
-    // rs2's COMMAND.COM for DOS sessions: the stub of crates/dos.
-    let command = out_dir.join("COMMAND.COM");
-    std::fs::write(&command, dos::shell::command_com()).unwrap();
-    files.push((command, "OS2\\MDOS\\COMMAND.COM".to_string()));
-    for (src, dest) in HELP_FILES {
-        let path = ul.join(src);
-        let text = std::fs::read(&path).ok()?;
-        // `:artwork.` files: beside the IPF source, or made here.
-        let dir = path.parent().unwrap().to_path_buf();
-        let load = |name: &[u8]| -> Option<Vec<u8>> {
-            let name = String::from_utf8_lossy(name).into_owned();
-            if name.eq_ignore_ascii_case("HMART.MET") {
-                return Some(hmtest_metafile());
-            }
-            std::fs::read(dir.join(&name)).ok()
-        };
-        let help = match ipf::compile::compile_with(&text, !dest.ends_with(".INF"), &load) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("{}: {e}", path.display());
-                return None;
-            }
-        };
-        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
-        std::fs::write(&out, help).unwrap();
-        files.push((out, dest.to_string()));
-    }
-    for (src, dest, cps, lang) in MSG_FILES {
-        let path = ul.join("msg").join(src);
-        let text = std::fs::read(&path).ok()?;
-        let name = dest.rsplit('\\').next().unwrap();
-        let opts = msgf::Options { code_pages: cps.to_vec(), language: *lang, dbcs: Vec::new(), name: name.to_ascii_lowercase().into_bytes() };
-        let msg = match msgf::compile(&text, &opts) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("{}: {e}", path.display());
-                return None;
-            }
-        };
-        let out = out_dir.join(name);
-        std::fs::write(&out, msg).unwrap();
-        files.push((out, dest.to_string()));
-    }
-    let ini = out_dir.join("MMPMMMIO.INI");
-    std::fs::write(&ini, mmio_ini(&std::fs::read_to_string(ul.join("mmio/ioprocs.txt")).ok()?)).unwrap();
-    files.push((ini, "MMOS2\\MMPMMMIO.INI".to_string()));
-    for (src, dest) in APP_DATA {
-        files.push((ul.join(src), dest.to_string()));
-    }
-    files.extend(build_userland_std()?);
-    files.extend(build_userland_std64()?);
-    files.extend(build_userland64()?);
     Some(files)
 }
 
