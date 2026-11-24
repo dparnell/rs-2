@@ -61,6 +61,8 @@ cp "$out/bin/RS2-LD.EXE" "$out/bin/rust-lld.exe"
 cp "$out/bin/RS2-LD.EXE" "$out/bin/rs2-ld32.exe"
 mkdir -p "$out/lib/rs2-32"
 cp "$std"/syslib/*.a "$std/link.ld" "$out/lib/rs2-32/"
+# (headers for the C code of userland-std's crates: userland-std/cc.sh)
+cp -R "$std/include" "$out/lib/rs2-32/"
 (cd "$out" && find . -type f | sed 's|^\./||' | sort) | while read -r f; do
     printf '%s -> sdk\\%s\n' "$out/$f" "$(echo "$f" | tr / '\\')"
 done > "$out.txt"

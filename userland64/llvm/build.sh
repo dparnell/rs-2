@@ -2,7 +2,7 @@
 # LLVM's clang and lld for rs2 (docs/SELF-HOSTING.md): 64-bit programs, cross-built
 # with cc64.sh through userland64/cmake.
 #
-#   build.sh [TARGET...]      (clang and lld by default; results in
+#   build.sh [TARGET...]      (clang, lld and llvm-ar by default; results in
 #                              work/llvm/rs2/bin, stripped in target/llvm64)
 #
 # Needs CMake, Ninja, clang and about 10 GB. LLVM's source comes from
@@ -15,7 +15,7 @@ dir=${LLVM_DIR:-$root/work/llvm}
 ver=21.1.8
 tarsha=4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
 src=$dir/llvm-project-$ver.src
-[ $# -gt 0 ] || set -- clang lld
+[ $# -gt 0 ] || set -- clang lld llvm-ar
 mkdir -p "$dir"
 # The source is unpacked again when the patch changes.
 if command -v sha256sum > /dev/null; then sha=sha256sum; else sha="shasum -a 256"; fi
@@ -47,7 +47,7 @@ triple=x86_64-unknown-rs2
 ninja -C "$dir/rs2" "$@"
 strip=$(ls -d "$(rustc --print sysroot)"/lib/rustlib/*/bin/llvm-objcopy | head -1)
 mkdir -p "$root/target/llvm64"
-for f in clang lld; do
+for f in clang lld llvm-ar; do
     [ ! -f "$dir/rs2/bin/$f.EXE" ] || "$strip" --strip-all "$dir/rs2/bin/$f.EXE" "$root/target/llvm64/$(echo $f | tr '[:lower:]' '[:upper:]').EXE"
 done
 ls -l "$root/target/llvm64"
