@@ -56,4 +56,4 @@ boot() {
 }
 boot STDTEST 120 ' 0 failed'
 boot W16TEST 200 'done: 0 failure'
-boot APITEST 120 '0 fail'
+boot APITEST 120 'done: 0 failure'
