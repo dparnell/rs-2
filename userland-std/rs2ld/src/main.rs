@@ -99,7 +99,10 @@ fn ld32(bin: &Path, mut args: Vec<String>) -> ! {
     if !args.first().is_some_and(|a| a == "-flavor") {
         args.splice(0..0, ["-flavor".into(), "gnu".into()]);
     }
-    args.splice(2..2, ["-L".into(), lib.to_string_lossy().into_owned(), "-T".into(), lib.join("link.ld").to_string_lossy().into_owned()]);
+// (userland's programs have their own script.)
+    if !args.iter().any(|a| a.starts_with("-T")) {
+            args.splice(2..2, ["-L".into(), lib.to_string_lossy().into_owned(), "-T".into(), lib.join("link.ld").to_string_lossy().into_owned()]);
+    }
     plain(bin, args)
 }
 
