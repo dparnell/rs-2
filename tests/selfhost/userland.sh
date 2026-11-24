@@ -51,7 +51,7 @@ cargo xtask diskget "$t/d.img" 'rs2\work\userland\*' -o "$t/out/userland"
 ls "$t/out/userland" | wc -l
 [ $# = 0 ] || exit 0
 # Everything, userland-std's programs too: STDTEST must be this build's.
-for f in STDTEST W16TEST APITEST WEB WEBTEXT; do [ -f "$t/out/userland/$f.EXE" ]; done
+for f in STDTEST.EXE APITEST.EXE WIN16.DLL WEB.EXE WEBTEXT.EXE; do [ -f "$t/out/userland/$f" ] || { echo "missing: $f"; exit 1; }; done
 # rs2 with what it built.
 boot() {
     cargo xtask run --prebuilt "$t/out" --headless --timeout "$2" --mem 6G --init "RS2\\$1.EXE" > "$t/$1.log" 2>&1
