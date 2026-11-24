@@ -3,6 +3,7 @@
 # linked and converted to LX there, then rs2 booted with it. Needs what
 # run.sh does.
 #
+#   userland.sh --std             (userland-std's programs only, not converted)
 #   userland.sh [PACKAGE...]      (userland/'s packages; all of them and
 #                                 userland-std's programs by default: hours
 #                                 in an emulator)
@@ -30,7 +31,12 @@ say 'set CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=rs2-ld32.exe'
 say 'set CC_i686_unknown_linux_gnu=E:/sdk/bin/CLANG.EXE --target=i686-unknown-linux-gnu -ffreestanding -fno-stack-protector -isystem E:/sdk/lib/rs2-32/include'
 say 'set AR_i686_unknown_linux_gnu=E:/sdk/bin/LLVM-AR.EXE'
 say 'echo begin'
-say "cargo run -p xtask -- userland $*"
+if [ "$1" = --std ]; then
+    say 'cd userland-std'
+    say 'cargo build --release'
+else
+    say "cargo run -p xtask -- userland $*"
+fi
 say 'if errorlevel 1 echo build failed'
 say 'dir work\userland'
 say 'echo end'
@@ -47,6 +53,7 @@ cargo xtask run --headless --timeout "${TIMEOUT:-9000}" --mem 8G --smp "${SMP:-8
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building
 grep -aq '^end' "$t/log"
 if grep -aqE '^error|^build failed' "$t/log"; then exit 1; fi
+[ "$1" != --std ] || exit 0
 cargo xtask diskget "$t/d.img" 'rs2\work\userland\*' -o "$t/out/userland"
 ls "$t/out/userland" | wc -l
 [ $# = 0 ] || exit 0
