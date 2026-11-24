@@ -100,8 +100,7 @@ programs of rs2's own as well.
    symbol that is not `MODULE.name` is an error). See "The C and C++
    toolchain" below.
 4. `rustc`: done (1.100.0, with its own LLVM 23). See "rustc" below.
-5. `cargo`, offline and without curl and libgit2 as far as it goes.
-   Milestone: `cargo build` of a host-tested crate.
+5. `cargo`: done, offline. See "cargo" below.
 6. `cargo xtask iso` on rs2, with the shell scripts gone.
 
 ## The C and C++ toolchain
@@ -173,6 +172,36 @@ linkers for the other targets (kernel, boot loader, 32-bit userland).
 `tests/rustc64/run.sh` compiles, links and runs programs there, a proc
 macro and its user, and a cdylib and its user, and compares objects with
 the installed rustc's: the same bytes, regex-syntax's 690 KB included.
+
+## cargo
+
+`userland64/cargo/build.sh` cross-builds cargo from rustc's source (after
+userland64/rustc/build.sh) with `rs2.patch`; `userland64/rustc/sdk.sh` puts
+it in the tree. `cargo build`, `run`, `test` and `check` work with path
+dependencies, build scripts and proc macros, offline: set CARGO_HOME (or
+HOME) and use `--offline` with vendored dependencies.
+
+- **RSCARGO.DLL** has cargo's C libraries: SQLite (with lock files, as its
+  byte range locks are changed in ways OS/2 refuses), and stand-ins for
+  curl and libgit2, which fail when cargo needs them. So no registry, no
+  git dependencies, and `cargo new` has to be `--vcs none`.
+- **Paths.** cargo has to tell absolute paths from others and makes URLs
+  of them, so it calls rs2libc's `rooted_paths`: the current directory and
+  the like are `/C:/dir`, as arguments and CARGO_HOME become. All of
+  rs2libc's and LIBC64's calls take such paths, and RS2-LD.EXE too. Lists
+  of paths (PATH) have semicolons.
+- **Processes.** There is no fork, so rustc does not share cargo's
+  jobserver: each rustc has its own. Arguments and environment share 64 KB;
+  rs2libc says E2BIG above that, and cargo and rustc use argument files.
+- **Open files.** rs2libc deletes a file the program itself has open when
+  it is closed (rustc's incremental locks), where Unix would at once.
+- rustc adds `.exe` to programs' names there.
+
+Not there yet: rustdoc (so `cargo test` needs `--lib --bins --tests`), the
+network and git.
+
+`tests/cargo64/run.sh` builds, runs, tests, changes and cleans a workspace
+with crates/inifile in it, on rs2.
 
 ## Needed by either route
 

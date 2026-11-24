@@ -1,6 +1,7 @@
 include!(concat!(env!("OUT_DIR"), "/gen.rs"));
 
 fn main() {
+    assert!(inifile::parse(b"").profile.apps.is_empty());
     println!("app: {} {} {} {:?}", GENERATED, mac::twice!(21), env!("FROM_BUILD"), std::env::args().skip(1).collect::<Vec<_>>());
 }
 

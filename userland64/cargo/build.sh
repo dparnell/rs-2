@@ -23,6 +23,14 @@ if [ "$(cat "$c/.rs2-patched" 2> /dev/null)" != "$patch" ]; then
     for n in curl-0.4.50 curl-sys-0.4.90+curl-8.21.0 libgit2-sys-0.18.7+1.9.6 libsqlite3-sys-0.38.1 libz-sys-1.1.29; do
         cp -R "$src/vendor/$n" "$c/${n%%-[0-9]*}"
     done
+    # The C libraries are in RSCARGO.DLL: nothing to build for them.
+    for n in curl-sys libgit2-sys libz-sys; do echo 'fn main() {}' > "$c/$n/build.rs"; done
+    cat > "$c/libsqlite3-sys/build.rs" <<'EOF'
+fn main() {
+    let out = std::env::var_os("OUT_DIR").unwrap();
+    std::fs::copy("sqlite3/bindgen_bundled_version.rs", std::path::Path::new(&out).join("bindgen.rs")).unwrap();
+}
+EOF
     (cd "$c" && patch -p1 < "$here/rs2.patch" && echo "$patch" > .rs2-patched)
 fi
 mkdir -p "$c/.cargo"
