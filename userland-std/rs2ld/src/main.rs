@@ -84,6 +84,28 @@ fn unrooted(a: &str) -> String {
     format!("{}{}", &a[..keep], &a[last + 1..])
 }
 
+/// As rs2-ld32.exe, the linker for userland-std's 32-bit programs: what
+/// lld.sh does for them.
+fn ld32(bin: &Path, mut args: Vec<String>) -> ! {
+    if args.iter().any(|a| a == "-shared") {
+        // A cdylib that a crate asks for besides its rlib: never used.
+        let out = args.iter().position(|a| a == "-o").and_then(|i| args.get(i + 1));
+        match out.map(|o| std::fs::write(o, "")) {
+            Some(Ok(())) => exit(0),
+            e => die(format_args!("{e:?}")),
+        }
+    }
+    let lib = bin.parent().unwrap_or(Path::new(".")).join("lib/rs2-32");
+    if !args.first().is_some_and(|a| a == "-flavor") {
+        args.splice(0..0, ["-flavor".into(), "gnu".into()]);
+    }
+    // (userland's programs have their own script.)
+    if !args.iter().any(|a| a.starts_with("-T")) {
+        args.splice(2..2, ["-L".into(), lib.to_string_lossy().into_owned(), "-T".into(), lib.join("link.ld").to_string_lossy().into_owned()]);
+    }
+    plain(bin, args)
+}
+
 /// As rust-lld.exe, which rustc runs for other targets: LLD with the paths
 /// put right.
 fn plain(bin: &Path, args: Vec<String>) -> ! {
@@ -127,6 +149,9 @@ fn main() {
     }
     if exe.file_stem().is_some_and(|n| n.eq_ignore_ascii_case("rust-lld")) {
         plain(bin, args);
+    }
+    if exe.file_stem().is_some_and(|n| n.eq_ignore_ascii_case("rs2-ld32")) {
+        ld32(bin, args);
     }
     if args.first().is_some_and(|a| a == "-flavor") {
         args.drain(..2.min(args.len()));

@@ -57,7 +57,7 @@ trap '[ ! -f $t/disk.save ] || cp $t/disk.save work/disk.txt' EXIT
     echo "$here/hello.rs -> tmp\\keep"
     (cd "$t" && find src host -type f) | while read -r f; do printf '%s -> %s\n' "$t/$f" "$(echo "$f" | tr / '\\')"; done
 } > work/disk.txt
-cargo xtask disk --hpfs --size 800 -o "$t/d.img" > /dev/null
+cargo xtask disk --hpfs --size 1200 -o "$t/d.img" > /dev/null
 cargo xtask run --headless --timeout "${TIMEOUT:-400}" --mem 6G --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\src\build.cmd' > "$t/log" 2>&1
 sed -n '/^begin/,$p' "$t/log"
 has() { grep -aq "$1" "$t/log" || { echo "run.sh: missing: $1" >&2; exit 1; }; }

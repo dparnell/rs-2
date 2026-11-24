@@ -3,7 +3,7 @@
 //! directory structures, the InDOS flag) lives in guest memory in DOS's
 //! layout; the rest (open files, searches) is kept here.
 
-mod con;
+mod conio;
 mod crit;
 mod fcb;
 mod file;

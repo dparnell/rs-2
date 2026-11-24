@@ -54,4 +54,4 @@ has 'Finished `release` profile'
 has 'could not compile `mac`'
 has 'Removed '
 grep -aq '^end' "$t/log"
-! grep -aq 'test result: FAILED' "$t/log"
+if grep -aq 'test result: FAILED' "$t/log"; then exit 1; fi

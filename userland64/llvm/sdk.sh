@@ -4,7 +4,7 @@
 #
 #   sdk.sh [DIR]              (target/sdk64 by default)
 #
-#   DIR/bin      CLANG.EXE, LLD.EXE, clang++.EXE (runs CLANG.EXE)
+#   DIR/bin      CLANG.EXE, LLD.EXE, LLVM-AR.EXE, clang++.EXE (runs CLANG.EXE)
 #   DIR/include  rs2's C headers and OS/2 headers; c++/: libc++'s
 #   DIR/lib      start-up code, import library, LIBCXX64.DLL, link64.ld,
 #                static libraries; clang/VER/include: clang's headers
@@ -27,7 +27,7 @@ $cc --libcxx
 $cc --static --libcxx
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib" "$out/include/c++/config" "$out/include/c++/v1" "$out/include/c++/abi"
-for f in CLANG LLD; do
+for f in CLANG LLD LLVM-AR; do
     [ ! -f "$root/target/llvm64/$f.EXE" ] || cp "$root/target/llvm64/$f.EXE" "$out/bin/"
 done
 $cc -o "$out/bin/clang++.EXE" "$here/clangxx.c"
