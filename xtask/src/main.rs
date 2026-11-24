@@ -151,8 +151,8 @@ struct Opts {
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
     hpfs: bool,
-    /// The directory with the rs2-boot.efi and rs2-kernel to use instead
-    /// of building them.
+    /// The directory with what to use instead of building it:
+    /// rs2-boot.efi and rs2-kernel, and in userland/ the 32-bit programs.
     prebuilt: Option<PathBuf>,
     fat32: bool,
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
@@ -529,7 +529,8 @@ fn main() -> ExitCode {
         }
         "diskget" => {
             // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
-            // (as `disk --hpfs` makes), by their names into DIR.
+            // (as `disk --hpfs` makes), by their names into DIR;
+            // PATH\* is a directory's files.
             let names = &args[1..1 + words];
             let dir = o.output.clone().unwrap_or_else(|| ".".into());
             std::fs::create_dir_all(&dir).unwrap();
@@ -538,6 +539,12 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             };
             for p in paths {
+                if let Some(d) = p.strip_suffix("\\*") {
+                    for (n, data) in hpfsimg::get_all(Path::new(img), d).unwrap_or_default() {
+                        std::fs::write(dir.join(n), data).unwrap();
+                    }
+                    continue;
+                }
                 match hpfsimg::get(Path::new(img), p) {
                     Some(d) => std::fs::write(dir.join(p.rsplit(['\\', '/']).next().unwrap()), d).unwrap(),
                     None => {
@@ -578,8 +585,8 @@ const CMDLINE_MAX: usize = 1024;
 
 fn build(o: &Opts) -> Option<PathBuf> {
     let (boot, kernel) = match &o.prebuilt {
-        Some(d) => (d.clone(), d.clone()),
-        None => (
+        Some(d) if d.join("rs2-kernel").exists() => (d.clone(), d.clone()),
+        _ => (
             cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?,
             cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?,
         ),
@@ -664,6 +671,16 @@ fn boot_volume(o: &Opts, esp: &Path) -> Option<Option<image::FileList>> {
     files.extend(win16_tests());
     let Some(four) = four_os2(o.dist) else { return Some(None) };
     files.extend(four);
+    // Programs built elsewhere (on rs2) instead of these.
+    if let Some(d) = &o.prebuilt {
+        for (src, dest) in &mut files {
+            let p = d.join("userland").join(dest.rsplit('\\').next().unwrap());
+            let ours = src.starts_with(root().join("work/userland")) && !src.starts_with(root().join("work/userland/64"));
+            if ours && p.exists() {
+                *src = p;
+            }
+        }
+    }
     files.extend(firmware());
     if !o.dist {
         files.extend(dos_tests());
@@ -1061,6 +1078,12 @@ fn build_userland() -> Option<image::FileList> {
     Some(files)
 }
 
+/// A program cargo built: rustc on rs2 adds .exe.
+fn program(p: PathBuf) -> PathBuf {
+    let exe = p.with_extension("exe");
+    if !p.exists() && exe.exists() { exe } else { p }
+}
+
 /// The 32-bit programs of userland/ (all, or the packages named) as LX.
 fn build_userland32(only: &[String]) -> Option<image::FileList> {
     let ul = root().join("userland");
@@ -1081,7 +1104,7 @@ fn build_userland32(only: &[String]) -> Option<image::FileList> {
         if !only.is_empty() && !only.iter().any(|o| o == bin) {
             continue;
         }
-        let elf = ul.join("target/i686-unknown-linux-gnu/release").join(bin);
+        let elf = program(ul.join("target/i686-unknown-linux-gnu/release").join(bin));
         let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
         let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
         cmd.current_dir(root()).args(["run", "-q", "--release", "-p", "elf2lx", "--"]).arg(&elf).arg(&lx);
@@ -1266,7 +1289,7 @@ fn check_dll_ranges(ul: &Path) -> Option<()> {
         if !(dest.ends_with(".DLL") || dest.ends_with(".QPR") || dest.ends_with(".DRV")) || ranges.iter().any(|r: &(u32, u32, &str)| r.2 == *bin) {
             continue;
         }
-        let elf = std::fs::read(ul.join("target/i686-unknown-linux-gnu/release").join(bin)).ok()?;
+        let elf = std::fs::read(program(ul.join("target/i686-unknown-linux-gnu/release").join(bin))).ok()?;
         if let Some((start, end)) = elf32_alloc_range(&elf) {
             ranges.push((start, end, *bin));
         }
@@ -1376,7 +1399,7 @@ fn build_userland_std() -> Option<image::FileList> {
     let out_dir = root().join("work/userland");
     let mut files = Vec::new();
     for (bin, dest, pm) in STD_PROGRAMS {
-        let elf = dir.join("target/i686-unknown-linux-gnu/release").join(bin);
+        let elf = program(dir.join("target/i686-unknown-linux-gnu/release").join(bin));
         let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
         let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
         // A 4 MB stack for thread 1 (Linux gives programs 8 MB).

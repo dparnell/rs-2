@@ -85,3 +85,22 @@ pub fn get(img: &std::path::Path, path: &str) -> Option<Vec<u8>> {
     data.truncate(n);
     Some(data)
 }
+
+/// The files of a directory there.
+pub fn get_all(img: &std::path::Path, dir: &str) -> Option<Vec<(String, Vec<u8>)>> {
+    let img = std::fs::read(img).ok()?;
+    let part = MemDisk(RefCell::new(img[2048 * 512..].to_vec()));
+    let mut vol = hpfs::Volume::mount(part).ok()?;
+    let d = vol.lookup(&dir.replace('/', "\\")).ok()?;
+    let mut v = Vec::new();
+    for e in vol.read_dir(&d).ok()? {
+        if e.is_dir() {
+            continue;
+        }
+        let mut data = vec![0; e.size as usize];
+        let n = vol.read(&e, 0, &mut data).ok()?;
+        data.truncate(n);
+        v.push((e.name.clone(), data));
+    }
+    Some(v)
+}

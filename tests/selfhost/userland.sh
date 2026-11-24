@@ -26,6 +26,8 @@ printf '@echo off\r\nE:\r\ncd \\rs2\r\nset PATH=E:\\sdk\\bin;%%PATH%%\r\nset BEG
 say() { printf '%s\r\n' "$1" >> "$cmd"; }
 # userland-std's config names shell scripts for these.
 say 'set CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=rs2-ld32.exe'
+say 'set CC_i686_unknown_linux_gnu=E:/sdk/bin/CLANG.EXE --target=i686-unknown-linux-gnu -ffreestanding -fno-stack-protector -isystem E:/sdk/lib/rs2-32/include'
+say 'set AR_i686_unknown_linux_gnu=E:/sdk/bin/LLVM-AR.EXE'
 say 'echo begin'
 say "cargo run -p xtask -- userland $*"
 say 'dir work\userland'
@@ -42,3 +44,16 @@ cargo xtask disk --hpfs --size 3000 -o "$t/d.img" > /dev/null
 cargo xtask run --headless --timeout "${TIMEOUT:-9000}" --mem 8G --smp "${SMP:-8}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building
 grep -aq '^end' "$t/log"
+! grep -aq '^error' "$t/log"
+cargo xtask diskget "$t/d.img" 'rs2\work\userland\*' -o "$t/out/userland"
+ls "$t/out/userland" | wc -l
+[ $# = 0 ] || exit 0
+# rs2 with what it built.
+boot() {
+    cargo xtask run --prebuilt "$t/out" --headless --timeout "$2" --mem 6G --init "RS2\\$1.EXE" > "$t/$1.log" 2>&1
+    grep -aE '^FAIL|passed|checks,|w16test done|failure' "$t/$1.log" | tail -5
+    grep -aq "$3" "$t/$1.log"
+}
+boot STDTEST 120 ' 0 failed'
+boot W16TEST 200 'done: 0 failure'
+boot APITEST 120 '0 fail'
