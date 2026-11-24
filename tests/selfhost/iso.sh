@@ -22,12 +22,21 @@ else
 fi
 say 'if errorlevel 1 echo build failed'
 say 'dir work\userland\64'
+[ "$1" = --64 ] || TIMEOUT=${TIMEOUT:-24000}
 build
 cargo xtask diskget "$t/d.img" 'rs2\work\userland\64\*' -o "$t/out/userland64"
 ls "$t/out/userland64"
 for f in LIBC64.DLL LIBCXX64.DLL CXXTEST.EXE STDTST64.EXE STDTRUST.EXE STDTRLIB.DLL PMWIN.DLL HELLO64.EXE; do
     [ -f "$t/out/userland64/$f" ] || { echo "missing: $f"; exit 1; }
 done
+if [ "$1" != --64 ]; then
+    # The rest of it: the kernel, the boot loader, the 32-bit programs.
+    cargo xtask diskget "$t/d.img" 'rs2.iso' 'rs2\target\x86_64-unknown-none\release\rs2-kernel' \
+        'rs2\target\x86_64-unknown-uefi\release\rs2-boot.efi' -o "$t/out"
+    cargo xtask diskget "$t/d.img" 'rs2\work\userland\*' -o "$t/out/userland"
+    for f in STDTEST.EXE APITEST.EXE WIN16.DLL WEB.EXE; do [ -f "$t/out/userland/$f" ] || { echo "missing: $f"; exit 1; }; done
+    ls -l "$t/out/rs2.iso"
+fi
 # rs2 with those programs.
 boot() {
     cargo xtask run --prebuilt "$t/out" --headless --timeout "$2" --mem 6G --init "RS2\\$1.EXE${4:+ $4}" > "$t/$1.log" 2>&1
@@ -43,5 +52,10 @@ boot STDTST64 120 ' 0 failed'
 boot PMDEMO64 90 'done: 0 failure' /SELFTEST
 boot PMSTD64 90 'done: 0 failure' /SELFTEST
 [ "$1" != --64 ] || exit 0
-cargo xtask diskget "$t/d.img" 'rs2.iso' -o "$t/out"
-ls -l "$t/out/rs2.iso"
+boot STDTEST 120 ' 0 failed'
+boot W16TEST 200 'done: 0 failure'
+boot APITEST 120 'done: 0 failure'
+# The ISO itself.
+cargo xtask run --iso "$t/out/rs2.iso" --headless --timeout 150 --mem 4G --screenshot "$t/iso.png" > "$t/iso.log" 2>&1
+if grep -aqiE 'panic|exception' "$t/iso.log"; then echo "the ISO's boot"; exit 1; fi
+grep -aq 'smp: ' "$t/iso.log"
