@@ -73,3 +73,15 @@ pub fn disk(files: &FileList, label: &str, size_mb: u64) -> Vec<u8> {
     img[511] = 0xaa;
     img
 }
+
+/// A file of the HPFS partition of an image `disk` made.
+pub fn get(img: &std::path::Path, path: &str) -> Option<Vec<u8>> {
+    let img = std::fs::read(img).ok()?;
+    let part = MemDisk(RefCell::new(img[2048 * 512..].to_vec()));
+    let mut vol = hpfs::Volume::mount(part).ok()?;
+    let e = vol.lookup(&path.replace('/', "\\")).ok()?;
+    let mut data = vec![0; e.size as usize];
+    let n = vol.read(&e, 0, &mut data).ok()?;
+    data.truncate(n);
+    Some(data)
+}

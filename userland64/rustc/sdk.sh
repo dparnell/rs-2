@@ -8,7 +8,8 @@
 #                RSCARGO.DLL if userland64/cargo/build.sh has run
 #   DIR/lib/rs2  what RS2-LD.EXE links into programs and DLLs (rs2libc as
 #                libc.a, start-up code, link64.ld)
-#   DIR/lib/rustlib   the standard library (rustup's, as it is)
+#                (rust-lld.exe: RS2-LD.EXE again, for the other targets)
+#   DIR/lib/rustlib   the standard libraries (rustup's, as it is)
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
@@ -47,6 +48,15 @@ done
 s=$(rustc --print sysroot)/lib/rustlib/$t/lib
 mkdir -p "$out/lib/rustlib/$t/lib"
 cp "$s"/*.rlib "$s"/*.rmeta "$out/lib/rustlib/$t/lib/"
+# The libraries for the kernel, the boot loader and the 32-bit userland
+# (data, as they are), and what links for them.
+for o in x86_64-unknown-none x86_64-unknown-uefi i686-unknown-linux-gnu; do
+    s=$(rustc --print sysroot)/lib/rustlib/$o/lib
+    [ -d "$s" ] || continue
+    mkdir -p "$out/lib/rustlib/$o/lib"
+    cp "$s"/*.rlib "$s"/*.rmeta "$out/lib/rustlib/$o/lib/"
+done
+cp "$out/bin/RS2-LD.EXE" "$out/bin/rust-lld.exe"
 (cd "$out" && find . -type f | sed 's|^\./||' | sort) | while read -r f; do
     printf '%s -> sdk\\%s\n' "$out/$f" "$(echo "$f" | tr / '\\')"
 done > "$out.txt"

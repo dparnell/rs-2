@@ -151,6 +151,9 @@ struct Opts {
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
     hpfs: bool,
+    /// The directory with the rs2-boot.efi and rs2-kernel to use instead
+    /// of building them.
+    prebuilt: Option<PathBuf>,
     fat32: bool,
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
     usb_kbd: bool,
@@ -232,6 +235,7 @@ fn parse(args: &[String]) -> Opts {
         boot_usb: false,
         dist: false,
         hpfs: false,
+        prebuilt: None,
         fat32: false,
         usb_kbd: false,
         bare: false,
@@ -308,6 +312,10 @@ fn parse(args: &[String]) -> Opts {
             "--boot-usb" => o.boot_usb = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
+            "--prebuilt" => {
+                i += 1;
+                o.prebuilt = Some(PathBuf::from(&args[i]));
+            }
             "--fat32" => o.fat32 = true,
             "--usb-kbd" => o.usb_kbd = true,
             "--bare" => {
@@ -471,7 +479,8 @@ fn main() -> ExitCode {
         eprintln!("usage: cargo xtask build|run|iso [options]");
         return ExitCode::FAILURE;
     };
-    let o = parse(&args[1..]);
+    let words = if cmd == "diskget" { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
+    let o = parse(&args[1 + words..]);
     let ok = match cmd.as_str() {
         "build" => build(&o).is_some(),
         "ir" => !interface_repositories().is_empty(),
@@ -512,6 +521,27 @@ fn main() -> ExitCode {
             println!("wrote {}", out.display());
             true
         }
+        "diskget" => {
+            // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
+            // (as `disk --hpfs` makes), by their names into DIR.
+            let names = &args[1..1 + words];
+            let dir = o.output.clone().unwrap_or_else(|| ".".into());
+            std::fs::create_dir_all(&dir).unwrap();
+            let Some((img, paths)) = names.split_first() else {
+                eprintln!("usage: cargo xtask diskget IMAGE PATH... -o DIR");
+                return ExitCode::FAILURE;
+            };
+            for p in paths {
+                match hpfsimg::get(Path::new(img), p) {
+                    Some(d) => std::fs::write(dir.join(p.rsplit(['\\', '/']).next().unwrap()), d).unwrap(),
+                    None => {
+                        eprintln!("{p}: not in {img}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            true
+        }
         _ => {
             eprintln!("unknown command {cmd}");
             false
@@ -541,8 +571,13 @@ fn copy(from: &Path, to: &Path) {
 const CMDLINE_MAX: usize = 1024;
 
 fn build(o: &Opts) -> Option<PathBuf> {
-    let boot = cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?;
-    let kernel = cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?;
+    let (boot, kernel) = match &o.prebuilt {
+        Some(d) => (d.clone(), d.clone()),
+        None => (
+            cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?,
+            cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?,
+        ),
+    };
     let esp = root().join("work/esp");
     let _ = std::fs::remove_dir_all(&esp);
     copy(&boot.join("rs2-boot.efi"), &esp.join("EFI/BOOT/BOOTX64.EFI"));
