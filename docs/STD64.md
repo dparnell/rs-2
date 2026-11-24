@@ -59,6 +59,8 @@ differs between the two:
   which lld keeps in an executable with `-z dynamic-undefined-weak`.
   `lld.sh` refuses a program with any other undefined symbol: a function
   rs2libc does not have shows up when linking.
+  Cargo runs `linker64.sh`, which hands build scripts and proc macros to
+  `cc`: on an x86-64 Linux host (CI) they have the same target triple.
 - **Thread-local storage.** Code in an executable reaches
   `#[thread_local]` variables through FS (`mov %fs:offset`); rustc on
   stable offers no other model. OS/2 keeps FS for the TIB, but 64-bit code

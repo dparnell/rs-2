@@ -37,7 +37,7 @@ mkdir -p "$c/.cargo"
 printf '[source.crates-io]\nreplace-with = "v"\n[source.v]\ndirectory = "../rustc-1.100.0-src/vendor"\n' > "$c/.cargo/config.toml"
 ln -sfn "$std/rs2libc" "$dir/rs2libc"
 export CC_x86_64_unknown_linux_gnu="$std/cc64.sh" AR_x86_64_unknown_linux_gnu="$std/ar.sh" CARGO_TARGET_DIR="$dir/cargo-build"
-export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$std/lld.sh"
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$std/linker64.sh"
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=$(sed -n '/^\[target.x86_64/,/^\]/p' "$std/.cargo/config.toml" |
     sed -n 's/^ *"\(.*\)",$/\1/p' | sed 's/", "/ /g' | tr '\n' ' ')
 export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS

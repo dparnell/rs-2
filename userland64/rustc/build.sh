@@ -43,7 +43,7 @@ export RUSTC_BOOTSTRAP=1 CFG_RELEASE=$ver CFG_RELEASE_NUM=$ver CFG_RELEASE_CHANN
     RUSTC_INSTALL_BINDIR=bin CFG_LIBDIR_RELATIVE=lib CFG_DISABLE_UNSTABLE_FEATURES=1 CFG_DEFAULT_CODEGEN_BACKEND=llvm RS2_LLVM=1
 export CC_x86_64_unknown_linux_gnu="$std/cc64.sh" AR_x86_64_unknown_linux_gnu="$std/ar.sh" CARGO_TARGET_DIR="$dir/build"
 # How to link: as userland-std/.cargo/config.toml.
-export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$std/lld.sh"
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$std/linker64.sh"
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=$(sed -n '/^\[target.x86_64/,/^\]/p' "$std/.cargo/config.toml" |
     sed -n 's/^ *"\(.*\)",$/\1/p' | sed 's/", "/ /g' | tr '\n' ' ')
 export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS
