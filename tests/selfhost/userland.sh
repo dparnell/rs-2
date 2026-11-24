@@ -27,7 +27,7 @@ say() { printf '%s\r\n' "$1" >> "$cmd"; }
 # userland-std's config names shell scripts for these.
 say 'set CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=rs2-ld32.exe'
 say 'echo begin'
-say "cargo xtask userland $*"
+say "cargo run -p xtask -- userland $*"
 say 'dir work\userland'
 say 'echo end'
 [ ! -f work/disk.txt ] || cp work/disk.txt "$t/disk.save"
