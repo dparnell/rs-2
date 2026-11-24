@@ -25,11 +25,13 @@ cmd=$t/build.cmd
 printf '@echo off\r\nE:\r\ncd \\rs2\r\nset PATH=E:\\sdk\\bin;%%PATH%%\r\nset BEGINLIBPATH=E:\\sdk\\bin\r\nset TMPDIR=E:\\tmp\r\nset CARGO_HOME=E:\\cargo\r\nset CARGO_INCREMENTAL=0\r\nset CARGO_NET_OFFLINE=true\r\n' > "$cmd"
 say() { printf '%s\r\n' "$1" >> "$cmd"; }
 # userland-std's config names shell scripts for these.
+say 'set CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=rs2-ld.exe'
 say 'set CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=rs2-ld32.exe'
 say 'set CC_i686_unknown_linux_gnu=E:/sdk/bin/CLANG.EXE --target=i686-unknown-linux-gnu -ffreestanding -fno-stack-protector -isystem E:/sdk/lib/rs2-32/include'
 say 'set AR_i686_unknown_linux_gnu=E:/sdk/bin/LLVM-AR.EXE'
 say 'echo begin'
 say "cargo run -p xtask -- userland $*"
+say 'if errorlevel 1 echo build failed'
 say 'dir work\userland'
 say 'echo end'
 [ ! -f work/disk.txt ] || cp work/disk.txt "$t/disk.save"
@@ -44,10 +46,12 @@ cargo xtask disk --hpfs --size 3000 -o "$t/d.img" > /dev/null
 cargo xtask run --headless --timeout "${TIMEOUT:-9000}" --mem 8G --smp "${SMP:-8}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building
 grep -aq '^end' "$t/log"
-! grep -aq '^error' "$t/log"
+if grep -aqE '^error|^build failed' "$t/log"; then exit 1; fi
 cargo xtask diskget "$t/d.img" 'rs2\work\userland\*' -o "$t/out/userland"
 ls "$t/out/userland" | wc -l
 [ $# = 0 ] || exit 0
+# Everything, userland-std's programs too: STDTEST must be this build's.
+for f in STDTEST W16TEST APITEST WEB WEBTEXT; do [ -f "$t/out/userland/$f.EXE" ]; done
 # rs2 with what it built.
 boot() {
     cargo xtask run --prebuilt "$t/out" --headless --timeout "$2" --mem 6G --init "RS2\\$1.EXE" > "$t/$1.log" 2>&1
