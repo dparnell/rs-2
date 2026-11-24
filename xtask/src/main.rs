@@ -96,11 +96,13 @@
 //! tools/scripts/soundin.py through the QMP socket (no window; with
 //! `--sound-wav` the script writes what is played).
 
+mod elf;
 mod hpfsimg;
 mod image;
 mod iso;
 mod png;
 mod somir;
+mod zip;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -527,6 +529,8 @@ fn main() -> ExitCode {
             let only = &args[1..1 + words];
             build_userland32(only).is_some() && (!only.is_empty() || build_userland_std().is_some())
         }
+        // The 64-bit programs (work/userland/64).
+        "userland64" => build_userland_std64().is_some() && build_userland64().is_some(),
         "diskget" => {
             // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
             // (as `disk --hpfs` makes), by their names into DIR;
@@ -675,7 +679,9 @@ fn boot_volume(o: &Opts, esp: &Path) -> Option<Option<image::FileList>> {
     if let Some(d) = &o.prebuilt {
         for (src, dest) in &mut files {
             let p = d.join("userland").join(dest.rsplit('\\').next().unwrap());
-            let ours = src.starts_with(root().join("work/userland")) && !src.starts_with(root().join("work/userland/64"));
+            let long = src.starts_with(root().join("work/userland/64"));
+            let p = if long { d.join("userland64").join(dest.rsplit('\\').next().unwrap()) } else { p };
+            let ours = src.starts_with(root().join("work/userland"));
             if ours && p.exists() {
                 *src = p;
             }
@@ -1203,13 +1209,13 @@ const PROGRAMS64: &[(&str, &str)] = &[
     ("pmdemo64", "RS2\\PMDEMO64.EXE"),
 ];
 
-/// 64-bit programs written in C (userland64/c): sources, cc64.sh flags
+/// 64-bit programs written in C (userland64/c): sources, cc64 flags
 /// (paths relative to userland64), file on the boot volume.
 const C_PROGRAMS64: &[(&[&str], &[&str], &str)] = &[
     (&["c/samples/hello.c"], &[], "RS2\\CHELLO64.EXE"),
     (&["c/samples/pmhello.c"], &["--pm", "--rc", "userland64/c/samples/pmhello.rc"], "RS2\\CPMHELLO.EXE"),
     (&["c/samples/clibtest.c"], &[], "RS2\\CLIBTEST.EXE"),
-    // The same, with the C library linked in (cc64.sh --static).
+    // The same, with the C library linked in (cc64 --static).
     (&["c/samples/clibtest.c"], &["--static"], "RS2\\CLIBTSTS.EXE"),
     // A C++ DLL that CXXTEST is linked against.
     (&["c/samples/cxxtdl2.cpp"], &["--dll"], "RS2\\DLL64\\CXXTDL2.DLL"),
@@ -1242,14 +1248,19 @@ fn build_userland64() -> Option<image::FileList> {
         std::fs::copy(&so, &out).ok()?;
         files.push((out, dest.to_string()));
     }
-    // The C library (docs/LIBC64.md): cc64.sh builds it, LIBC64.DLL goes
+    // The C library (docs/LIBC64.md): cc64 (tools/cc64) builds it, LIBC64.DLL goes
     // with the 64-bit DLLs.
-    if !Command::new(dir.join("c/cc64.sh")).current_dir(root()).arg("--libc").status().ok()?.success() {
-        eprintln!("cc64.sh failed to build the C library");
+    let cc64 = || {
+        let mut c = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+        c.current_dir(root()).args(["run", "-q", "--release", "-p", "cc64", "--"]);
+        c
+    };
+    if !cc64().arg("--libc").status().ok()?.success() {
+        eprintln!("cc64 failed to build the C library");
         return None;
     }
-    if !Command::new(dir.join("c/cc64.sh")).current_dir(root()).arg("--libcxx").status().ok()?.success() {
-        eprintln!("cc64.sh failed to build the C++ library");
+    if !cc64().arg("--libcxx").status().ok()?.success() {
+        eprintln!("cc64 failed to build the C++ library");
         return None;
     }
     for name in ["LIBC64.DLL", "LIBCXX64.DLL"] {
@@ -1257,16 +1268,16 @@ fn build_userland64() -> Option<image::FileList> {
         std::fs::copy(root().join("target/libc64").join(name), &dll).ok()?;
         files.push((dll, format!("RS2\\DLL64\\{name}")));
     }
-    // The C samples (userland64/c/cc64.sh: clang and rust-lld).
+    // The C samples (clang and rust-lld).
     for (srcs, flags, dest) in C_PROGRAMS64 {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
-        let mut cmd = Command::new(dir.join("c/cc64.sh"));
-        cmd.current_dir(root()).arg("-o").arg(&out).args(flags.iter());
+        let mut cmd = cc64();
+        cmd.arg("-o").arg(&out).args(flags.iter());
         for s in *srcs {
             cmd.arg(dir.join(s));
         }
         if !cmd.status().ok()?.success() {
-            eprintln!("cc64.sh failed for {dest}");
+            eprintln!("cc64 failed for {dest}");
             return None;
         }
         files.push((out, dest.to_string()));
@@ -1368,7 +1379,20 @@ fn build_userland_std64() -> Option<image::FileList> {
     if !cmd.status().ok()?.success() {
         return None;
     }
-    if !Command::new("sh").arg(dir.join("dyn64.sh")).arg(DYN_PROGRAM64).env_remove("CARGO_TARGET_DIR").status().ok()?.success() {
+    // With a sysroot that has no libstd.so (rs2's own) rustc takes std from
+    // the DLL as it is; otherwise dyn64.sh makes one.
+    let std_so = std::fs::read_dir(sysroot().join("lib/rustlib").join(TARGET).join("lib"))
+        .is_ok_and(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("libstd-") && e.path().extension().is_some_and(|x| x == "so")));
+    let mut cmd;
+    if std_so {
+        cmd = Command::new("sh");
+        cmd.arg(dir.join("dyn64.sh")).arg(DYN_PROGRAM64);
+    } else {
+        cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+        cmd.current_dir(&dir).args(["rustc", "--release", "--target", TARGET, "--target-dir", "target/dyn64", "-p", DYN_PROGRAM64]);
+        cmd.args(["--", "-C", "prefer-dynamic"]);
+    }
+    if !cmd.env_remove("CARGO_TARGET_DIR").status().ok()?.success() {
         return None;
     }
     let out_dir = root().join("work/userland/64");
@@ -1378,7 +1402,7 @@ fn build_userland_std64() -> Option<image::FileList> {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         let file = if dest.ends_with(".DLL") { format!("lib{bin}.so") } else { bin.to_string() };
         let target = dir.join(if dynamic(bin) { "target/dyn64" } else { "target" });
-        std::fs::copy(target.join(TARGET).join("release").join(file), &out).ok()?;
+        std::fs::copy(program(target.join(TARGET).join("release").join(file)), &out).ok()?;
         files.push((out, dest.to_string()));
     }
     Some(files)
@@ -1556,7 +1580,7 @@ const FOUR_OS2_FILES: &[(&str, &str)] = &[
 
 /// 4OS2's files, and its help message file (OS2\\SYSTEM\\4OS2H.MSG,
 /// compiled here from the zip's 4os2h.txt: Open Watcom has no MKMSGF).
-/// Without the zip (offline, no curl or unzip) a distribution build
+/// Without the zip (offline, no curl) a distribution build
 /// stops; a development build goes on without 4OS2.
 fn four_os2(dist: bool) -> Option<image::FileList> {
     match four_os2_files() {
@@ -1593,9 +1617,9 @@ fn four_os2_files() -> Result<image::FileList, String> {
     let dir = root().join("target/4os2");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ok = Command::new("unzip").args(["-q", "-o"]).arg(&zip).arg("-d").arg(&dir).status().is_ok_and(|s| s.success());
-    if !ok {
-        return Err(format!("could not unpack {}", zip.display()));
+    let data = std::fs::read(&zip).map_err(|e| format!("{}: {e}", zip.display()))?;
+    for (name, d) in zip::unpack(&data).ok_or(format!("could not unpack {}", zip.display()))? {
+        std::fs::write(dir.join(&name), d).map_err(|e| format!("{name}: {e}"))?;
     }
     let mut v = Vec::new();
     for (src, dest) in FOUR_OS2_FILES {
@@ -1614,20 +1638,30 @@ fn four_os2_files() -> Result<image::FileList, String> {
     Ok(v)
 }
 
-/// Remove debug information (keeps the boot image small).
+/// rustc's sysroot.
+fn sysroot() -> PathBuf {
+    let o = Command::new("rustc").args(["--print", "sysroot"]).output().ok();
+    o.map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).unwrap_or_default()
+}
+
+/// Remove debug information (keeps the boot image small): with llvm-tools'
+/// rust-objcopy, or here where there is none (rs2).
 fn strip(file: &Path) {
-    let sysroot = Command::new("rustc").args(["--print", "sysroot"]).output().ok();
-    let Some(out) = sysroot else { return };
-    let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let host = Command::new("rustc").args(["-vV"]).output().ok().map(|o| {
         String::from_utf8_lossy(&o.stdout)
             .lines()
             .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
             .unwrap_or_default()
     });
-    let objcopy = Path::new(&sysroot).join("lib/rustlib").join(host.unwrap_or_default()).join("bin/rust-objcopy");
+    let objcopy = sysroot().join("lib/rustlib").join(host.unwrap_or_default()).join("bin/rust-objcopy");
     if objcopy.exists() {
         let _ = Command::new(objcopy).arg("--strip-debug").arg(file).status();
+        return;
+    }
+    let Ok(elf) = std::fs::read(file) else { return };
+    match elf::strip_debug(&elf) {
+        Some(d) => std::fs::write(file, d).unwrap(),
+        None => eprintln!("warning: {} keeps its debug information", file.display()),
     }
 }
 
