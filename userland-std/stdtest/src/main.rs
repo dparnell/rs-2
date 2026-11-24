@@ -295,6 +295,16 @@ fn fs(t: &mut T, root: &str) {
         // Path joins drives like any other name; rs2libc makes sense of it.
         let j = std::path::Path::new("C:/OS2").join(format!("{dir}/DATA.BIN"));
         t.check("path with a drive in it", j.exists(), format!("{j:?}"));
+        let p = format!("{dir}/OPEN.BIN");
+        let f = std::fs::File::create(&p);
+        let r = std::fs::remove_file(&p);
+        drop(f);
+        t.check("delete an open file", r.is_ok() && !std::path::Path::new(&p).exists(), format!("{r:?}"));
+        let long = "x".repeat(20000);
+        let out = std::process::Command::new(std::env::current_exe().unwrap()).args(["echo-len", &long]).output();
+        t.check("20,000 byte argument", matches!(&out, Ok(o) if String::from_utf8_lossy(&o.stdout).contains("20000")), format!("{out:?}"));
+        let r = std::process::Command::new(std::env::current_exe().unwrap()).arg("x".repeat(70000)).output();
+        t.check("argument too long", matches!(&r, Err(e) if e.kind() == std::io::ErrorKind::ArgumentListTooLong), format!("{:?}", r.is_ok()));
     }
     let before = std::env::current_dir();
     let r = std::env::set_current_dir(&dir).and_then(|_| std::fs::read_to_string("DATA.BIN"));
@@ -710,6 +720,10 @@ fn process(t: &mut T) {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("echo-len") {
+        println!("{}", std::env::args().nth(2).unwrap_or_default().len());
+        return;
+    }
     let args: Vec<String> = std::env::args().collect();
     let mut t = T { pass: 0, fail: 0 };
     let want: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();

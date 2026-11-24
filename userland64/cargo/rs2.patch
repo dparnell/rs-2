@@ -1,0 +1,571 @@
+--- a/cargo/Cargo.lock
++++ b/cargo/Cargo.lock
+@@ -421,6 +421,7 @@
+  "portable-atomic",
+  "rand 0.10.1",
+  "regex",
++ "rs2libc",
+  "rusqlite",
+  "rustc-hash 2.1.2",
+  "rustc-stable-hash",
+@@ -953,13 +954,9 @@
+ [[package]]
+ name = "curl"
+ version = "0.4.50"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3a45ee8994e5307cb4c60cfc1c20bf7263ffb771ddc135c9f768a14bcbc15b09"
+ dependencies = [
+  "curl-sys",
+  "libc",
+- "openssl-probe",
+- "openssl-sys",
+  "schannel",
+  "socket2",
+  "windows-sys 0.61.2",
+@@ -968,14 +965,10 @@
+ [[package]]
+ name = "curl-sys"
+ version = "0.4.90+curl-8.21.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "97799a0d220bfb3361e0fe4936966ff8c4b24d65c3f06dfc70d7b680b44e7897"
+ dependencies = [
+  "cc",
+  "libc",
+- "libnghttp2-sys",
+  "libz-sys",
+- "openssl-sys",
+  "pkg-config",
+  "vcpkg",
+  "windows-sys 0.61.2",
+@@ -1146,6 +1139,17 @@
+ ]
+ 
+ [[package]]
++name = "dlmalloc"
++version = "0.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
++dependencies = [
++ "cfg-if",
++ "libc",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
+ name = "dunce"
+ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -1440,6 +1444,12 @@
+ ]
+ 
+ [[package]]
++name = "gimli"
++version = "0.34.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
++
++[[package]]
+ name = "git2"
+ version = "0.21.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -1449,8 +1459,6 @@
+  "libc",
+  "libgit2-sys",
+  "log",
+- "openssl-probe",
+- "openssl-sys",
+  "url",
+ ]
+ 
+@@ -2874,14 +2882,10 @@
+ [[package]]
+ name = "libgit2-sys"
+ version = "0.18.7+1.9.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "23c7391e4b9f4ffab1a624223cc1d7385ff9a678f490768add717de7ea2f4d89"
+ dependencies = [
+  "cc",
+  "libc",
+- "libssh2-sys",
+  "libz-sys",
+- "openssl-sys",
+  "pkg-config",
+ ]
+ 
+@@ -2896,20 +2900,14 @@
+ ]
+ 
+ [[package]]
+-name = "libnghttp2-sys"
+-version = "0.1.13+1.68.1"
++name = "libm"
++version = "0.2.16"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "492e00167f1418c15648144f42bbfc63099806ecee9bf8d09a6353d6b4856b3c"
+-dependencies = [
+- "cc",
+- "libc",
+-]
++checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+ 
+ [[package]]
+ name = "libsqlite3-sys"
+ version = "0.38.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f6c19a05435c21ac299d71b6a9c13db3e3f47c520517d58990a462a1397a61db"
+ dependencies = [
+  "cc",
+  "pkg-config",
+@@ -2917,25 +2915,8 @@
+ ]
+ 
+ [[package]]
+-name = "libssh2-sys"
+-version = "0.3.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fce5a0b125f6aeac93b304b35f7f1e9f054aad29ddac57091928e41df3ccd233"
+-dependencies = [
+- "cc",
+- "libc",
+- "libz-sys",
+- "openssl-sys",
+- "pkg-config",
+- "semver",
+- "vcpkg",
+-]
+-
+-[[package]]
+ name = "libz-sys"
+ version = "1.1.29"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -3365,12 +3346,6 @@
+ ]
+ 
+ [[package]]
+-name = "openssl-probe"
+-version = "0.1.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+-
+-[[package]]
+ name = "openssl-src"
+ version = "300.6.1+3.6.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3918,6 +3893,16 @@
+ ]
+ 
+ [[package]]
++name = "rs2libc"
++version = "0.1.0"
++dependencies = [
++ "dlmalloc",
++ "libc",
++ "libm",
++ "unwinding",
++]
++
++[[package]]
+ name = "rsqlite-vfs"
+ version = "0.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -4920,6 +4905,15 @@
+ version = "0.9.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
++
++[[package]]
++name = "unwinding"
++version = "0.2.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4b134ada16dda9e435abe2a6d76a01d497bc60707357845a15f9b0ed42dc88ce"
++dependencies = [
++ "gimli",
++]
+ 
+ [[package]]
+ name = "url"
+--- a/cargo/Cargo.toml
++++ b/cargo/Cargo.toml
+@@ -45,13 +45,13 @@
+ core-foundation = { version = "0.10.1", features = ["mac_os_10_7_support"] }
+ crates-io = { version = "0.41.3", path = "crates/crates-io" }
+ criterion = { version = "0.8.2", features = ["html_reports"] }
+-curl = "0.4.49"
++curl = { version = "0.4.49", default-features = false }
+ curl-sys = "0.4.88"
+ filetime = "0.2.27"
+ flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
+ futures = { version = "0.3.32", default-features = false, features = ["std", "executor", "async-await"]}
+ futures-timer = "3.0.3"
+-git2 = { version = "0.21.0", features = ["https", "ssh"] }
++git2 = { version = "0.21.0", default-features = false, features = ["cred"] }
+ git2-curl = "0.22.0"
+ # When updating this, also see if `gix-transport` further down needs updating or some auth-related tests will fail.
+ gix = { version = "0.85.0", default-features = false, features = ["sha1", "progress-tree", "parallel", "dirwalk", "status"] }
+@@ -173,7 +173,7 @@
+ clap_complete.workspace = true
+ color-print.workspace = true
+ crates-io.workspace = true
+-curl = { workspace = true, features = ["http2"] }
++curl.workspace = true
+ curl-sys.workspace = true
+ filetime.workspace = true
+ flate2.workspace = true
+@@ -235,6 +235,7 @@
+ 
+ [target.'cfg(unix)'.dependencies]
+ libc.workspace = true
++rs2libc = { path = "../../rs2libc" }
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ cargo-credential-libsecret.workspace = true
+@@ -296,3 +297,10 @@
+ 
+ [lints]
+ workspace = true
++
++[patch.crates-io]
++curl-sys = { path = "../curl-sys" }
++libgit2-sys = { path = "../libgit2-sys" }
++libsqlite3-sys = { path = "../libsqlite3-sys" }
++libz-sys = { path = "../libz-sys" }
++curl = { path = "../curl" }
+--- a/cargo/crates/cargo-util/src/paths.rs
++++ b/cargo/crates/cargo-util/src/paths.rs
+@@ -18,7 +18,15 @@
+ /// environment variable this is will be used for, which is included in the
+ /// error message.
+ pub fn join_paths<T: AsRef<OsStr>>(paths: &[T], env: &str) -> Result<OsString> {
+-    env::join_paths(paths.iter()).with_context(|| {
++    // rs2: ; between paths, which have drives.
++    let mut joined = OsString::new();
++    for (i, p) in paths.iter().enumerate() {
++        if i > 0 {
++            joined.push(";");
++        }
++        joined.push(p);
++    }
++    Ok::<_, env::JoinPathsError>(joined).with_context(|| {
+         let mut message = format!(
+             "failed to join paths from `${env}` together\n\n\
+              Check if any of path segments listed below contain an \
+@@ -33,6 +41,17 @@
+     })
+ }
+ 
++/// Like [`std::env::split_paths`], with rs2's separator.
++pub fn split_paths(s: &OsStr) -> impl Iterator<Item = PathBuf> {
++    let parts: Vec<PathBuf> = s
++        .to_string_lossy()
++        .split(';')
++        .filter(|p| !p.is_empty())
++        .map(|p| PathBuf::from(p.replace('\\', "/")))
++        .collect();
++    parts.into_iter()
++}
++
+ /// Returns the name of the environment variable used for searching for
+ /// dynamic libraries.
+ pub fn dylib_path_envvar() -> &'static str {
+@@ -70,7 +89,7 @@
+ /// will need to be dealt with.
+ pub fn dylib_path() -> Vec<PathBuf> {
+     match env::var_os(dylib_path_envvar()) {
+-        Some(var) => env::split_paths(&var).collect(),
++        Some(var) => split_paths(&var).collect(),
+         None => Vec::new(),
+     }
+ }
+@@ -124,13 +143,9 @@
+ pub fn resolve_executable(exec: &Path) -> Result<PathBuf> {
+     if exec.components().count() == 1 {
+         let paths = env::var_os("PATH").ok_or_else(|| anyhow::format_err!("no PATH"))?;
+-        let candidates = env::split_paths(&paths).flat_map(|path| {
++        let candidates = split_paths(&paths).flat_map(|path| {
+             let candidate = path.join(&exec);
+-            let with_exe = if env::consts::EXE_EXTENSION.is_empty() {
+-                None
+-            } else {
+-                Some(candidate.with_extension(env::consts::EXE_EXTENSION))
+-            };
++            let with_exe = Some(candidate.with_extension("exe"));
+             iter::once(candidate).chain(with_exe)
+         });
+         for candidate in candidates {
+--- a/cargo/crates/cargo-util/src/process_builder.rs
++++ b/cargo/crates/cargo-util/src/process_builder.rs
+@@ -547,8 +547,9 @@
+                 }
+             }
+         }
++        // rs2: passing a jobserver on needs fork.
+         if let Some(ref c) = self.jobserver {
+-            c.configure(&mut command);
++            let _ = c;
+         }
+         command
+     }
+@@ -634,36 +635,13 @@
+ 
+ #[cfg(unix)]
+ mod imp {
+-    use super::{ProcessBuilder, ProcessError, close_tempfile_and_log_error, debug_force_argfile};
++    use super::ProcessBuilder;
+     use anyhow::Result;
+     use std::io;
+-    use std::os::unix::process::CommandExt;
+ 
++    // rs2: there is no exec; run it and wait.
+     pub fn exec_replace(process_builder: &ProcessBuilder) -> Result<()> {
+-        let mut error;
+-        let mut file = None;
+-        if debug_force_argfile(process_builder.retry_with_argfile) {
+-            let (mut command, argfile) = process_builder.build_command_with_argfile()?;
+-            file = Some(argfile);
+-            error = command.exec()
+-        } else {
+-            let mut command = process_builder.build_command();
+-            error = command.exec();
+-            if process_builder.should_retry_with_argfile(&error) {
+-                let (mut command, argfile) = process_builder.build_command_with_argfile()?;
+-                file = Some(argfile);
+-                error = command.exec()
+-            }
+-        }
+-        if let Some(file) = file {
+-            close_tempfile_and_log_error(file);
+-        }
+-
+-        Err(anyhow::Error::from(error).context(ProcessError::new(
+-            &format!("could not execute process {}", process_builder),
+-            None,
+-            None,
+-        )))
++        process_builder.exec()
+     }
+ 
+     pub fn command_line_too_big(err: &io::Error) -> bool {
+--- a/cargo/crates/cargo-util/src/read2.rs
++++ b/cargo/crates/cargo-util/src/read2.rs
+@@ -1,81 +1,45 @@
+ pub use self::imp::read2;
+ 
++// rs2: pipes always block, so each has a thread.
+ #[cfg(unix)]
+ mod imp {
+-    use libc::{F_GETFL, F_SETFL, O_NONBLOCK, c_int, fcntl};
+-    use std::io;
+-    use std::io::prelude::*;
+-    use std::mem;
+-    use std::os::unix::prelude::*;
++    use std::io::{self, Read};
+     use std::process::{ChildStderr, ChildStdout};
++    use std::sync::mpsc;
+ 
+-    fn set_nonblock(fd: c_int) -> io::Result<()> {
+-        let flags = unsafe { fcntl(fd, F_GETFL) };
+-        if flags == -1 || unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } == -1 {
+-            return Err(io::Error::last_os_error());
+-        }
+-        Ok(())
++    fn reader(
++        mut pipe: impl Read + Send + 'static,
++        is_out: bool,
++        tx: mpsc::Sender<(bool, io::Result<Vec<u8>>)>,
++    ) {
++        std::thread::spawn(move || {
++            let mut buf = vec![0; 16384];
++            loop {
++                let r = pipe.read(&mut buf).map(|n| buf[..n].to_vec());
++                let last = !matches!(&r, Ok(v) if !v.is_empty());
++                if tx.send((is_out, r)).is_err() || last {
++                    break;
++                }
++            }
++        });
+     }
+ 
+     pub fn read2(
+-        mut out_pipe: ChildStdout,
+-        mut err_pipe: ChildStderr,
++        out_pipe: ChildStdout,
++        err_pipe: ChildStderr,
+         data: &mut dyn FnMut(bool, &mut Vec<u8>, bool),
+     ) -> io::Result<()> {
+-        set_nonblock(out_pipe.as_raw_fd())?;
+-        set_nonblock(err_pipe.as_raw_fd())?;
+-
+-        let mut out_done = false;
+-        let mut err_done = false;
+-        let mut out = Vec::new();
+-        let mut err = Vec::new();
+-
+-        let mut fds: [libc::pollfd; 2] = unsafe { mem::zeroed() };
+-        fds[0].fd = out_pipe.as_raw_fd();
+-        fds[0].events = libc::POLLIN;
+-        fds[1].fd = err_pipe.as_raw_fd();
+-        fds[1].events = libc::POLLIN;
+-        let mut nfds = 2;
+-        let mut errfd = 1;
+-
+-        while nfds > 0 {
+-            // wait for either pipe to become readable using `poll`
+-            let r = unsafe { libc::poll(fds.as_mut_ptr(), nfds, -1) };
+-            if r == -1 {
+-                let err = io::Error::last_os_error();
+-                if err.kind() == io::ErrorKind::Interrupted {
+-                    continue;
+-                }
+-                return Err(err);
+-            }
+-
+-            // Read as much as we can from each pipe, ignoring EWOULDBLOCK or
+-            // EAGAIN. If we hit EOF, then this will happen because the underlying
+-            // reader will return Ok(0), in which case we'll see `Ok` ourselves. In
+-            // this case we flip the other fd back into blocking mode and read
+-            // whatever's leftover on that file descriptor.
+-            let handle = |res: io::Result<_>| match res {
+-                Ok(_) => Ok(true),
+-                Err(e) => {
+-                    if e.kind() == io::ErrorKind::WouldBlock {
+-                        Ok(false)
+-                    } else {
+-                        Err(e)
+-                    }
+-                }
+-            };
+-            if !err_done && fds[errfd].revents != 0 && handle(err_pipe.read_to_end(&mut err))? {
+-                err_done = true;
+-                nfds -= 1;
+-            }
+-            data(false, &mut err, err_done);
+-            if !out_done && fds[0].revents != 0 && handle(out_pipe.read_to_end(&mut out))? {
+-                out_done = true;
+-                fds[0].fd = err_pipe.as_raw_fd();
+-                errfd = 0;
+-                nfds -= 1;
+-            }
+-            data(true, &mut out, out_done);
++        let (tx, rx) = mpsc::channel();
++        reader(out_pipe, true, tx.clone());
++        reader(err_pipe, false, tx);
++        let (mut out, mut err, mut open) = (Vec::new(), Vec::new(), 2);
++        while open > 0 {
++            let Ok((is_out, r)) = rx.recv() else { break };
++            let v = r?;
++            let buf = if is_out { &mut out } else { &mut err };
++            buf.extend_from_slice(&v);
++            open -= v.is_empty() as usize;
++            data(is_out, buf, v.is_empty());
+         }
+         Ok(())
+     }
+--- a/cargo/src/bin/cargo/main.rs
++++ b/cargo/src/bin/cargo/main.rs
+@@ -1,4 +1,5 @@
+ use cargo::util::{self, CargoResult, closest_msg, command_prelude};
++use rs2libc as _;
+ use cargo::workspace::features;
+ use cargo_util::{ProcessBuilder, ProcessError};
+ use cargo_util_schemas::manifest::StringOrVec;
+@@ -15,6 +16,8 @@
+ use crate::command_prelude::*;
+ 
+ fn main() {
++    // rs2: absolute paths as /C:/dir, which Path and Url take for absolute.
++    rs2libc::rooted_paths();
+     let _guard = setup_logger();
+ 
+     let mut gctx = match GlobalContext::default() {
+@@ -343,7 +346,7 @@
+ 
+ fn search_directories(gctx: &GlobalContext) -> Vec<PathBuf> {
+     let mut path_dirs = if let Some(val) = gctx.get_env_os("PATH") {
+-        env::split_paths(&val).collect()
++        cargo_util::paths::split_paths(&val).collect()
+     } else {
+         vec![]
+     };
+--- a/cargo/src/compiler/mod.rs
++++ b/cargo/src/compiler/mod.rs
+@@ -772,7 +772,7 @@
+ ) -> CargoResult<()> {
+     let var = paths::dylib_path_envvar();
+     let search_path = rustc.get_env(var).unwrap_or_default();
+-    let mut search_path = env::split_paths(&search_path).collect::<Vec<_>>();
++    let mut search_path = paths::split_paths(&search_path).collect::<Vec<_>>();
+     for (pkg_id, metadata) in &build_scripts.plugins {
+         let output = build_script_outputs
+             .get(*metadata)
+@@ -876,7 +876,7 @@
+         base.env("CARGO_PRIMARY_PACKAGE", "1");
+         let file_list = build_runner.sbom_output_files(unit)?;
+         if !file_list.is_empty() {
+-            let file_list = std::env::join_paths(file_list)?;
++            let file_list = paths::join_paths(&file_list, "CARGO_SBOM_PATH")?;
+             base.env("CARGO_SBOM_PATH", file_list);
+         }
+     }
+--- a/cargo/src/ops/cargo_install.rs
++++ b/cargo/src/ops/cargo_install.rs
+@@ -846,7 +846,7 @@
+         // Print a warning that if this directory isn't in PATH that they won't be
+         // able to run these commands.
+         let path = gctx.get_env_os("PATH").unwrap_or_default();
+-        let dst_in_path = env::split_paths(&path).any(|path| path == dst);
++        let dst_in_path = paths::split_paths(&path).any(|path| path == dst);
+ 
+         if !dst_in_path {
+             gctx.shell().warn(&format!(
+--- a/curl/Cargo.toml
++++ b/curl/Cargo.toml
+@@ -32,20 +32,16 @@
+ repository = "https://github.com/alexcrichton/curl-rust"
+ 
+ [features]
+-default = ["ssl"]
++default = []
+ force-system-lib-on-osx = ["curl-sys/force-system-lib-on-osx"]
+-http2 = ["curl-sys/http2"]
++http2 = []
+ mesalink = ["curl-sys/mesalink"]
+ ntlm = ["curl-sys/ntlm"]
+ poll_7_68_0 = ["curl-sys/poll_7_68_0"]
+ protocol-ftp = ["curl-sys/protocol-ftp"]
+ rustls = ["curl-sys/rustls"]
+ spnego = ["curl-sys/spnego"]
+-ssl = [
+-    "openssl-sys",
+-    "openssl-probe",
+-    "curl-sys/ssl",
+-]
++ssl = []
+ static-curl = ["curl-sys/static-curl"]
+ static-ssl = ["curl-sys/static-ssl"]
+ upkeep_7_62_0 = ["curl-sys/upkeep_7_62_0"]
+--- a/curl-sys/Cargo.toml
++++ b/curl-sys/Cargo.toml
+@@ -33,16 +33,16 @@
+ repository = "https://github.com/alexcrichton/curl-rust"
+ 
+ [features]
+-default = ["ssl"]
++default = []
+ force-system-lib-on-osx = []
+-http2 = ["libnghttp2-sys"]
++http2 = []
+ mesalink = []
+ ntlm = []
+ poll_7_68_0 = []
+ protocol-ftp = []
+ rustls = ["rustls-ffi"]
+ spnego = []
+-ssl = ["openssl-sys"]
++ssl = []
+ static-curl = []
+ static-ssl = ["openssl-sys/vendored"]
+ upkeep_7_62_0 = []

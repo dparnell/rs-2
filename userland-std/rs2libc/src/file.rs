@@ -87,7 +87,28 @@ fn set_flag(h: u32, bit: u8, on: bool) {
     }
 }
 
+/// What file each handle has open (`path_hash`), and the files to delete
+/// when they are closed: Unix deletes open files, OS/2 does not.
+static OPEN: [core::sync::atomic::AtomicU64; MAX_HANDLES] = [const { core::sync::atomic::AtomicU64::new(0) }; MAX_HANDLES];
+static UNLINKED: SpinLock<Vec<Vec<u8>>> = SpinLock::new(Vec::new());
+
+fn path_hash(p: &[u8]) -> u64 {
+    let h = full_path(p).iter().fold(0xcbf2_9ce4_8422_2325u64, |h, c| (h ^ c.to_ascii_uppercase() as u64).wrapping_mul(0x100_0000_01b3));
+    h | 1
+}
+
+/// After a handle was closed: the deletions that waited.
+fn unlink_waiting() {
+    let mut l = UNLINKED.lock();
+    if !l.is_empty() {
+        l.retain(|p| !matches!(unsafe { DosDelete(p.as_ptr()) }, 0 | 2 | 3));
+    }
+}
+
 fn forget(h: u32) {
+    if let Some(e) = OPEN.get(h as usize) {
+        e.store(0, Ordering::Relaxed);
+    }
     if let Some(f) = FLAGS.get(h as usize) {
         f.store(0, Ordering::Relaxed);
     }
@@ -119,11 +140,21 @@ pub unsafe fn c_path(p: *const c_char) -> Vec<u8> {
     os2_path(unsafe { cstr(p) })
 }
 
+/// Set by `rooted_paths`.
+static ROOTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn set_rooted() {
+    ROOTED.store(true, Ordering::Relaxed);
+}
+
 /// A path as std's Path sees it: 64-bit programs get / (Path does not
-/// split at \).
+/// split at \), and /C:/dir for C:\dir if they asked for that.
 fn std_path(mut p: Vec<u8>) -> Vec<u8> {
     if cfg!(target_arch = "x86_64") {
         p.iter_mut().filter(|c| **c == b'\\').for_each(|c| *c = b'/');
+        if ROOTED.load(Ordering::Relaxed) && p.get(1) == Some(&b':') {
+            p.insert(0, b'/');
+        }
     }
     p
 }
@@ -206,6 +237,16 @@ pub unsafe extern "C" fn openat(dirfd: c_int, path: *const c_char, flags: c_int,
 }
 
 fn open_os2(p: &[u8], flags: c_int, mode: mode_t) -> c_int {
+    let fd = open_os2_handle(p, flags, mode);
+    if let Some(Fd::File(h)) = classify(fd)
+        && let Some(e) = OPEN.get(h as usize)
+    {
+        e.store(path_hash(p), Ordering::Relaxed);
+    }
+    fd
+}
+
+fn open_os2_handle(p: &[u8], flags: c_int, mode: mode_t) -> c_int {
     let acc = flags & libc::O_ACCMODE;
     if flags & libc::O_DIRECTORY != 0 || (acc == libc::O_RDONLY && flags & libc::O_CREAT == 0 && is_dir(p)) {
         return match query_path(p) {
@@ -257,6 +298,7 @@ pub unsafe extern "C" fn close(fd: c_int) -> c_int {
         Some(Fd::File(h)) => {
             forget(h);
             let rc = unsafe { DosClose(h) };
+            unlink_waiting();
             if rc != 0 { fail_os2(rc) } else { 0 }
         }
         Some(Fd::Socket(s)) => crate::net::close_socket(fd, s),
@@ -506,6 +548,18 @@ pub unsafe extern "C" fn utimensat(dirfd: c_int, path: *const c_char, ts: *const
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn lutimes(path: *const c_char, tv: *const libc::timeval) -> c_int {
+    if tv.is_null() {
+        return unsafe { utimensat(libc::AT_FDCWD, path, core::ptr::null(), 0) };
+    }
+    let ts = [0, 1].map(|i| {
+        let t = unsafe { &*tv.add(i) };
+        libc::timespec { tv_sec: t.tv_sec, tv_nsec: (t.tv_usec * 1000) as _ }
+    });
+    unsafe { utimensat(libc::AT_FDCWD, path, ts.as_ptr(), 0) }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn futimens(fd: c_int, ts: *const libc::timespec) -> c_int {
     let h = match classify(fd) {
         Some(Fd::File(h)) => h,
@@ -737,6 +791,13 @@ fn unlink_os2(p: &[u8]) -> c_int {
     }
     if rc == 5 && is_dir(p) {
         return fail(libc::EISDIR);
+    }
+    if rc == 32 || rc == 5 {
+        let h = path_hash(p);
+        if OPEN.iter().any(|e| e.load(Ordering::Relaxed) == h) {
+            UNLINKED.lock().push(p.to_vec());
+            return 0;
+        }
     }
     fail_os2(rc)
 }

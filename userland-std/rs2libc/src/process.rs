@@ -224,6 +224,11 @@ unsafe fn spawn(
     }
     env.extend_from_slice(b"\0\0");
 
+    // Both share 64 KB (rustc and cargo then use argument files).
+    if args.len() > 32000 || args.len() + env.len() > 60000 {
+        return libc::E2BIG;
+    }
+
     let _g = SPAWN.lock();
     // Apply the file actions to this process, remembering how to undo them.
     let mut saved: Vec<(c_int, Option<u32>)> = Vec::new();

@@ -1,0 +1,8 @@
+[package]
+name = "app"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+mac = { path = "../mac" }
+inifile = { path = "../inifile" }

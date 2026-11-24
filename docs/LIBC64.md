@@ -124,7 +124,8 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
   for single blocks of 16 MB or more, memory comes from above 4 GB (16 MB
   regions); whichever side is full, the other is tried. The library's own
   functions take pointers from anywhere: they copy names and argument
-  blocks below 4 GB for the calls that need it. A program that uses a lot
+  blocks below 4 GB for the calls that need it (and take a path `/C:/dir`,
+  as cargo writes them, for `C:/dir`). A program that uses a lot
   of memory and calls the OS/2 API itself passes memory from the stack,
   static data or DosAllocMem without OBJ_ANY. One block is at most
   4 GB - 64 KB. One spin-then-yield lock covers all threads.

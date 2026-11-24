@@ -164,7 +164,7 @@ cargo xtask run --headless --timeout 150 --mem 6G --init "RS2\STDTST64.EXE"
 cargo xtask run --headless --timeout 60 --init "RS2\PMSTD64.EXE /SELFTEST C:\OS2"
 ```
 
-STDTST64 (userland-std/stdtest, also built as the 32-bit STDTEST) makes 108
+STDTST64 (userland-std/stdtest, also built as the 32-bit STDTEST) makes 111
 checks: threads, synchronisation, thread-locals and their destructors,
 files, directories, locks, times, the environment, panics, TCP and UDP,
 child processes, memory, DLLs (STDTDLL.DLL, and STDTRUST.EXE on

@@ -57,3 +57,5 @@ pub mod spin;
 pub use unwinding as _;
 
 pub use errno::set_errno;
+
+pub use misc::rooted_paths;

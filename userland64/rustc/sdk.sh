@@ -4,7 +4,8 @@
 #
 #   sdk.sh [DIR]              (target/sdk64 by default)
 #
-#   DIR/bin      RUSTC.EXE, RS2-LD.EXE, RSLLVM.DLL
+#   DIR/bin      RUSTC.EXE, RS2-LD.EXE, RSLLVM.DLL; CARGO.EXE and
+#                RSCARGO.DLL if userland64/cargo/build.sh has run
 #   DIR/lib/rs2  what RS2-LD.EXE links into programs and DLLs (rs2libc as
 #                libc.a, start-up code, link64.ld)
 #   DIR/lib/rustlib   the standard library (rustup's, as it is)
@@ -20,6 +21,10 @@ bin=$(ls -d "$(rustc --print sysroot)"/lib/rustlib/*/bin | head -1)
 "$bin/llvm-objcopy" --strip-all "$root/target/rustc64/RUSTC.EXE" "$out/bin/RUSTC.EXE"
 "$bin/llvm-objcopy" --strip-all "$std/target/$t/release/rs2-ld" "$out/bin/RS2-LD.EXE"
 "$bin/llvm-objcopy" --strip-all "$root/target/rustc64/RSLLVM.DLL" "$out/bin/RSLLVM.DLL"
+if [ -f "$root/target/cargo64/CARGO.EXE" ]; then
+    "$bin/llvm-objcopy" --strip-all "$root/target/cargo64/CARGO.EXE" "$out/bin/CARGO.EXE"
+    "$bin/llvm-objcopy" --strip-all "$root/target/cargo64/RSCARGO.DLL" "$out/bin/RSCARGO.DLL"
+fi
 # rs2libc and what it uses as libc.a (std asks for -lc).
 r=$out/lib/rs2
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/rs2libc.XXXXXX")
