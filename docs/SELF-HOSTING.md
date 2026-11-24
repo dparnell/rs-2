@@ -225,6 +225,34 @@ paths put right. In QEMU without hardware virtualisation (4 CPUs emulated
 on an Apple silicon Mac, where the same build takes 13 seconds) the boot
 loader takes 19 seconds and the kernel 51 minutes.
 
+`tests/selfhost/userland.sh` builds the 32-bit userland there the same way:
+
+```text
+cargo run -p xtask -- userland
+```
+
+compiles userland and userland-std (the browser, with ring's C code and the
+JavaScript engine), and converts the programs and DLLs to LX: 230 files,
+which `xtask run --prebuilt` then boots instead of the host's, and STDTEST,
+W16TEST and APITEST run on that. The emulated build takes 2 hours 20
+minutes, with 8 CPUs: xtask 71 seconds, userland 19 minutes, userland-std
+119. `userland.sh PACKAGE...` builds only those of userland's packages,
+`--std` only userland-std.
+
+- rs2-ld32.exe is RS2-LD.EXE again, linking userland-std's 32-bit programs
+  as lld.sh does (with `lib/rs2-32` of the toolchain's tree).
+- The test names the linkers in the environment, and CLANG.EXE and
+  LLVM-AR.EXE in its copy of userland-std's cargo config: CMD makes the
+  names of variables upper case, and the C compiler's are not.
+- No source file may have the name of a device, whatever its extension:
+  opening `con.rs` waits for the keyboard.
+- The userland's data files (messages, help, INF) come from the host, and so
+  do W16TEST.EXE and the 64-bit programs. The programs are not all
+  byte-identical to the host's.
+
+Not there yet: the 64-bit programs of `xtask iso`, its shell scripts, and
+the images themselves.
+
 ## Needed by either route
 
 - Offline builds: vendor the dependencies (`cargo vendor`) and build with
