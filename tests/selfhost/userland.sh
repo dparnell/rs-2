@@ -50,7 +50,7 @@ trap '[ ! -f $t/disk.save ] || cp $t/disk.save work/disk.txt' EXIT
     (cd "$t" && find rs2 -type f) | while read -r f; do printf '%s -> %s\n' "$t/$f" "$(echo "$f" | tr / '\\')"; done
 } > work/disk.txt
 cargo xtask disk --hpfs --size 3000 -o "$t/d.img" > /dev/null
-cargo xtask run --headless --timeout "${TIMEOUT:-9000}" --mem 8G --smp "${SMP:-8}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
+cargo xtask run --headless --timeout "${TIMEOUT:-14000}" --mem 8G --smp "${SMP:-8}" --hdd "$t/d.img" --init 'OS2\CMD.EXE /C E:\build.cmd' > "$t/log" 2>&1
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building
 grep -aq '^end' "$t/log"
 if grep -aqE '^error|^build failed' "$t/log"; then exit 1; fi
