@@ -117,7 +117,8 @@ written (DosOpenL, DosSetFilePtrL, DosSetFileSizeL). `char` is signed.
   "device") and fully buffered otherwise. stderr is unbuffered.
 - **Memory.** malloc keeps chunks with boundary tags in regions from
   DosAllocMem. Free chunks sit in size-class bins and are merged with
-  their neighbours when freed. Blocks of 1 MB or more get regions of their
+  their neighbours when freed; each thread keeps a few chunks of every
+  size to 1 KB for itself, so that most calls take no lock. Blocks of 1 MB or more get regions of their
   own, which are given back by `free`. The first 96 MB of regions are
   below 4 GB (4 MB each), so a program of ordinary size can pass any
   malloc pointer to any OS/2 call (API64.md, "Memory"). After that, and

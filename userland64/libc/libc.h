@@ -24,6 +24,7 @@
 
 /* Each thread's own state, found through one dword of thread-local
  * memory (DosAllocThreadLocalMemory). */
+#define _RS2_CACHE_BINS 63
 struct _rs2_thread {
     int err;
     int sigdepth;
@@ -42,7 +43,13 @@ struct _rs2_thread {
     void *dtors;
     void **tls;
     size_t tls_count;
+    /* malloc.c: a few free chunks of each small size. shared: the block is
+     * not one thread's own, so it keeps none. */
+    int shared;
+    void *cache[_RS2_CACHE_BINS];
+    unsigned char cached[_RS2_CACHE_BINS];
 };
+HIDDEN void _rs2_cache_done(struct _rs2_thread *);
 HIDDEN struct _rs2_thread *_rs2_self(void);
 HIDDEN void _rs2_thread_done(void);
 HIDDEN void _rs2_thread_dtors(void);

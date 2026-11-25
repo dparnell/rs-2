@@ -311,33 +311,46 @@ static void test_sort(void) {
 
 /* ---- math ---- */
 
+/* A number clang does not know: the library computes with it, not clang. */
+static double rt(double x) {
+    volatile double v = x;
+    return v;
+}
+
 static void test_math(void) {
-    check_num("sqrt", sqrt(2), 1.4142135623730951, 0);
-    check_num("sin", sin(M_PI / 6), 0.5, 1e-15);
-    check_num("cos", cos(M_PI / 3), 0.5, 1e-15);
-    check_num("tan", tan(M_PI / 4), 1, 1e-15);
-    check_num("sin big", sin(1e22), -0.8522008497671888, 1e-6);
-    check_num("exp", exp(1), M_E, 1e-15);
-    check_num("log", log(M_E), 1, 1e-15);
-    check_num("log10", log10(1000), 3, 1e-15);
-    check_num("log2", log2(1024), 10, 0);
-    check_num("pow", pow(2, 10), 1024, 0);
-    check_num("pow frac", pow(2, 0.5), M_SQRT2, 1e-15);
-    check_num("pow neg", pow(-2, 3), -8, 0);
-    check_num("atan2", atan2(1, 1), M_PI_4, 1e-15);
-    check_num("atan2 quadrant", atan2(-1, -1), -3 * M_PI_4, 1e-15);
-    check_num("asin", asin(0.5), M_PI / 6, 1e-15);
-    check_num("acos", acos(0.5), M_PI / 3, 1e-15);
-    check_num("sinh", sinh(1), 1.1752011936438014, 1e-15);
-    check_num("tanh", tanh(0.5), 0.46211715726000974, 1e-15);
-    check_num("hypot", hypot(3, 4), 5, 0);
-    check_num("cbrt", cbrt(27), 3, 1e-15);
-    check_num("expm1", expm1(1e-10), 1.00000000005e-10, 1e-15);
-    check_num("log1p", log1p(1e-10), 9.9999999995e-11, 1e-15);
-    check_num("erf", erf(1), 0.8427007929497149, 1e-15);
-    check_num("erfc", erfc(3), 2.209049699858544e-05, 1e-13);
-    check_num("tgamma", tgamma(5), 24, 1e-14);
-    check_num("lgamma", lgamma(0.5), 0.5723649429247001, 1e-14);
+    check_num("sqrt", sqrt(rt(2)), 1.4142135623730951, 0);
+    check_num("sin", sin(rt(M_PI / 6)), 0.5, 1e-15);
+    check_num("cos", cos(rt(M_PI / 3)), 0.5, 1e-15);
+    check_num("tan", tan(rt(M_PI / 4)), 1, 1e-15);
+    check_num("sin big", sin(rt(1e22)), -0.8522008497671888, 1e-15);
+    check_num("cos big", cos(rt(1e300)), -0.5753861119575491, 1e-15);
+    check_num("tan big", tan(rt(1e10)), -0.5583496378112419, 1e-15);
+    check_num("sin pi", sin(rt(M_PI)), 1.2246467991473532e-16, 1e-15);
+    check_num("sin negative", sin(rt(-4)), 0.7568024953079282, 1e-15);
+    check_num("cos quadrants", cos(rt(-2)) + cos(rt(5)), -0.13248465108391616, 1e-14);
+    check_num("exp", exp(rt(1)), M_E, 1e-15);
+    check_num("log", log(rt(M_E)), 1, 1e-15);
+    check_num("log10", log10(rt(1000)), 3, 1e-15);
+    check_num("log2", log2(rt(1024)), 10, 0);
+    check_num("pow", pow(rt(2), rt(10)), 1024, 0);
+    check_num("pow frac", pow(rt(2), rt(0.5)), M_SQRT2, 1e-15);
+    check_num("pow neg", pow(rt(-2), rt(3)), -8, 0);
+    check_num("atan2", atan2(rt(1), rt(1)), M_PI_4, 1e-15);
+    check_num("atan2 quadrant", atan2(rt(-1), rt(-1)), -3 * M_PI_4, 1e-15);
+    check_num("asin", asin(rt(0.5)), M_PI / 6, 1e-15);
+    check_num("acos", acos(rt(0.5)), M_PI / 3, 1e-15);
+    check_num("sinh", sinh(rt(1)), 1.1752011936438014, 1e-15);
+    check_num("tanh", tanh(rt(0.5)), 0.46211715726000974, 1e-15);
+    check_num("hypot", hypot(rt(3), rt(4)), 5, 0);
+    check_num("cbrt", cbrt(rt(27)), 3, 1e-15);
+    check_num("expm1", expm1(rt(1e-10)), 1.00000000005e-10, 1e-15);
+    check_num("log1p", log1p(rt(1e-10)), 9.9999999995e-11, 1e-15);
+    check_num("erf", erf(rt(1)), 0.8427007929497149, 1e-15);
+    check_num("erf small", erf(rt(-0.25)), -0.2763263901682369, 1e-15);
+    check_num("erf 2", erf(rt(2)), 0.9953222650189527, 1e-15);
+    check_num("erfc", erfc(rt(3)), 2.209049699858544e-05, 1e-13);
+    check_num("tgamma", tgamma(rt(5)), 24, 1e-14);
+    check_num("lgamma", lgamma(rt(0.5)), 0.5723649429247001, 1e-14);
     check("floor/ceil", floor(-1.5) == -2 && ceil(-1.5) == -1 && floor(2.0) == 2 && ceil(2.1) == 3);
     check("round/trunc", round(-2.5) == -3 && round(2.4) == 2 && trunc(-2.7) == -2 && rint(2.5) == 2);
     check("fmod", fmod(7.5, 2) == 1.5 && fmod(-7.5, 2) == -1.5);

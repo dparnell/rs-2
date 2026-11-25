@@ -11,6 +11,10 @@ name = "bootinfo"
 version = "0.1.0"
 
 [[package]]
+name = "cc64"
+version = "0.1.0"
+
+[[package]]
 name = "crashqr"
 version = "0.1.0"
 

@@ -24,7 +24,7 @@ static ULONG *slot(void) {
 }
 
 /* Threads before the slot exists, or if it cannot be had, share this. */
-static struct _rs2_thread fallback;
+static struct _rs2_thread fallback = {.shared = 1};
 
 struct _rs2_thread *_rs2_self(void) {
     ULONG *s = slot();
@@ -46,6 +46,7 @@ void _rs2_thread_done(void) {
     if (s && *s) {
         PVOID p = (PVOID)(uintptr_t)*s;
         HEV ev = ((struct _rs2_thread *)p)->event;
+        _rs2_cache_done(p);
         *s = 0;
         DosFreeMem(p);
         if (ev)
