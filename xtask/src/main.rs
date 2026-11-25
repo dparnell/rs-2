@@ -481,7 +481,7 @@ fn main() -> ExitCode {
         eprintln!("usage: cargo xtask build|run|iso [options]");
         return ExitCode::FAILURE;
     };
-    let words = if cmd == "diskget" || cmd == "userland" { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
+    let words = if matches!(cmd.as_str(), "diskget" | "userland" | "devdisk") { args[1..].iter().take_while(|a| *a != "-o").count() } else { 0 };
     let o = parse(&args[1 + words..]);
     let ok = match cmd.as_str() {
         "build" => build(&o).is_some(),
@@ -531,6 +531,15 @@ fn main() -> ExitCode {
         }
         // The 64-bit programs (work/userland/64).
         "userland64" => build_userland_std64().is_some() && build_userland64().is_some(),
+        // devdisk DIR -o ISO: the developer disk (docs/DEVDISK.md), which
+        // userland64/devdisk/build.sh has put into DIR, with its installers.
+        "devdisk" => match &args[1..1 + words] {
+            [dir] => devdisk(&o, Path::new(dir)),
+            _ => {
+                eprintln!("usage: cargo xtask devdisk DIR -o ISO (userland64/devdisk/build.sh runs it)");
+                false
+            }
+        },
         "diskget" => {
             // diskget IMAGE PATH... -o DIR: files of an HPFS disk image
             // (as `disk --hpfs` makes), by their names into DIR;
@@ -721,7 +730,10 @@ fn version_text() -> String {
     let git = |args: &[&str]| {
         Command::new("git").args(args).current_dir(root()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
     };
-    let commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let commit = git(&["rev-parse", "--short", "HEAD"])
+        // The developer disk's sources have no history, but this.
+        .or_else(|| std::fs::read_to_string(root().join(".rs2-commit")).ok().map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| "unknown".into());
     let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
     let days = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) / 86400) as i64;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
@@ -2259,6 +2271,46 @@ Boot this disc (or a USB stick it was written to) on a UEFI machine.\r\n"
     iso::write(&out, "RS2_LIVE", &img, &[("README.TXT".to_string(), readme)]);
     println!("wrote {} ({} MB)", out.display(), std::fs::metadata(&out).map(|m| m.len() >> 20).unwrap_or(0));
     let _ = Stdio::null();
+    true
+}
+
+/// The developer disk's installers (userland/devinst), not on the live
+/// ISO: bin, file on the disk, whether a PM program.
+const DEV_PROGRAMS: &[(&str, &str, bool)] = &[("devinst", "INSTALL.EXE", false), ("pmdevins", "SETUP.EXE", true)];
+
+fn devdisk(o: &Opts, dir: &Path) -> bool {
+    let ul = root().join("userland");
+    let cargo = || Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+    let ok = |c: &mut Command| c.status().is_ok_and(|s| s.success());
+    if !ok(cargo().current_dir(&ul).args(["build", "--release", "-p", "devinst"]).env_remove("CARGO_TARGET_DIR")) {
+        return false;
+    }
+    for (bin, name, pm) in DEV_PROGRAMS {
+        let elf = program(ul.join("target/i686-unknown-linux-gnu/release").join(bin));
+        let mut c = cargo();
+        c.current_dir(root()).args(["run", "-q", "--release", "-p", "elf2lx", "--"]).arg(&elf).arg(dir.join(name));
+        if *pm {
+            c.arg("--pm");
+            if let Some(ico) = pmwin::appicons::icon_file("PMINSTAL") {
+                let path = ul.join("target/SETUP.ICO");
+                std::fs::write(&path, ico).unwrap();
+                c.args(["--res", "1", "1"]).arg(path);
+            }
+        }
+        if !ok(&mut c) {
+            return false;
+        }
+    }
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap()))
+        .collect();
+    files.sort();
+    let out = o.output.clone().unwrap_or_else(|| root().join("work/rs2-dev.iso"));
+    iso::write_data(&out, "RS2_DEV", &files);
+    println!("wrote {} ({} MB)", out.display(), std::fs::metadata(&out).map(|m| m.len() >> 20).unwrap_or(0));
     true
 }
 

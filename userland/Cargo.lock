@@ -67,6 +67,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "devinst"
+version = "0.1.0"
+dependencies = [
+ "inflate",
+ "os2",
+ "pmkit",
+ "utils",
+]
+
+[[package]]
 name = "display"
 version = "0.1.0"
 dependencies = [
@@ -149,6 +159,10 @@ dependencies = [
  "os2",
  "pmkit",
 ]
+
+[[package]]
+name = "inflate"
+version = "0.1.0"
 
 [[package]]
 name = "inifile"

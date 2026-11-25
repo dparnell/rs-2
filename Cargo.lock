@@ -59,6 +59,10 @@ name = "hpfs"
 version = "0.1.0"
 
 [[package]]
+name = "inflate"
+version = "0.1.0"
+
+[[package]]
 name = "inifile"
 version = "0.1.0"
 

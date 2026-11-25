@@ -1,0 +1,6 @@
+# rs2's cargo has no network and no git.
+[net]
+offline = true
+
+[cargo-new]
+vcs = "none"

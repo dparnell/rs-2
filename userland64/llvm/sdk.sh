@@ -35,8 +35,13 @@ cp -R "$ul/include/." "$out/include/"
 cp "$ul"/cxx/config/* "$out/include/c++/config/"
 cp -R "$cxx/libcxx/include/." "$out/include/c++/v1/"
 cp -R "$cxx/libcxxabi/include/." "$out/include/c++/abi/"
-res=$(ls -d "$llvm"/rs2/lib/clang/*/include "$llvm"/host/lib/clang/*/include 2> /dev/null | head -1)
-[ -z "$res" ] || { d=$out/lib/clang/$(basename "$(dirname "$res")"); mkdir -p "$d"; cp -RL "$res" "$d/"; }
+if [ -f "$root/target/llvm64/clang/version" ]; then
+    d=$out/lib/clang/$(cat "$root/target/llvm64/clang/version")
+    mkdir -p "$d"
+    cp -R "$root/target/llvm64/clang/include" "$d/"
+fi
+res=$(ls -d "$llvm"/rs2/lib/clang/*/include "$llvm"/host/lib/clang/*/include 2> /dev/null | head -1) || true
+[ -z "$res" ] || [ -d "$out/lib/clang" ] || { d=$out/lib/clang/$(basename "$(dirname "$res")"); mkdir -p "$d"; cp -RL "$res" "$d/"; }
 cp "$lib/crt1.o" "$lib/crtdll.o" "$lib/dllstart.o" "$lib/libc64.a" "$lib/libc.a" "$lib/libcxx64s.a" "$lib/LIBCXX64.DLL" \
     "$ul/link64.ld" "$out/lib/"
 printf '.section .rodata\n.globl RS2_APPTYPE\n.type RS2_APPTYPE,@object\nRS2_APPTYPE: .long 3\n' |

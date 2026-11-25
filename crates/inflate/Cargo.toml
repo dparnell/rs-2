@@ -1,0 +1,9 @@
+[package]
+name = "inflate"
+description = "no_std: raw deflate data (RFC 1951) decompressed in pieces, and zip's CRC-32"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false

@@ -1,0 +1,36 @@
+rs2 developer disk, installed in @DIR@
+
+  DEVENV.CMD   sets up a command prompt (after the restart that follows the
+               installation every command prompt has the settings)
+  sdk          the compilers: bin, include, lib; crates: the OS/2 API for Rust
+  samples      C, C++ and Rust programs; BUILD.CMD there builds them all
+  docs         the 64-bit API, the C and C++ libraries, std, self-hosting
+  cargo        cargo's own directory (CARGO_HOME)
+  src          rs2's sources, if they were installed
+  licenses     the compilers' licences
+  tmp          temporary files
+
+C and C++:
+
+  clang hello.c -o HELLO.EXE
+  clang++ -std=c++20 prog.cpp -o PROG.EXE
+  rc64 pmprog.rc -o pmprog_rc.s
+  clang -mwindows pmprog.c pmprog_rc.s -o PMPROG.EXE
+  clang -shared lib.c -o LIB.DLL
+
+Rust:
+
+  rustc -O hello.rs -o HELLO.EXE
+  cargo new hello          (no network: cargo is offline, and crates from
+  cargo build --release     crates.io have to be vendored)
+
+Programs that call the OS/2 API name the os2 crate in Cargo.toml:
+
+  os2 = { path = "@UDIR@/sdk/crates/os2", default-features = false }
+
+rs2 itself, if its sources were installed (2500 MB free, 8 GB of memory):
+
+  cd src
+  build                    (the live ISO: @DIR@\src\rs2-live.iso)
+
+"cargo xtask" has the other commands; docs\SELF-HOSTING.md has the rest.

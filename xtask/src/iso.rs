@@ -126,6 +126,88 @@ fn dir_record(name: &[u8], lba: u32, size: u32, dir: bool) -> Vec<u8> {
     r
 }
 
+/// The root directory (one sector, at 22) of files: name, sector, size.
+fn root_dir<'a>(files: impl Iterator<Item = (&'a [u8], u32, u32)>) -> Vec<u8> {
+    let mut root = Vec::new();
+    root.extend(dir_record(&[0], 22, SECTOR as u32, true));
+    root.extend(dir_record(&[1], 22, SECTOR as u32, true));
+    for (name, lba, size) in files {
+        root.extend(dir_record(name, lba, size, false));
+    }
+    assert!(root.len() <= SECTOR, "root directory too large");
+    root.resize(SECTOR, 0);
+    root
+}
+
+/// The primary volume descriptor.
+fn volume(label: &str, total: u32) -> Vec<u8> {
+    let mut pvd = vec![0u8; SECTOR];
+    pvd[0] = 1;
+    pvd[1..6].copy_from_slice(b"CD001");
+    pvd[6] = 1;
+    pvd[8..40].copy_from_slice(&pad("RS2", 32));
+    pvd[40..72].copy_from_slice(&pad(label, 32));
+    pvd[80..88].copy_from_slice(&both32(total));
+    pvd[120..124].copy_from_slice(&both16(1));
+    pvd[124..128].copy_from_slice(&both16(1));
+    pvd[128..132].copy_from_slice(&both16(SECTOR as u16));
+    pvd[132..140].copy_from_slice(&both32(10)); // path table size
+    pvd[140..144].copy_from_slice(&20u32.to_le_bytes());
+    pvd[148..152].copy_from_slice(&21u32.to_be_bytes());
+    let rootrec = dir_record(&[0], 22, SECTOR as u32, true);
+    pvd[156..156 + 34].copy_from_slice(&rootrec[..34]);
+    pvd[190..318].copy_from_slice(&pad("RS2", 128));
+    pvd[318..446].copy_from_slice(&pad("RS2 PROJECT", 128));
+    pvd[446..574].copy_from_slice(&pad("CARGO XTASK ISO", 128));
+    pvd[574..702].copy_from_slice(&pad("", 128));
+    let date = b"2026101800000000\0";
+    for at in [813usize, 830, 847, 864] {
+        pvd[at..at + 17].copy_from_slice(date);
+    }
+    pvd[881] = 1;
+    pvd
+}
+
+fn terminator() -> Vec<u8> {
+    let mut term = vec![0u8; SECTOR];
+    term[0] = 255;
+    term[1..6].copy_from_slice(b"CD001");
+    term[6] = 1;
+    term
+}
+
+/// Path tables (sectors 20 and 21): just the root.
+fn path_tables(img: &mut [u8]) {
+    for (at, lba, one) in [(20, 22u32.to_le_bytes(), 1u16.to_le_bytes()), (21, 22u32.to_be_bytes(), 1u16.to_be_bytes())] {
+        let t = &mut img[at * SECTOR..];
+        t[0] = 1;
+        t[2..6].copy_from_slice(&lba);
+        t[6..8].copy_from_slice(&one);
+    }
+}
+
+/// A disc that does not boot: `files` (8.3 names) in its root directory.
+pub fn write_data(out: &Path, label: &str, files: &[(String, Vec<u8>)]) {
+    let mut next = 23u32;
+    let mut placed = Vec::new();
+    for (name, data) in files {
+        placed.push((format!("{};1", name.to_ascii_uppercase()).into_bytes(), next, data));
+        next += data.len().div_ceil(SECTOR).max(1) as u32;
+    }
+    placed.sort();
+    let mut img = vec![0u8; next as usize * SECTOR];
+    img[16 * SECTOR..17 * SECTOR].copy_from_slice(&volume(label, next));
+    img[17 * SECTOR..18 * SECTOR].copy_from_slice(&terminator());
+    path_tables(&mut img);
+    let root = root_dir(placed.iter().map(|(n, l, d)| (&n[..], *l, d.len() as u32)));
+    img[22 * SECTOR..23 * SECTOR].copy_from_slice(&root);
+    for (_, lba, data) in &placed {
+        let at = *lba as usize * SECTOR;
+        img[at..at + data.len()].copy_from_slice(data);
+    }
+    std::fs::write(out, img).expect("write iso");
+}
+
 /// Write the ISO. `esp` is the FAT image used for UEFI boot; `files` are
 /// extra (name, contents) pairs placed in the root directory.
 pub fn write(out: &Path, label: &str, esp: &[u8], files: &[(String, Vec<u8>)]) {
@@ -142,14 +224,7 @@ pub fn write(out: &Path, label: &str, esp: &[u8], files: &[(String, Vec<u8>)]) {
     let total = next + GPT_TAIL_SECTORS;
 
     // Root directory.
-    let mut root = Vec::new();
-    root.extend(dir_record(&[0], 22, SECTOR as u32, true));
-    root.extend(dir_record(&[1], 22, SECTOR as u32, true));
-    for (name, lba, data) in &placed {
-        root.extend(dir_record(name, *lba, data.len() as u32, false));
-    }
-    assert!(root.len() <= SECTOR, "root directory too large");
-    root.resize(SECTOR, 0);
+    let root = root_dir(placed.iter().map(|(n, l, d)| (&n[..], *l, d.len() as u32)));
 
     let mut img = vec![0u8; total as usize * SECTOR];
 
@@ -176,32 +251,7 @@ pub fn write(out: &Path, label: &str, esp: &[u8], files: &[(String, Vec<u8>)]) {
     img[511] = 0xaa;
     write_gpt(&mut img, total512, start512 as u64, count512 as u64);
 
-    // Primary volume descriptor.
-    let mut pvd = vec![0u8; SECTOR];
-    pvd[0] = 1;
-    pvd[1..6].copy_from_slice(b"CD001");
-    pvd[6] = 1;
-    pvd[8..40].copy_from_slice(&pad("RS2", 32));
-    pvd[40..72].copy_from_slice(&pad(label, 32));
-    pvd[80..88].copy_from_slice(&both32(total));
-    pvd[120..124].copy_from_slice(&both16(1));
-    pvd[124..128].copy_from_slice(&both16(1));
-    pvd[128..132].copy_from_slice(&both16(SECTOR as u16));
-    pvd[132..140].copy_from_slice(&both32(10)); // path table size
-    pvd[140..144].copy_from_slice(&20u32.to_le_bytes());
-    pvd[148..152].copy_from_slice(&21u32.to_be_bytes());
-    let rootrec = dir_record(&[0], 22, SECTOR as u32, true);
-    pvd[156..156 + 34].copy_from_slice(&rootrec[..34]);
-    pvd[190..318].copy_from_slice(&pad("RS2", 128));
-    pvd[318..446].copy_from_slice(&pad("RS2 PROJECT", 128));
-    pvd[446..574].copy_from_slice(&pad("CARGO XTASK ISO", 128));
-    pvd[574..702].copy_from_slice(&pad("", 128));
-    let date = b"2026101800000000\0";
-    for at in [813usize, 830, 847, 864] {
-        pvd[at..at + 17].copy_from_slice(date);
-    }
-    pvd[881] = 1;
-    img[16 * SECTOR..17 * SECTOR].copy_from_slice(&pvd);
+    img[16 * SECTOR..17 * SECTOR].copy_from_slice(&volume(label, total));
 
     // El Torito boot record.
     let mut br = vec![0u8; SECTOR];
@@ -216,12 +266,7 @@ pub fn write(out: &Path, label: &str, esp: &[u8], files: &[(String, Vec<u8>)]) {
     br[71..75].copy_from_slice(&19u32.to_le_bytes());
     img[17 * SECTOR..18 * SECTOR].copy_from_slice(&br);
 
-    // Terminator.
-    let mut term = vec![0u8; SECTOR];
-    term[0] = 255;
-    term[1..6].copy_from_slice(b"CD001");
-    term[6] = 1;
-    img[18 * SECTOR..19 * SECTOR].copy_from_slice(&term);
+    img[18 * SECTOR..19 * SECTOR].copy_from_slice(&terminator());
 
     // Boot catalog: validation entry + default entry (UEFI, no emulation).
     let mut cat = vec![0u8; SECTOR];
@@ -242,17 +287,7 @@ pub fn write(out: &Path, label: &str, esp: &[u8], files: &[(String, Vec<u8>)]) {
     cat[40..44].copy_from_slice(&esp_lba.to_le_bytes());
     img[19 * SECTOR..20 * SECTOR].copy_from_slice(&cat);
 
-    // Path tables: just the root.
-    let mut lpt = vec![0u8; SECTOR];
-    lpt[0] = 1;
-    lpt[2..6].copy_from_slice(&22u32.to_le_bytes());
-    lpt[6..8].copy_from_slice(&1u16.to_le_bytes());
-    img[20 * SECTOR..21 * SECTOR].copy_from_slice(&lpt);
-    let mut mpt = vec![0u8; SECTOR];
-    mpt[0] = 1;
-    mpt[2..6].copy_from_slice(&22u32.to_be_bytes());
-    mpt[6..8].copy_from_slice(&1u16.to_be_bytes());
-    img[21 * SECTOR..22 * SECTOR].copy_from_slice(&mpt);
+    path_tables(&mut img);
 
     img[22 * SECTOR..23 * SECTOR].copy_from_slice(&root);
     for (_, lba, data) in &placed {

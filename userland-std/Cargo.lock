@@ -994,6 +994,17 @@ name = "os2"
 version = "0.1.0"
 
 [[package]]
+name = "os2-exe"
+version = "0.1.0"
+
+[[package]]
+name = "os2-rc"
+version = "0.1.0"
+dependencies = [
+ "os2-exe",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1210,6 +1221,14 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "rc64"
+version = "0.1.0"
+dependencies = [
+ "os2-rc",
+ "rs2libc",
+]
 
 [[package]]
 name = "redox_syscall"
