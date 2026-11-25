@@ -128,8 +128,8 @@ clang finds the tree relative to itself. Temporary files go to TMPDIR, TMP
 or TEMP, else the current directory. clang++.EXE runs CLANG.EXE. The same
 tree is a cross SDK for the host's build of this clang:
 `work/llvm/host/bin/clang --target=x86_64-unknown-rs2
---sysroot=target/sdk64`. Resources (`cc64.sh --rc`) are not in it yet:
-os2-rc has to run on rs2 for that.
+--sysroot=target/sdk64`. Resource
+scripts are compiled by rc64 of the developer disk ([DEVDISK.md](DEVDISK.md)).
 
 `tests/clang64/run.sh` builds a C program, a PM program, a C++ DLL,
 CXXTEST and the C library's sources on rs2 and compares each result with
@@ -285,6 +285,5 @@ DOS test programs' builds), downloads, and hosts on Windows.
 - Performance: each disk runs one command at a time (on the roadmap).
   Builds would be slow but workable on a
   VM with several CPUs and 8 GB+ of memory.
-- Distribution: the toolchain's licences allow shipping it, but it is not
-  rs2 code, so it belongs on a separate developer image rather than the
-  dist ISO.
+- Distribution: the toolchain is on an optional developer disk of its own
+  ([DEVDISK.md](DEVDISK.md)), as it is not rs2 code.

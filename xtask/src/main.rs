@@ -16,6 +16,7 @@
 //!                  [--smp N] [--mem SIZE] [--bare] [--cmdline 'WORDS']
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
+//! cargo xtask fetch                         only download what a build does
 //! cargo xtask ir                            write the interface repositories
 //!                                           (target/SOM.IR, WPSH.IR, ...)
 //! cargo xtask disk [--hpfs|--fat32] [--system] [--size MB] [-o FILE]
@@ -531,6 +532,11 @@ fn main() -> ExitCode {
         }
         // The 64-bit programs (work/userland/64).
         "userland64" => build_userland_std64().is_some() && build_userland64().is_some(),
+        // What a build downloads (work/cache, work/firmware), only that.
+        "fetch" => {
+            firmware();
+            four_os2(true).is_some()
+        }
         // devdisk DIR -o ISO: the developer disk (docs/DEVDISK.md), which
         // userland64/devdisk/build.sh has put into DIR, with its installers.
         "devdisk" => match &args[1..1 + words] {

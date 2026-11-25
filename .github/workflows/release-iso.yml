@@ -1,6 +1,8 @@
 # On a pushed tag (v*): create the GitHub release for it (if there is none
 # yet), build the live ISO (build-iso.yml) and attach it to the release as
-# rs2-live.iso, with its SHA-256.
+# rs2-live.iso, with its SHA-256. The optional developer disk
+# (build-devdisk.yml) follows as rs2-dev.iso when it is built, which can take
+# hours; the release has its live ISO whatever becomes of that.
 #
 # A release made by hand in GitHub's web page for a new tag creates that
 # tag, which also starts this workflow: the release is then kept as it is
@@ -62,3 +64,26 @@ jobs:
 
       - name: Attach to the release
         run: gh release upload "$TAG" rs2-live.iso rs2-live.iso.sha256 --clobber
+
+  devdisk:
+    needs: release
+    uses: ./.github/workflows/build-devdisk.yml
+    with:
+      ref: refs/tags/${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+  attach-devdisk:
+    needs: devdisk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: rs2-dev
+
+      - name: Attach to the release
+        run: gh release upload "$TAG" rs2-dev.iso rs2-dev.iso.sha256 --clobber

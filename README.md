@@ -147,6 +147,11 @@ on rs2:
 cargo run -p xtask -- iso --dist --release -o E:/rs2.iso
 ```
 
+The compilers are on the optional developer disk, `rs2-dev.iso`, which each
+release has too: its installer sets up everything to develop 64-bit programs
+in Rust, C and C++ on rs2 and, if wanted, rs2's sources
+([docs/DEVDISK.md](docs/DEVDISK.md)).
+
 The compilers are not on the live ISO. They are LLVM's clang and lld and
 Rust's rustc and cargo, cross-built for rs2 once on another system
 (`userland64/llvm/build.sh`, `userland64/rustc/build.sh`,

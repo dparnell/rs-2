@@ -54,6 +54,7 @@ git archive HEAD Cargo.toml Cargo.lock README.md .cargo boot kernel crates tools
 echo "$commit" > "$s/.rs2-commit"
 (cd "$s" && cargo vendor -q --locked -s userland/Cargo.toml -s userland-std/Cargo.toml vendor > /dev/null)
 printf '\n[source.crates-io]\nreplace-with = "vendored"\n[source.vendored]\ndirectory = "vendor"\n' >> "$s/.cargo/config.toml"
+cargo xtask fetch
 for d in cache firmware; do
     [ ! -d "work/$d" ] || { mkdir -p "$s/work" && cp -RL "work/$d" "$s/work/"; }
 done
