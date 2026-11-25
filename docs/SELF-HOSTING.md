@@ -1,7 +1,8 @@
-# Self-hosting rs2 (notes for later)
+# Self-hosting rs2
 
-Status: under way. This records what it would take for rs2 to build
-itself, i.e. `cargo xtask iso` running on rs2. The first step is done:
+Status: rs2 builds itself. `cargo xtask iso` runs on rs2 and the live ISO
+it makes boots ("rs2 on rs2" below); macOS and Linux still build it as
+before. This records how it got there and what is left. The first step:
 rs2 runs 64-bit programs (ELF64, long mode) with a native 64-bit OS/2
 API, including PM: see [API64.md](API64.md). They can use memory above
 4 GB (API64.md, "Memory"), and C programs have a C library of their own
@@ -17,10 +18,10 @@ The build is three Cargo workspaces (kernel and tools, `userland` and
 
 - `clang`, for the 64-bit C and C++ libraries (`userland64/c/cc64.sh`) and
   for ring's C code in userland-std
-- a POSIX shell, for `cc64.sh`, `userland-std/{cc,cc64,ar,lld}.sh` and the
-  DOS test programs' `build.sh` (better rewritten in Rust than a shell
-  ported)
-- `git` (the version stamp), `curl` and `unzip` (optional downloads)
+  (cc64 itself is tools/cc64, in Rust; the script builds and runs it)
+- a POSIX shell, for `userland-std/{cc,cc64,ar,lld,dyn64}.sh`; rs2 has none
+  and uses its own linkers and compilers by name instead
+- `git` (the version stamp) and `curl` (optional downloads), neither on rs2
 
 QEMU is needed only for `xtask run`, not for `build`, `iso` or `disk`.
 
@@ -103,9 +104,8 @@ programs of rs2's own as well.
 5. `cargo`: done, offline. See "cargo" below.
 6. The boot loader and the kernel built on rs2: done. See "rs2 on rs2"
    below.
-7. `cargo xtask iso` on rs2, with the shell scripts gone: the 32-bit
-   userland (RS2-LD.EXE knows 64-bit programs only), userland-std's
-   dependencies vendored, the 64-bit C libraries.
+7. `cargo xtask iso` on rs2, with the shell scripts gone: done (the 32-bit
+   userland, the 64-bit programs and C libraries, the image).
 
 ## The C and C++ toolchain
 
@@ -170,8 +170,8 @@ rustc --crate-type cdylib lib.rs          (libname.so: the DLL NAME)
 - **Stacks** that the stacker crate makes are mapped below 4 GB, as the
   OS/2 API takes no pointers above.
 
-Not there yet: `dylib` crates that share std (userland-std/dyn64.sh) and
-linkers for the other targets (kernel, boot loader, 32-bit userland).
+`dylib` crates that share std need no dyn64.sh there: the sysroot has no
+`libstd.so` to begin with, and `-C prefer-dynamic` is enough.
 
 `tests/rustc64/run.sh` compiles, links and runs programs there, a proc
 macro and its user, and a cdylib and its user, and compares objects with
@@ -250,8 +250,30 @@ minutes, with 8 CPUs: xtask 71 seconds, userland 19 minutes, userland-std
   do W16TEST.EXE and the 64-bit programs. The programs are not all
   byte-identical to the host's.
 
-Not there yet: the 64-bit programs of `xtask iso`, its shell scripts, and
-the images themselves.
+`tests/selfhost/iso.sh` builds everything there:
+
+```text
+cargo run -p xtask -- iso --dist --release -o E:/rs2.iso
+```
+
+It boots rs2 with the results and runs the 64-bit and 32-bit test programs
+on it, then boots the ISO. `iso.sh --64` builds and tests the 64-bit
+programs only (`xtask userland64`). The whole emulated build takes 1 hour
+5 minutes with 8 CPUs: the kernel 6 minutes, userland 13, userland-std 17,
+the rest xtask, the 64-bit programs, the C and C++ libraries and the image.
+(The times above are from before LIBC64's malloc had per-thread caches;
+the compilers' threads mostly waited for its lock.)
+
+- cc64 (tools/cc64) replaces the script: it finds clang, rust-lld and
+  llvm-ar in rustup's tools or else on PATH, passes long argument lists in
+  response files, and reads ELF files itself.
+- xtask unpacks zips itself, and strips the kernel itself without
+  rust-objcopy.
+- LIBC64.DLL is byte-identical to the host's; C++ and Rust programs are
+  not all (other compiler versions and paths).
+
+Not there yet: data files that come from the host (W16TEST.EXE and the
+DOS test programs' builds), downloads, and hosts on Windows.
 
 ## Needed by either route
 

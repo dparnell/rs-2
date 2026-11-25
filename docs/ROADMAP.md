@@ -93,8 +93,8 @@ Microsoft file (docs/WIN16.md).
   byte-range locks, IBM's NET.EXE on rs2's NETAPI, NFS
 - MMPM/2: MPEG and Indeo video, IBM's Ultimotion codebook (rs2 draws
   those blocks flat), multiple images per file, compound files (RIFF CF)
-- self-hosting (building rs2 on rs2): 64-bit processes with a Linux
-  system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
+- self-hosting: rs2 builds its own ISO; left: rustdoc, downloads (git,
+  curl), a shell; see [SELF-HOSTING.md](SELF-HOSTING.md)
 - other architectures (AArch64 on QEMU `virt` and the Raspberry Pi 4,
   then RISC-V): an architecture layer in the kernel, a native kernel,
   OS/2 programs on an x86 runner built from x86emu, native system DLLs
