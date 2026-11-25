@@ -38,6 +38,11 @@ programs unmodified, natively, on 64-bit PCs.
   OS/2 INI files; see [docs/PM.md](docs/PM.md).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
+- 64-bit native programs, Presentation Manager ones included, in C, C++
+  and Rust; see [docs/API64.md](docs/API64.md).
+- Self-hosting: clang, lld, rustc and cargo run on rs2, and rs2 builds
+  its own live ISO there, which boots; see
+  [Building rs2 on rs2](#building-rs2-on-rs2).
 
 ![The rs2 live system: the Workplace Shell desktop with the Programs folder and an OS/2 window running ver and dir](docs/images/rs2-live.png)
 
@@ -122,7 +127,7 @@ cargo xtask iso --dist --release -o rs2.iso
 
 This builds everything in release mode (loader, kernel, the OS/2
 programs and DLLs listed in `dist/manifest.txt`) and writes `rs2.iso`,
-about 66 MB. Without `-o` it goes to `work/rs2.iso`. The first build
+about 77 MB. Without `-o` it goes to `work/rs2.iso`. The first build
 takes a few minutes; later ones only rebuild what changed.
 
 The image is a hybrid: attach it to a virtual machine as a CD (see
@@ -131,6 +136,27 @@ USB stick for a real PC with UEFI firmware (Secure Boot off), e.g. on
 macOS `diskutil list` to find the stick, then `sudo dd if=rs2.iso
 of=/dev/rdiskN bs=4m`; on Linux `sudo dd if=rs2.iso of=/dev/sdX bs=4M
 status=progress`. `dd` overwrites the whole device: check its name.
+
+### Building rs2 on rs2
+
+rs2 can build itself: kernel, boot loader, all 32-bit and 64-bit programs
+and DLLs, and the live ISO, with the same command as elsewhere, running
+on rs2:
+
+```text
+cargo run -p xtask -- iso --dist --release -o E:/rs2.iso
+```
+
+The compilers are not on the live ISO. They are LLVM's clang and lld and
+Rust's rustc and cargo, cross-built for rs2 once on another system
+(`userland64/llvm/build.sh`, `userland64/rustc/build.sh`,
+`userland64/cargo/build.sh`, then `userland64/rustc/sdk.sh`).
+`tests/selfhost/iso.sh` does the rest on macOS: it puts them and
+the sources (dependencies included, as cargo is offline only there) on a
+disk, builds the ISO on rs2 in QEMU (about an hour with 8 emulated
+CPUs; 8 GB of memory), runs the test programs on the result and boots the
+ISO. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for how it works
+and what is still missing, such as rustdoc and git.
 
 ### Trying it in QEMU
 
