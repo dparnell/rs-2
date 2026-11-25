@@ -6,6 +6,7 @@
 #
 #   run.sh [ISO]         (work/rs2-dev.iso; userland64/devdisk/build.sh)
 #   run.sh --rs2 [ISO]   also builds rs2's 64-bit programs from the disk's sources
+#   run.sh --iso [ISO]   the whole live ISO instead (over an hour)
 #
 # Changes work/disk.txt for the run and puts it back.
 set -e
@@ -13,7 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 cd "$root"
 rs2=
-[ "$1" != --rs2 ] || { rs2=1; shift; }
+case "$1" in --rs2 | --iso) rs2=$1; shift ;; esac
 iso=${1:-$root/work/rs2-dev.iso}
 t=$root/work/devdisktest
 rm -rf "$t"
@@ -48,7 +49,10 @@ say 'cargo new fresh'
 say 'cd fresh'
 say 'cargo run'
 say 'echo samples done'
-if [ -n "$rs2" ]; then
+if [ "$rs2" = --iso ]; then
+    say 'call D:\RS2DEV\src\BUILD.CMD'
+    say 'dir D:\RS2DEV\src\*.iso'
+elif [ -n "$rs2" ]; then
     say 'call D:\RS2DEV\src\BUILD.CMD userland64'
     say 'dir D:\RS2DEV\src\work\userland\64'
 fi
@@ -56,7 +60,7 @@ say 'echo end'
 [ ! -f work/disk.txt ] || cp work/disk.txt "$t/disk.save"
 trap '[ ! -f $t/disk.save ] || cp $t/disk.save work/disk.txt' EXIT
 printf '%s -> t.cmd\n' "$cmd" > work/disk.txt
-cargo xtask disk --hpfs --size 3500 -o "$t/d.img" > /dev/null
+cargo xtask disk --hpfs --size 4000 -o "$t/d.img" > /dev/null
 # QEMU is stopped when the script has ended.
 (
     while ! grep -aq '^end' work/serial.log 2> /dev/null || [ ! -f "$t/started" ]; do
@@ -85,6 +89,11 @@ has 'PMHELLO.EXE\|pmhello.exe'
 has 'Hello, world!'
 has '^end'
 if grep -aqE '^error' "$t/log"; then exit 1; fi
-if [ -n "$rs2" ]; then
+if [ "$rs2" = --iso ]; then
+    cargo xtask diskget "$t/d.img" 'RS2DEV\src\rs2-live.iso' -o "$t/out"
+    cargo xtask run --iso "$t/out/rs2-live.iso" --headless --timeout 150 --mem 4G --screenshot "$t/iso.png" > "$t/iso.log" 2>&1
+    if grep -aqiE 'panic|exception' "$t/iso.log"; then echo "the ISO's boot"; exit 1; fi
+    grep -aq 'smp: ' "$t/iso.log"
+elif [ -n "$rs2" ]; then
     cargo xtask diskget "$t/d.img" 'RS2DEV\src\work\userland\64\STDTST64.EXE' 'RS2DEV\src\work\userland\64\LIBCXX64.DLL' -o "$t/out"
 fi
