@@ -11,7 +11,7 @@ name: Build developer disk
 
 on:
   push:
-    branches: [main]
+    branches: [main, devdisk]
   workflow_dispatch:
   workflow_call:
     inputs:
