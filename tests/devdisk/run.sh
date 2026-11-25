@@ -1,6 +1,7 @@
 #!/bin/sh
 # The developer disk (docs/DEVDISK.md): installed on rs2 from its CD image
-# onto an empty HPFS disk, twice; the samples and a new cargo project built
+# onto an empty HPFS disk (D: beside a
+# virtio CD), twice; the samples and a new cargo project built
 # and run there with nothing but DEVENV.CMD's settings.
 #
 #   run.sh [ISO]         (work/rs2-dev.iso; userland64/devdisk/build.sh)
@@ -23,17 +24,17 @@ say() { printf '%s\r\n' "$1" >> "$cmd"; }
 say '@echo off'
 say 'echo begin'
 # The CD's letter: the first with the disk's archive.
-for d in D F G H; do say "if exist $d:\\SDK.ZIP set CD=$d:"; done
+for d in E F G H; do say "if exist $d:\\SDK.ZIP set CD=$d:"; done
 say '%CD%'
 say '%CD%\INSTALL /LIST'
 say '%CD%\INSTALL /YES /DIR:C:\X'
-say '%CD%\INSTALL /YES /DRIVE:E /SOURCE'
+say '%CD%\INSTALL /YES /DRIVE:D /SOURCE'
 say 'echo second'
-say '%CD%\INSTALL /YES /DIR:E:\RS2DEV'
+say '%CD%\INSTALL /YES /DIR:D:\RS2DEV'
 say 'type C:\CONFIG.SYS'
-say 'call E:\RS2DEV\DEVENV.CMD'
-say 'type E:\RS2DEV\src\userland-std\.cargo\config.toml'
-say 'call E:\RS2DEV\samples\BUILD.CMD'
+say 'call D:\RS2DEV\DEVENV.CMD'
+say 'type D:\RS2DEV\src\userland-std\.cargo\config.toml'
+say 'call D:\RS2DEV\samples\BUILD.CMD'
 say 'c\HELLO a b'
 say 'cd c'
 say 'USEMYLIB'
@@ -42,14 +43,14 @@ say 'cd ..'
 say 'cpp\HELLO'
 say 'rust\hello\target\release\hello'
 say 'dir rust\pmhello\target\release\pmhello.exe'
-say 'cd E:\RS2DEV'
+say 'cd D:\RS2DEV'
 say 'cargo new fresh'
 say 'cd fresh'
 say 'cargo run'
 say 'echo samples done'
 if [ -n "$rs2" ]; then
-    say 'call E:\RS2DEV\src\BUILD.CMD userland64'
-    say 'dir E:\RS2DEV\src\work\userland\64'
+    say 'call D:\RS2DEV\src\BUILD.CMD userland64'
+    say 'dir D:\RS2DEV\src\work\userland\64'
 fi
 say 'echo end'
 [ ! -f work/disk.txt ] || cp work/disk.txt "$t/disk.save"
@@ -66,14 +67,14 @@ cargo xtask disk --hpfs --size 3500 -o "$t/d.img" > /dev/null
     pkill -f "qemu-system-x86_64 .*$t/d.img"
 ) > /dev/null 2>&1 &
 : > work/serial.log
-cargo xtask run --headless --timeout "${TIMEOUT:-3600}" --mem 8G --smp "${SMP:-4}" --hdd "$t/d.img" --virtio-cd "$iso" --init 'OS2\CMD.EXE /C E:\t.cmd' > "$t/log" 2>&1 || true
+cargo xtask run --headless --timeout "${TIMEOUT:-3600}" --mem 8G --smp "${SMP:-4}" --hdd "$t/d.img" --virtio-cd "$iso" --init 'OS2\CMD.EXE /C D:\t.cmd' > "$t/log" 2>&1 || true
 sed -n '/^begin/,$p' "$t/log" | tr '\r' '\n' | grep -av Building | tail -150
 has() { grep -aq "$1" "$t/log" || { echo "run.sh: missing: $1" >&2; exit 1; }; }
 has 'C: is not an HPFS or JFS drive'
 [ "$(grep -ac 'The developer disk is installed' "$t/log")" = 2 ]
-[ "$(grep -ac '^SET CARGO_HOME=E:.RS2DEV.cargo' "$t/log")" = 1 ]
-[ "$(grep -ac '^LIBPATH=.*;E:.RS2DEV.sdk.bin' "$t/log")" = 1 ]
-has 'E:/RS2DEV/sdk/bin/CLANG.EXE'
+[ "$(grep -ac '^SET CARGO_HOME=D:.RS2DEV.cargo' "$t/log")" = 1 ]
+[ "$(grep -ac '^LIBPATH=.*;D:.RS2DEV.sdk.bin' "$t/log")" = 1 ]
+has 'D:/RS2DEV/sdk/bin/CLANG.EXE'
 has 'Hello from C, 64-bit, on OS/2 20.45 (2 arguments)'
 has 'MYLIB.DLL says 42'
 has 'cpmhello selftest done: 0 failure'

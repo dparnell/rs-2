@@ -15,7 +15,7 @@ C and C++:
   clang hello.c -o HELLO.EXE
   clang++ -std=c++20 prog.cpp -o PROG.EXE
   rc64 pmprog.rc -o pmprog_rc.s
-  clang -mwindows pmprog.c pmprog_rc.s -o PMPROG.EXE
+  clang -mwindows -Wno-pointer-sign pmprog.c pmprog_rc.s -o PMPROG.EXE
   clang -shared lib.c -o LIB.DLL
 
 Rust:

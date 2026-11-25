@@ -807,6 +807,33 @@ fn not_here(e: u32) -> bool {
     matches!(e, 2 | 3 | 5 | 12 | 15 | 26 | 51 | 53..=60 | 64..=67 | 69 | 71 | 86 | 110 | 123 | 206 | 240)
 }
 
+/// The loading process's BeginLIBPATH, the LIBPATH and its EndLIBPATH, "."
+/// being its current directory.
+fn search_dirs() -> Vec<String> {
+    let process = crate::task::sched::current_opt().and_then(|t| t.process());
+    let (begin, end) = process
+        .as_ref()
+        .map(|p| {
+            let x = p.ext_libpath.lock();
+            (x.0.clone(), x.1.clone())
+        })
+        .unwrap_or_default();
+    let mut dirs: Vec<String> = begin.split(';').filter(|s| !s.is_empty()).map(String::from).collect();
+    dirs.extend(libpath());
+    dirs.extend(end.split(';').filter(|s| !s.is_empty()).map(String::from));
+    let cwd = process.map_or_else(
+        || String::from("C:\\"),
+        |p| {
+            let c = p.cwd.lock();
+            alloc::format!("{}:\\{}", (b'A' + c.0) as char, c.1[c.0 as usize])
+        },
+    );
+    for d in dirs.iter_mut().filter(|d| *d == ".") {
+        d.clone_from(&cwd);
+    }
+    dirs
+}
+
 /// Locate a DLL for the loader: a path, or `NAME.DLL` along the LIBPATH.
 /// `Err(2)` means it is not there; other errors stopped the search.
 pub fn find_module(name: &str) -> Result<(String, Arc<[u8]>), u32> {
@@ -816,24 +843,7 @@ pub fn find_module(name: &str) -> Result<(String, Arc<[u8]>), u32> {
         return load_file(name).map(|d| (name.to_string(), d)).map_err(|e| if not_here(e) { NOT_FOUND } else { e });
     }
     let file = if name.contains('.') { name.to_string() } else { alloc::format!("{name}.DLL") };
-    // BeginLIBPATH, LIBPATH, EndLIBPATH of the loading process.
-    let (begin, end) = crate::task::sched::current_opt()
-        .and_then(|t| t.process())
-        .map(|p| {
-            let x = p.ext_libpath.lock();
-            (x.0.clone(), x.1.clone())
-        })
-        .unwrap_or_default();
-    let mut dirs: Vec<String> = begin.split(';').filter(|s| !s.is_empty()).map(String::from).collect();
-    dirs.extend(libpath());
-    dirs.extend(end.split(';').filter(|s| !s.is_empty()).map(String::from));
-    let cwd = crate::task::sched::current_opt().and_then(|t| t.process()).map(|p| {
-        let c = p.cwd.lock();
-        alloc::format!("{}:\\{}", (b'A' + c.0) as char, c.1[c.0 as usize])
-    });
-    for dir in dirs {
-        // "." is the loading process's current directory.
-        let dir = if dir == "." { cwd.clone().unwrap_or_else(|| String::from("C:\\")) } else { dir };
+    for dir in search_dirs() {
         let full = alloc::format!("{}\\{}", dir.trim_end_matches('\\'), file);
         match load_file(&full) {
             Ok(d) => return Ok((full.to_ascii_uppercase(), d)),
@@ -856,11 +866,7 @@ pub fn find_module64(name: &str) -> Result<(String, Arc<[u8]>), u32> {
     // The system drive, as QSV_BOOT_DRIVE reports it.
     let boot = 'C';
     let mut dirs = alloc::vec![alloc::format!("{boot}:\\RS2\\DLL64")];
-    if let Some(p) = crate::task::sched::current_opt().and_then(|t| t.process()) {
-        let x = p.ext_libpath.lock();
-        dirs.extend(x.0.split(';').filter(|s| !s.is_empty()).map(String::from));
-    }
-    dirs.extend(libpath());
+    dirs.extend(search_dirs());
     for dir in dirs {
         let full = alloc::format!("{}\\{}", dir.trim_end_matches('\\'), file);
         match load_file(&full) {

@@ -5,7 +5,7 @@ cd @DIR@\samples\c
 echo C
 clang -O2 hello.c -o HELLO.EXE
 rc64 pmhello.rc -o pmhello_rc.s
-clang -O2 -mwindows pmhello.c pmhello_rc.s -o PMHELLO.EXE
+clang -O2 -Wno-pointer-sign -mwindows pmhello.c pmhello_rc.s -o PMHELLO.EXE
 clang -O2 -shared mylib.c -o MYLIB.DLL
 clang -O2 usemylib.c MYLIB.DLL -o USEMYLIB.EXE
 cd @DIR@\samples\cpp
