@@ -1,0 +1,10 @@
+[package]
+name = "rc64"
+description = "RC64: OS/2 resource scripts for 64-bit programs, on rs2 (docs/DEVDISK.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }
+os2-rc = { path = "../../crates/os2-rc", features = ["host"] }

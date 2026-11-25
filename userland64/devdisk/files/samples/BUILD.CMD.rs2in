@@ -1,0 +1,19 @@
+@echo off
+rem Builds the samples (run @DIR@\DEVENV first).
+@DRIVE@
+cd @DIR@\samples\c
+echo C
+clang -O2 hello.c -o HELLO.EXE
+rc64 pmhello.rc -o pmhello_rc.s
+clang -O2 -Wno-pointer-sign -mwindows pmhello.c pmhello_rc.s -o PMHELLO.EXE
+clang -O2 -shared mylib.c -o MYLIB.DLL
+clang -O2 usemylib.c MYLIB.DLL -o USEMYLIB.EXE
+cd @DIR@\samples\cpp
+echo C++
+clang++ -O2 -std=c++20 hello.cpp -o HELLO.EXE
+cd @DIR@\samples\rust\hello
+echo Rust
+cargo build --release
+cd @DIR@\samples\rust\pmhello
+cargo build --release
+cd @DIR@\samples

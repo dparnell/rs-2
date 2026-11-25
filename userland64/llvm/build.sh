@@ -50,4 +50,13 @@ mkdir -p "$root/target/llvm64"
 for f in clang lld llvm-ar; do
     [ ! -f "$dir/rs2/bin/$f.EXE" ] || "$strip" --strip-all "$dir/rs2/bin/$f.EXE" "$root/target/llvm64/$(echo $f | tr '[:lower:]' '[:upper:]').EXE"
 done
+# What sdk.sh needs besides, so that it can do without $LLVM_DIR.
+for d in "$dir"/rs2/lib/clang/*/include; do
+    [ -d "$d" ] || continue
+    rm -rf "$root/target/llvm64/clang"
+    mkdir -p "$root/target/llvm64/clang"
+    cp -RL "$d" "$root/target/llvm64/clang/"
+    basename "$(dirname "$d")" > "$root/target/llvm64/clang/version"
+done
+cp "$src/llvm/LICENSE.TXT" "$root/target/llvm64/"
 ls -l "$root/target/llvm64"

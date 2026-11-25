@@ -1,0 +1,10 @@
+@echo off
+rem The developer disk's settings, for this command prompt. DEVENV DIRECTORY
+rem also goes to a directory of @DIR@.
+set PATH=@DIR@\sdk\bin;%PATH%
+set BEGINLIBPATH=@DIR@\sdk\bin
+set CARGO_HOME=@DIR@\cargo
+if "%TMPDIR%"=="" set TMPDIR=@DIR@\tmp
+@DRIVE@
+cd @DIR@
+if not "%1"=="" cd @DIR@\%1

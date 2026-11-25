@@ -1,0 +1,16 @@
+@echo off
+rem Builds rs2's live ISO (run @DIR@\DEVENV first, unless the computer was
+rem restarted after the installation). Words on the command line take the
+rem place of the xtask command: BUILD userland64
+setlocal
+@DRIVE@
+cd @DIR@\src
+set CARGO_INCREMENTAL=0
+set CARGO_NET_OFFLINE=true
+if not "%1"=="" goto own
+cargo run -p xtask -- iso --dist --release -o @UDIR@/src/rs2-live.iso
+goto end
+:own
+cargo run -p xtask -- %1 %2 %3 %4 %5 %6 %7 %8 %9
+:end
+endlocal

@@ -1,0 +1,7 @@
+[package]
+name = "pmhello"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+os2 = { path = "../../../sdk/crates/os2", default-features = false }

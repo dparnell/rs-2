@@ -1,0 +1,20 @@
+[package]
+name = "devinst"
+description = "The developer disk's installer (docs/DEVDISK.md): INSTALL.EXE, text, and SETUP.EXE, Presentation Manager"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "devinst"
+path = "src/bin/devinst.rs"
+
+[[bin]]
+name = "pmdevins"
+path = "src/bin/pmdevins.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+utils = { path = "../utils" }
+pmkit = { path = "../pmkit" }
+inflate = { path = "../../crates/inflate" }
