@@ -3,7 +3,9 @@
  * regions of their own. The first LOW_MAX bytes of regions are below
  * 4 GB, so that a program of ordinary size can pass any pointer from
  * malloc to any OS/2 call; after that, and for blocks of HIGH_MIN bytes
- * and more, memory comes from above 4 GB. One lock for all threads. */
+ * and more, memory comes from above 4 GB. One lock for all threads; each
+ * thread keeps a few small chunks of its own (they stay marked in use) and
+ * takes the lock only to fill or empty that cache. */
 #include "libc.h"
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +25,9 @@
 #define LOW_MAX (96UL << 20)
 #define HIGH_REGION (16UL << 20)
 #define HIGH_MIN (16UL << 20)
-#define NBINS 64
+#define NBINS 128
+#define SMALL 1024UL                /* to here each size has its own bin */
+#define SCAN 32                     /* chunks looked at in a mixed bin */
 
 typedef struct chunk {
     size_t prev_size;
@@ -40,30 +44,45 @@ static int heap_ready;
 #define MEM(c) ((void *)((char *)(c) + HDR))
 #define CHUNK(p) ((chunk *)((char *)(p) - HDR))
 
+static uint64_t bin_map[NBINS / 64];   /* bins that are not empty */
+
 static int bin_of(size_t sz) {
-    /* 32..1024 in steps of 32 (bins 0-31), then by powers of two. */
-    if (sz <= 1024)
-        return (int)(sz >> 5) - 1;
-    int b = 31;
-    size_t s = 1024;
-    while (s < sz && b < NBINS - 1) {
-        s <<= 1;
-        b++;
-    }
-    return b;
+    /* 32..1024 in steps of 16 (bins 0-62), then four to a power of two. */
+    if (sz <= SMALL)
+        return (int)(sz >> 4) - 2;
+    int e = 63 - __builtin_clzl(sz);
+    int b = 63 + (e - 10) * 4 + (int)((sz >> (e - 2)) & 3);
+    return b < NBINS ? b : NBINS - 1;
 }
 
 static void unlink_chunk(chunk *c) {
     c->prev->next = c->next;
     c->next->prev = c->prev;
+    if (c->next == c->prev) {   /* the list head alone: an empty bin */
+        chunk *h = c->next;
+        if (h >= bins && h < bins + NBINS && h->next == h)
+            bin_map[(h - bins) >> 6] &= ~(1UL << ((h - bins) & 63));
+    }
 }
 
 static void link_chunk(chunk *c) {
-    chunk *h = &bins[bin_of(CSIZE(c))];
+    int b = bin_of(CSIZE(c));
+    chunk *h = &bins[b];
     c->next = h->next;
     c->prev = h;
     h->next->prev = c;
     h->next = c;
+    bin_map[b >> 6] |= 1UL << (b & 63);
+}
+
+/* The first bin from b on that is not empty, or NBINS. */
+static int next_bin(int b) {
+    for (int w = b >> 6; w < NBINS / 64; w++, b = w << 6) {
+        uint64_t m = bin_map[w] & (~0UL << (b & 63));
+        if (m)
+            return (w << 6) + __builtin_ctzl(m);
+    }
+    return NBINS;
 }
 
 static void init(void) {
@@ -113,16 +132,25 @@ static int grow(void) {   /* a request is below DIRECT_MIN */
 }
 
 static chunk *take(size_t sz) {
-    for (int b = bin_of(sz); b < NBINS; b++) {
-        chunk *h = &bins[b];
-        for (chunk *c = h->next; c != h; c = c->next) {
+    int b = bin_of(sz);
+    if (sz > SMALL) {
+        /* Sizes differ in this bin, and it may be long. */
+        chunk *h = &bins[b], *c = h->next;
+        for (int i = 0; c != h && (i < SCAN || b == NBINS - 1); i++, c = c->next) {
             if (CSIZE(c) >= sz) {
                 unlink_chunk(c);
                 return c;
             }
         }
+        b++;
     }
-    return 0;
+    /* Any chunk of a later bin is large enough. */
+    b = b < NBINS ? next_bin(b) : NBINS;
+    if (b == NBINS)
+        return 0;
+    chunk *c = bins[b].next;
+    unlink_chunk(c);
+    return c;
 }
 
 /* Splits c (in use) so it keeps sz; the rest goes back as a free chunk. */
@@ -172,46 +200,23 @@ void *_rs2_low_alloc(size_t n) {
     return MEM(c);
 }
 
-void *malloc(size_t n) {
-    size_t sz = request(n);
-    if (!sz) {
-        errno = ENOMEM;
-        return 0;
-    }
-    if (sz >= DIRECT_MIN) {
-        void *p = direct(sz);
-        if (!p)
-            errno = ENOMEM;
-        return p;
-    }
-    _rs2_spin_lock(&heap_lock);
+/* With the lock: a chunk of sz bytes, in use. */
+static chunk *get(size_t sz) {
     if (!heap_ready)
         init();
     chunk *c = take(sz);
     if (!c && grow())
         c = take(sz);
-    if (!c) {
-        _rs2_spin_unlock(&heap_lock);
-        errno = ENOMEM;
-        return 0;
+    if (c) {
+        c->size |= INUSE;
+        NEXT(c)->size |= PREV_INUSE;
+        trim(c, sz);
     }
-    c->size |= INUSE;
-    NEXT(c)->size |= PREV_INUSE;
-    trim(c, sz);
-    _rs2_spin_unlock(&heap_lock);
-    return MEM(c);
+    return c;
 }
 
-void free(void *p) {
-    if (!p)
-        return;
-    chunk *c = CHUNK(p);
-    if (c->size & DIRECT) {
-        /* prev_size: how far the region starts before (aligned_alloc). */
-        DosFreeMem((char *)c - c->prev_size);
-        return;
-    }
-    _rs2_spin_lock(&heap_lock);
+/* With the lock: c is free again. */
+static void put(chunk *c) {
     size_t sz = CSIZE(c);
     if (!(c->size & PREV_INUSE)) {
         chunk *pv = (chunk *)((char *)c - c->prev_size);
@@ -226,6 +231,96 @@ void free(void *p) {
     }
     set_free(c, sz);
     link_chunk(c);
+}
+
+/* A thread's chunks of one size: filled FILL at a time, emptied by half. */
+#define FILL 8
+#define CACHE_MAX(sz) ((sz) <= 256 ? 32 : 16)
+
+static void empty(struct _rs2_thread *t, int b, int leave) {
+    _rs2_spin_lock(&heap_lock);
+    while (t->cached[b] > leave) {
+        chunk *c = t->cache[b];
+        t->cache[b] = c->next;
+        t->cached[b]--;
+        put(c);
+    }
+    _rs2_spin_unlock(&heap_lock);
+}
+
+void _rs2_cache_done(struct _rs2_thread *t) {
+    for (int b = 0; b < _RS2_CACHE_BINS; b++)
+        if (t->cached[b])
+            empty(t, b, 0);
+}
+
+void *malloc(size_t n) {
+    size_t sz = request(n);
+    if (!sz) {
+        errno = ENOMEM;
+        return 0;
+    }
+    if (sz >= DIRECT_MIN) {
+        void *p = direct(sz);
+        if (!p)
+            errno = ENOMEM;
+        return p;
+    }
+    struct _rs2_thread *t = sz <= SMALL ? _rs2_self() : 0;
+    int b = bin_of(sz);
+    if (t && t->cached[b]) {
+        chunk *c = t->cache[b];
+        t->cache[b] = c->next;
+        t->cached[b]--;
+        return MEM(c);
+    }
+    _rs2_spin_lock(&heap_lock);
+    chunk *c = get(sz);
+    if (c && t && !t->shared) {
+        for (int i = 1; i < FILL; i++) {
+            chunk *x = get(sz);
+            if (!x)
+                break;
+            if (CSIZE(x) != sz) {   /* (too little was left to split off) */
+                put(x);
+                break;
+            }
+            x->next = t->cache[b];
+            t->cache[b] = x;
+            t->cached[b]++;
+        }
+    }
+    _rs2_spin_unlock(&heap_lock);
+    if (!c) {
+        errno = ENOMEM;
+        return 0;
+    }
+    return MEM(c);
+}
+
+void free(void *p) {
+    if (!p)
+        return;
+    chunk *c = CHUNK(p);
+    if (c->size & DIRECT) {
+        /* prev_size: how far the region starts before (aligned_alloc). */
+        DosFreeMem((char *)c - c->prev_size);
+        return;
+    }
+    size_t sz = CSIZE(c);
+    if (sz <= SMALL) {
+        struct _rs2_thread *t = _rs2_self();
+        if (!t->shared) {
+            int b = bin_of(sz);
+            c->next = t->cache[b];
+            t->cache[b] = c;
+            if (++t->cached[b] >= CACHE_MAX(sz))
+                empty(t, b, CACHE_MAX(sz) / 2);
+            return;
+        }
+    }
+    _rs2_spin_lock(&heap_lock);
+    put(c);
     _rs2_spin_unlock(&heap_lock);
 }
 
