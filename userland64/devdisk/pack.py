@@ -28,7 +28,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         with open(os.path.join(top, n), "rb") as f:
             data = f.read()
         base = n.removesuffix(".rs2in").upper()
-        if base.endswith((".CMD", "README.TXT", "VERSION.TXT", "LICENSE.TXT")):
+        if "/vendor/" not in n and base.endswith((".CMD", "README.TXT", "VERSION.TXT", "LICENSE.TXT")):
             data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         i = zipfile.ZipInfo(n, stamp)
         i.compress_type = zipfile.ZIP_DEFLATED
