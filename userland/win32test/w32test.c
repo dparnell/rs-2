@@ -505,7 +505,9 @@ static void t_dll(void)
     check(h != NULL && h == W32DllSelf(), "GetModuleHandle(W32DLL) is its base");
     h = LoadLibraryA("W32DLL.DLL");
     check(h != NULL && h == W32DllSelf(), "LoadLibrary of a loaded DLL");
-    add = (int (WINAPI *)(int, int))GetProcAddress(h, "W32DllAdd");
+    /* Open Watcom exports stdcall names decorated, as Windows' own
+       GetProcAddress needs them. */
+    add = (int (WINAPI *)(int, int))GetProcAddress(h, "_W32DllAdd@8");
     check(add != NULL && add(4, 5) == 9, "GetProcAddress in W32DLL");
     check(W32DllAttaches == 1, "no second DLL_PROCESS_ATTACH");
     check(FreeLibrary(h), "FreeLibrary");

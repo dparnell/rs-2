@@ -40,6 +40,7 @@ mod process;
 mod sync;
 mod text;
 mod time;
+mod thunks;
 #[path = "../../w32ntdll/src/pe.rs"]
 mod pe;
 

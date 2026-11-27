@@ -31,6 +31,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub mod pe;
+mod thunks;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]

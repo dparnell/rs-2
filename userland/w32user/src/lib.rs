@@ -12,6 +12,7 @@ extern crate alloc;
 extern crate os2;
 
 use alloc::vec::Vec;
+mod thunks;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
@@ -423,7 +424,7 @@ core::arch::global_asm!(
     "push eax",
     "push dword ptr [esp+12]",
     "push dword ptr [esp+12]",
-    "call wvsprintfA",
+    "call __w32t_wvsprintfA",
     "ret",
     ".globl wsprintfW",
     "wsprintfW:",
@@ -431,6 +432,6 @@ core::arch::global_asm!(
     "push eax",
     "push dword ptr [esp+12]",
     "push dword ptr [esp+12]",
-    "call wvsprintfW",
+    "call __w32t_wvsprintfW",
     "ret",
 );
