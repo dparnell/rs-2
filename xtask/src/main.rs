@@ -688,6 +688,7 @@ fn boot_volume(o: &Opts, esp: &Path) -> Option<Option<image::FileList>> {
     files.extend(image::manifest(&root(), &text));
     files.extend(userland);
     files.extend(win16_tests());
+    files.extend(win32_tests());
     let Some(four) = four_os2(o.dist) else { return Some(None) };
     files.extend(four);
     // Programs built elsewhere (on rs2) instead of these.
@@ -899,6 +900,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmmerge", "OS2\\DLL\\PMMERGE.DLL"),
         ("registry", "OS2\\DLL\\REGISTRY.DLL"),
         ("pmwinx", "OS2\\DLL\\PMWINX.DLL"),
+        // The Win32 layer (docs/WIN32.md).
+        ("w32ntdll", "OS2\\DLL\\W32NTDLL.DLL"),
+        ("w32kern", "OS2\\DLL\\W32KERN.DLL"),
+        ("w32user", "OS2\\DLL\\W32USER.DLL"),
         ("pmbidi", "OS2\\DLL\\PMBIDI.DLL"),
         ("pmddeml", "OS2\\DLL\\PMDDEML.DLL"),
         ("pmviop", "OS2\\DLL\\PMVIOP.DLL"),
@@ -1559,6 +1564,21 @@ fn firmware() -> image::FileList {
 /// Watcom when it is installed) as C:\\RS2\\*.EXE.
 fn win16_tests() -> image::FileList {
     let dir = root().join("userland/win16test");
+    let _ = Command::new("sh").arg(dir.join("build.sh")).status();
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir.join("bin")) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_ascii_uppercase();
+            v.push((e.path(), format!("RS2\\{name}")));
+        }
+    }
+    v
+}
+
+/// The Win32 test programs (userland/win32test, built with Open Watcom
+/// when it is installed) as C:\\RS2\\*.EXE and *.DLL (docs/WIN32.md).
+fn win32_tests() -> image::FileList {
+    let dir = root().join("userland/win32test");
     let _ = Command::new("sh").arg(dir.join("build.sh")).status();
     let mut v = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir.join("bin")) {

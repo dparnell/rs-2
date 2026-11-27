@@ -1,0 +1,6 @@
+; Forwarders to W32NTDLL (its ordinals).
+RaiseException=W32NTDLL.8 @1
+RtlUnwind=W32NTDLL.20 @2
+RtlZeroMemory=W32NTDLL.22 @3
+RtlMoveMemory=W32NTDLL.23 @4
+RtlFillMemory=W32NTDLL.24 @5

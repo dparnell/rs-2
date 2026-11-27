@@ -18,6 +18,7 @@
 //! | 431 | `Rs2W32Continue(PCONTEXT)`: resume the thread in that context (NtContinue) |
 //! | 432 | `Rs2W32Unhandled(PEXCEPTION_RECORD, PCONTEXT)`: nobody handled it: the default action (the process ends, POPUPLOG) |
 //! | 433 | `Rs2W32Modules(PULONG pBuf, ULONG cMax)`: the PE modules the process uses, dependencies first, as (image base, module handle) pairs, at most `cMax`; returns how many there are |
+//! | 434 | `Rs2W32AllocAt(ULONG addr, ULONG cb, ULONG fl)`: private memory at `addr` (64 KB aligned; PAG_ flags), as VirtualAlloc with an address reserves it |
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -317,6 +318,20 @@ pub fn query_modules(c: &mut Ctx) -> u32 {
         c.write_u32(buf + i as u32 * 8 + 4, m.hmte as u32);
     }
     ms.len() as u32
+}
+
+/// Rs2W32AllocAt(addr, cb, fl)
+pub fn alloc_at(c: &mut Ctx) -> u32 {
+    let (addr, size, flags) = (c.arg(0), c.arg(1), c.arg(2));
+    if addr % vm::TILE != 0 || addr < vm::ARENA_START || size == 0 {
+        return super::err::INVALID_ADDRESS;
+    }
+    let flags = flags & (vm::pag::READ | vm::pag::WRITE | vm::pag::EXECUTE | vm::pag::GUARD | vm::pag::COMMIT);
+    let r = c.space().alloc(size, flags, vm::SegKind::Data, Some(addr));
+    match r {
+        Ok(_) => 0,
+        Err(_) => super::err::INVALID_ADDRESS,
+    }
 }
 
 /// The stack of a Win32 thread grew down to the page at `page`: its TEB's

@@ -1,0 +1,14 @@
+[package]
+name = "w32user-dll"
+description = "W32USER.DLL: USER32 of rs2's Win32 layer (stage 1: strings, message boxes) (docs/WIN32.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autolib = false
+
+[[bin]]
+name = "w32user"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

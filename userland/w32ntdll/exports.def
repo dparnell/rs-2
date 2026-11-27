@@ -1,0 +1,20 @@
+; W32NTDLL.DLL (docs/WIN32.md): rs2's own entries (Rs2W32*), then NTDLL's.
+Rs2W32Start @1
+Rs2W32ThreadAttach @2
+Rs2W32ThreadDetach @3
+Rs2W32ProcessDetach @4
+Rs2W32InitModules @5
+Rs2W32SetUnhandledFilter @6
+Rs2W32QueryUnhandledFilter @7
+Rs2W32Raise @8
+Rs2W32ModuleOfAddress @9
+Rs2W32HmteOfBase @10
+Rs2W32BaseOfHmte @11
+RtlUnwind @20
+RtlRaiseException @21
+RtlZeroMemory @22
+RtlMoveMemory @23
+RtlFillMemory @24
+NtCurrentTeb @25
+RtlGetVersion @26
+RtlCaptureContext @27

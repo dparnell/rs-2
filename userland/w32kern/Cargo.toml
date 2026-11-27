@@ -1,0 +1,14 @@
+[package]
+name = "w32kern-dll"
+description = "W32KERN.DLL: KERNEL32 of rs2's Win32 layer, on rs2's OS/2 API (docs/WIN32.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autolib = false
+
+[[bin]]
+name = "w32kern"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -1,0 +1,14 @@
+[package]
+name = "w32ntdll-dll"
+description = "W32NTDLL.DLL: NTDLL of rs2's Win32 layer: process start, PE DLL initialisation, TLS, exception dispatch (docs/WIN32.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autolib = false
+
+[[bin]]
+name = "w32ntdll"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -292,6 +292,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 431) => super::win32::cont,
         (8, 432) => super::win32::unhandled,
         (8, 433) => super::win32::query_modules,
+        (8, 434) => super::win32::alloc_at,
         (8, 407) => super::vdm::request,
         (8, 100) => super::sysctl::rs2_query_counters,
         (8, 200) => super::sockets::query_iface,
