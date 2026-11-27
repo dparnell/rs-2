@@ -1615,4 +1615,5 @@ with DDESRV16; Spy > All Windows shows the other tasks' messages.
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode
-Windows programs, and, for now, Win32s (32-bit PE programs).
+Windows programs, and Win32s (32-bit PE programs: docs/WIN32.md plans
+them as programs of their own).

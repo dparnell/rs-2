@@ -83,6 +83,16 @@ Microsoft file (docs/WIN16.md).
 - stage 4: DPMI, the floating point emulator, MMSYSTEM, OLE, TOOLHELP and
   the task/module databases
 
+## Native Win32
+
+32-bit Windows (PE) programs as OS/2 processes, on rs2 DLLs that share
+WIN16's USER and GDI core (plan: docs/WIN32.md).
+
+- stage 1: the PE loader, TEB/PEB, SEH, KERNEL32's core, the console,
+  MSVCRT
+- stage 2: USER32 and GDI32 on the shared core, COMDLG32
+- stage 3: COMCTL32, SHELL32, WINMM, Winsock, OLE
+
 ## Milestone 5: install media
 
 - choice of partitions and file systems, BIOS boot, boot manager
