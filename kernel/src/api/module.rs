@@ -652,8 +652,9 @@ pub fn app_type(data: &[u8]) -> Result<u32, u32> {
             Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
         },
         // FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31, and FAPPTYP_DLL for a DLL.
-        Ok(Format::Pe { header }) => Ok(match os2_exe::pe::Module::parse(data, header) {
-            Ok(m) if m.header.is_dll() => 0x5010,
+        // (IMAGE_FILE_DLL is 0x2000 in the file header's characteristics.)
+        Ok(Format::Pe { header }) => Ok(match data.get(header + 0x17) {
+            Some(c) if c & 0x20 != 0 => 0x5010,
             _ => 0x5000,
         }),
         Ok(Format::Mz) => Ok(0x0020), // FAPPTYP_DOS

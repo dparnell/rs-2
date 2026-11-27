@@ -60,9 +60,11 @@ pub fn load(
     specific: bool,
     mut space: Option<&mut AddressSpace>,
 ) -> Result<Arc<Module>, u32> {
+    // A file with a PE signature that is not a PE32 image is not an
+    // executable rs2 knows (as OS/2 says of every PE file).
     let m = pe::Module::parse(&data, header).map_err(|e| {
         crate::trace!("loader: {path}: {e}");
-        err::BAD_EXE_FORMAT
+        err::INVALID_EXE_SIGNATURE
     })?;
     let h = &m.header;
     if h.machine != pe::MACHINE_I386 {
