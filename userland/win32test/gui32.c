@@ -696,6 +696,56 @@ static void user_checks(void)
     check("IsWindow after DestroyWindow", !IsWindow(child));
 }
 
+/* ---- Hooks ---- */
+
+static HHOOK cwp_hook, cwp_hook2, gm_hook;
+static int cwp_seen, cwp2_seen, gm_seen;
+
+static LRESULT CALLBACK cwp_proc(int code, WPARAM wp, LPARAM lp)
+{
+    CWPSTRUCT *c = (CWPSTRUCT *)lp;
+    if (c->message == WM_USER + 7 && c->lParam == 0x1234)
+        cwp_seen++;
+    return CallNextHookEx(cwp_hook, code, wp, lp);
+}
+
+static LRESULT CALLBACK cwp_proc2(int code, WPARAM wp, LPARAM lp)
+{
+    CWPSTRUCT *c = (CWPSTRUCT *)lp;
+    if (c->message == WM_USER + 7)
+        cwp2_seen++;
+    return CallNextHookEx(cwp_hook2, code, wp, lp);
+}
+
+static LRESULT CALLBACK gm_proc(int code, WPARAM wp, LPARAM lp)
+{
+    MSG *m = (MSG *)lp;
+    if (m->message == WM_USER + 8 && wp == PM_REMOVE) {
+        gm_seen++;
+        m->wParam = 99;
+    }
+    return CallNextHookEx(gm_hook, code, wp, lp);
+}
+
+static void hook_checks(void)
+{
+    MSG m;
+    cwp_hook = SetWindowsHookExA(WH_CALLWNDPROC, cwp_proc, NULL, GetCurrentThreadId());
+    cwp_hook2 = SetWindowsHookExA(WH_CALLWNDPROC, cwp_proc2, NULL, GetCurrentThreadId());
+    check("SetWindowsHookExA (WH_CALLWNDPROC)", cwp_hook != NULL && cwp_hook2 != NULL);
+    SendMessageA(main_wnd, WM_USER + 7, 0, 0x1234);
+    check("WH_CALLWNDPROC hooks see SendMessage, the chain passes it on", cwp_seen == 1 && cwp2_seen == 1);
+    check("UnhookWindowsHookEx", UnhookWindowsHookEx(cwp_hook2));
+    SendMessageA(main_wnd, WM_USER + 7, 0, 0x1234);
+    check("an unhooked hook is not called", cwp_seen == 2 && cwp2_seen == 1);
+    UnhookWindowsHookEx(cwp_hook);
+    gm_hook = SetWindowsHookExA(WH_GETMESSAGE, gm_proc, NULL, GetCurrentThreadId());
+    PostMessageA(main_wnd, WM_USER + 8, 1, 0);
+    check("PeekMessage (a message for WH_GETMESSAGE)", PeekMessageA(&m, main_wnd, WM_USER + 8, WM_USER + 8, PM_REMOVE));
+    check("WH_GETMESSAGE hooks see and change the message", gm_seen == 1 && m.wParam == 99);
+    UnhookWindowsHookEx(gm_hook);
+}
+
 /* ---- MDI ---- */
 
 static HWND mdi_client;
@@ -819,6 +869,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     dialog_checks();
     comdlg_checks();
     mdi_checks();
+    hook_checks();
     InvalidateRect(main_wnd, NULL, TRUE);
     pump(1500);
     /* GUI32 WAIT: the window stays until it is closed. */

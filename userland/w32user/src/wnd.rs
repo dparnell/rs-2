@@ -597,6 +597,14 @@ pub fn deliver(hwnd: u16, msg: u16, wp: u32, lp: u32, wide: bool) -> u32 {
         let c = wnd(hwnd).map_or(0, |w| w.client);
         return unsafe { WinSendMsg(c, if wide { XSEND_W } else { XSEND_A } | msg as u32, wp, lp) };
     }
+    // WH_CALLWNDPROC hooks see it first, and may change the window's
+    // procedure (subclassing a window being created).
+    if crate::hook::has(crate::hook::WH_CALLWNDPROC) || crate::kern::host().is_some() {
+        crate::hook::sending(hwnd, msg, wp, lp);
+        crate::kern::observe(crate::hook::WH_CALLWNDPROC, &Msg { hwnd: hwnd as u32, msg: msg as u32, wp, lp, ..Default::default() });
+        let Some((p, uni)) = wnd(hwnd).map(|w| (w.proc_, w.unicode)) else { return 0 };
+        return call_conv(p, uni, hwnd, msg, wp, lp, wide);
+    }
     call_conv(p, uni, hwnd, msg, wp, lp, wide)
 }
 
@@ -2130,6 +2138,7 @@ fn peek_range(hab: u32, filter: u32, lo: u32, hi: u32, remove: bool) -> Option<Q
 
 /// A MSG: hwnd, message, wParam, lParam, time, pt.
 #[derive(Clone, Copy, Default)]
+#[repr(C)]
 pub struct Msg {
     pub hwnd: u32,
     pub msg: u32,
@@ -2244,8 +2253,15 @@ pub fn get_message(h: u16, lo: u32, hi: u32, peek: Option<u32>) -> Option<Msg> {
         if matches!(msg, W_LBUTTONDOWN | W_RBUTTONDOWN | W_MBUTTONDOWN) && peek.is_none_or(|fl| fl & 1 != 0) {
             parent_notify_click(hwnd, msg, lp);
         }
+        // WH_KEYBOARD hooks may take a key (virtual key, key data).
+        if (0x100..=0x105).contains(&msg) && crate::hook::key(wp, lp) {
+            continue;
+        }
         let sy = screen_size().1;
-        let m = Msg { hwnd: hwnd as u32, msg: msg as u32, wp, lp, time: q.time, x: q.x, y: sy - 1 - q.y };
+        let mut m = Msg { hwnd: hwnd as u32, msg: msg as u32, wp, lp, time: q.time, x: q.x, y: sy - 1 - q.y };
+        // WH_GETMESSAGE hooks see (and may change) the message.
+        crate::hook::got(&mut m, peek.is_none_or(|fl| fl & 1 != 0));
+        crate::kern::observe(crate::hook::WH_GETMESSAGE, &m);
         u().msg_time = q.time;
         u().msg_pos = (m.y as u32 & 0xffff) << 16 | m.x as u32 & 0xffff;
         u().last = Some((hwnd, msg, q));

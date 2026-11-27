@@ -621,6 +621,9 @@ pub fn dialog_box(hinst: u32, t: &[u8], owner: u16, proc_: u32, param: u32, unic
             break;
         }
         // (The loop's messages are in the A form, whatever the dialog.)
+        if crate::hook::filter(&m, 0) {
+            continue;
+        }
         if !is_dialog_message(h, &m, false) {
             translate(&m);
             dispatch(&m, false);

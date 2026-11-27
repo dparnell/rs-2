@@ -1321,35 +1321,48 @@ pub extern "stdcall" fn BroadcastSystemMessageW(_f: u32, _r: u32, m: u32, wp: u3
     1
 }
 
-/// Hooks: kept, not called (the input reaches the windows as before).
+// ---- Hooks (hook.rs) ----
+
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn SetWindowsHookExA(_id: i32, _f: u32, _hi: u32, _t: u32) -> u32 {
-    0x00ec_0001
+pub extern "stdcall" fn SetWindowsHookExA(id: i32, f: u32, _hi: u32, t: u32) -> u32 {
+    crate::hook::set(id, f, t)
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn SetWindowsHookExW(_id: i32, _f: u32, _hi: u32, _t: u32) -> u32 {
-    0x00ec_0001
+pub extern "stdcall" fn SetWindowsHookExW(id: i32, f: u32, _hi: u32, t: u32) -> u32 {
+    crate::hook::set(id, f, t)
+}
+
+/// SetWindowsHook(kind, proc): the old form, for the thread.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn SetWindowsHookA(id: i32, f: u32) -> u32 {
+    crate::hook::set(id, f, crate::tid())
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn SetWindowsHookA(_id: i32, _f: u32) -> u32 {
-    0x00ec_0001
+pub extern "stdcall" fn UnhookWindowsHookEx(h: u32) -> i32 {
+    crate::hook::unhook(h) as i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn UnhookWindowsHookEx(_h: u32) -> i32 {
-    1
+pub extern "stdcall" fn UnhookWindowsHook(id: i32, f: u32) -> i32 {
+    crate::hook::unhook_proc(id, f) as i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn UnhookWindowsHook(_id: i32, _f: u32) -> i32 {
-    1
+pub extern "stdcall" fn CallNextHookEx(h: u32, c: i32, wp: u32, lp: u32) -> u32 {
+    crate::hook::call_next(h, c, wp, lp)
+}
+
+/// CallMsgFilter(lpMsg, code): WH_MSGFILTER hooks see the message.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn CallMsgFilterA(p: u32, code: i32) -> i32 {
+    wnd::Msg::read(p).is_some_and(|m| crate::hook::filter(&m, code)) as i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn CallNextHookEx(_h: u32, _c: i32, _wp: u32, _lp: u32) -> u32 {
-    0
+pub extern "stdcall" fn CallMsgFilterW(p: u32, code: i32) -> i32 {
+    CallMsgFilterA(p, code)
 }
 
 #[unsafe(no_mangle)]

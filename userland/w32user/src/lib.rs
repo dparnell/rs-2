@@ -51,6 +51,7 @@ mod draw;
 mod edit;
 mod gdi;
 mod gdi32;
+mod hook;
 mod icon;
 mod kern;
 mod listbox;

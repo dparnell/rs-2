@@ -32,6 +32,10 @@ pub struct Host {
     /// or 0xFFFF for all top-level windows): 1 and `*r` set if the host
     /// delivered it.
     pub send_foreign: unsafe extern "C" fn(h: u32, m: u32, wp: u32, lp: u32, r: *mut u32) -> u32,
+    /// A message a hook of `kind` sees (WH_GETMESSAGE as GetMessage gives
+    /// it, WH_CALLWNDPROC as it is sent), for the host's system-wide
+    /// hooks in other processes.
+    pub observe: unsafe extern "C" fn(kind: i32, m: *const crate::wnd::Msg),
     /// Flags: 1, every thread uses the first thread's queue (a Windows
     /// task's threads take turns).
     pub flags: u32,
@@ -217,4 +221,11 @@ pub fn send_foreign(hwnd: u32, m: u32, wp: u32, lp: u32) -> Option<u32> {
     let h = host()?;
     let mut r = 0;
     (unsafe { (h.send_foreign)(hwnd, m, wp, lp, &mut r) } != 0).then_some(r)
+}
+
+/// Tell the host of a message a hook of `kind` sees.
+pub fn observe(kind: i32, m: &crate::wnd::Msg) {
+    if let Some(h) = host() {
+        unsafe { (h.observe)(kind, m) };
+    }
 }
