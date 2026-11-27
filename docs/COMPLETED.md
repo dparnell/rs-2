@@ -775,6 +775,11 @@ file (docs/WIN32.md).
 - done: W32CRT, the C runtime as MSVCRT.DLL, MSVCR70-120, UCRTBASE and
   the UCRT's api-ms-win-crt DLLs; MinGW-w64 programs in C and C++
   (MTEST, MTESTM, MCPP).
+- done (stage 2): USER32, GDI32 and MSIMG32 in W32USER, WIN16's window
+  manager and GDI in 32-bit form: windows, A/W messages, painting,
+  menus and accelerators from PE resources, DIBs and DIB sections,
+  dialogs (DLGTEMPLATE(EX)) and the standard controls; PE resources in
+  W32KERN (FindResource...). GUI32 passes 112 checks.
 ## Milestone 5: install media
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

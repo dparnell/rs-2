@@ -47,7 +47,7 @@ Bigger, because:
 | Stage | What | Done when |
 |-------|------|-----------|
 | 1 | Console programs: the PE loader, TEB/PEB, SEH, TLS, KERNEL32's core, the console on VIO, a C runtime DLL | Open Watcom and MinGW console programs (hello, file I/O, threads, exceptions, `getenv`, `system`) run from CMD, with exit codes |
-| 2 | GUI programs: USER32 and GDI32 on a core shared with WIN16, resources, COMDLG32 | Open Watcom's and MinGW's Win32 GUI samples; Win32s-era programs |
+| 2 | GUI programs: USER32 and GDI32 on a core shared with WIN16, resources, COMDLG32 (USER32, GDI32, dialogs and controls done: "Stage 2 as built") | Open Watcom's and MinGW's Win32 GUI samples; Win32s-era programs |
 | 3 | The compatibility tail: COMCTL32, SHELL32, WINMM, Winsock, OLE, printing, the rest of ADVAPI32 | Chosen real programs (an editor, an installer, a game) |
 | later | Win64 (PE32+) on rs2's long-mode path (docs/API64.md) | |
 
@@ -239,9 +239,9 @@ for rs2's DLLs (GetModuleHandle("KERNEL32") is W32KERN's handle, which
 GetProcAddress takes). Error codes are OS/2's, which are Windows' for
 most numbers.
 
-`userland/w32user` → `\OS2\DLL\W32USER.DLL`, stage 1's USER32: the
-character calls, wsprintf (and wvsprintf), MessageBox on standard
-error.
+`userland/w32user` → `\OS2\DLL\W32USER.DLL`: USER32 and GDI32 (stage
+2: "Stage 2 as built"); for a console program, MessageBox writes to
+standard error (it has no PM queue).
 
 **Stack alignment.** Windows programs (as OS/2 ones) keep the stack
 4-byte aligned, and Rust code for i686 assumes 16: its SSE stores to the
@@ -327,6 +327,9 @@ told otherwise); `cargo xtask build` puts them on drive C: as
   43 checks`.
 - `MCPP.EXE`: C++ (`mcpp.cpp`, static libstdc++): static constructors,
   std::string, vector, map, unique_ptr, exceptions.
+- `GUI32.EXE`: stage 2's checks (`gui32.c`, `gui32.rc`): a MinGW GUI
+  program (`-mwindows`) with a menu, accelerators, strings, an icon and
+  a dialog in its resources. See "Stage 2 as built".
 
 A load that fails names the import in the kernel's log
 (`loader:` lines); `apitrace=W32TEST` on the kernel command line traces
@@ -334,7 +337,88 @@ the program's OS/2 calls, among them W32KERN's on its behalf.
 
 ## Stage 2: windows on a core shared with WIN16
 
-### Sharing the core
+### Stage 2 as built
+
+| Part | State |
+|------|-------|
+| USER32: classes, windows, messages (A and W), painting, timers, properties | done |
+| GDI32: DCs, objects, text, shapes, bitmaps, DIBs, DIB sections, regions, palettes, fonts | done (no paths or world transforms; no printers) |
+| Menus and accelerators (PE resources, MENUEX, MENUITEMINFO) | done |
+| Dialogs (DLGTEMPLATE, DLGTEMPLATEEX) and BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX, SCROLLBAR | done |
+| The clipboard (text), the caret, icons and cursors from resources | done |
+| MSIMG32 (AlphaBlend, TransparentBlt, GradientFill) | done, on the pels |
+| WIN16 as a facade over the 32-bit core | to do (see below) |
+| COMDLG32 | to do |
+
+`GUI32.EXE` passes `gui32 done: 0 failure(s) in 112 checks`
+(`cargo xtask run --headless --timeout 120 --init "RS2\GUI32.EXE"`;
+`RS2\GUI32.EXE WAIT` keeps its window and dialog up).
+
+**The order changed.** The plan below moves WIN16's 16-bit-independent
+code into crates first, and builds the Win32 DLLs on them. WIN16's
+USER and GDI turned out to be 16-bit throughout: far pointers in
+messages, 16-bit wParams, Win16 structure layouts in every call. So the
+32-bit form came first instead: W32USER is WIN16's window manager, GDI,
+dialogs and controls ported to 32 bits (as Wine's USER32 is the core
+and its USER.EXE16 a thunking layer over it). WIN16 is unchanged for
+now; making it a facade over W32USER's core (16-bit messages and
+structures translated to the 32-bit ones, as Wine's WINPROC_CallProc16To32
+does) is the step that removes the second copy. Until then a fix to the
+window manager is made in both.
+
+**One DLL.** USER32, GDI32 and MSIMG32 are all W32USER (the loader maps
+the three names, and W32KERN's GetModuleHandle does): windows, DCs and
+GDI objects share their state, as WIN16's one DLL does. Handles stay
+the small numbers WIN16 gives out, in ranges of their own: GDI objects
+0x0100 and up, windows 0x4004, DCs 0x8002, menus 0xA004, icons 0xE000;
+accelerator tables 0x000A0000 and up.
+
+**Text** is kept in the process's code page; a window whose procedure
+takes W messages (its class registered with RegisterClassW,
+SetWindowLongW(GWL_WNDPROC), a dialog of DialogBoxParamW) gets the W
+form of WM_SETTEXT, WM_GETTEXT, WM_CREATE's CREATESTRUCT, WM_CHAR...,
+converted in `wnd::call_conv`; SendMessageW to an A window converts the
+other way. GetMessageW gives WM_CHAR's character in UTF-16.
+
+**Built-in procedures.** DefWindowProc, DefDlgProc and the controls'
+procedures are Rust functions; programs see the addresses of their
+exports (the realigning thunks: `Rs2ButtonProc`, `Rs2EditProc`...), so
+subclassing and CallWindowProc work, and calls from the window manager
+go to the Rust function directly.
+
+**Threads.** A thread gets a PM message queue on its first window or
+message call. A window belongs to the thread that made it; SendMessage
+to another thread's window is PM's WinSendMsg of a private message
+(`XSEND_A`/`XSEND_W`), which that thread's window procedure takes while
+the sender waits. The window manager's tables are not locked: programs
+that make windows on several threads at once are not safe yet.
+
+**DIB sections** are a PM bitmap and the program's buffer (DosAllocMem),
+kept in step around each GDI call that uses one: the buffer goes into
+the bitmap before the call reads it, the bitmap back into the buffer
+after a call drew into it. PM's bitmaps are bottom-up with 1, 4, 8 or 24
+bits per pel: top-down DIBs and 16/32-bit ones (BI_RGB, BI_BITFIELDS)
+are converted (`gdi32::normalize_dib`, `read_dib`).
+
+**Dialogs** take their base units from the template's font (DS_SETFONT;
+MS Shell Dlg is MS Sans Serif): the average width of the letters and the
+height, as Windows computes them, so dialogs come out their designed
+size; every control gets WM_SETFONT.
+
+**Found on the way**: PM's frame destruction does not send WM_DESTROY
+to a frame's client, so DestroyWindow sends WM_DESTROY itself (before
+the children hear theirs) and WM_NCDESTROY after; W32USER's imports of
+W32KERN must be declared `extern "stdcall"` (W32KERN's exports pop their
+arguments).
+
+**Not yet**: paths, world transforms and metafiles; printing; MDI;
+hooks are accepted but not called; WM_MOUSELEAVE, WM_MOUSEWHEEL; a
+window's region; fonts are WIN16's mapping of faces onto rs2's (no
+TrueType files).
+
+### The plan
+
+#### Sharing the core
 
 `userland/win16` already holds Windows' window manager and GDI semantics
 on PM: window and class tables, the PM frame and `Win16Wnd` client
@@ -363,7 +447,7 @@ The order matters: step 1 is a refactor of a large working DLL, done in
 small commits with W16TEST and the real programs in docs/WIN16.md
 ("Real programs") run after each, before any Win32 code depends on it.
 
-### What the 32-bit facade changes
+#### What the 32-bit facade changes
 
 - **Message packing.** WPARAM is 32 bits, so messages that packed a
   handle and a code into LPARAM move them: WM_COMMAND (notification code
