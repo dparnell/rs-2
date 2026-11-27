@@ -1020,6 +1020,27 @@ name = "vt100"
 version = "0.1.0"
 
 [[package]]
+name = "w32kern-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "w32ntdll-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "w32user-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "wifipm"
 version = "0.1.0"
 dependencies = [
