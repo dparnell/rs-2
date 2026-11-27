@@ -55,6 +55,7 @@ pub mod vio;
 pub mod vdm;
 pub mod viowin;
 pub mod win16;
+pub mod win32;
 pub mod wlan;
 pub mod keychain;
 pub mod xproc;

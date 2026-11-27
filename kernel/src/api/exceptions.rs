@@ -232,6 +232,13 @@ pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     if super::debug::exception(f, p, t, code, &info, false) {
         return;
     }
+    // A Win32 process: its own dispatcher (api/win32.rs).
+    if p.w32.load(core::sync::atomic::Ordering::Relaxed) != 0 {
+        if !super::win32::deliver(f, p, t) {
+            default_action(f, p, t, code);
+        }
+        return;
+    }
     if !raise(f, p, t, code, 0, &info, f.rip as u32) {
         default_action(f, p, t, code);
     }
@@ -243,6 +250,11 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     if super::exceptions64::is64(f) {
         let info: Vec<u64> = info.iter().map(|&v| v as u64).collect();
         return super::exceptions64::raise(f, p, t, code, flags, &info, f.rip.max(address as u64));
+    }
+    // A Win32 process's handlers are Win32's (api/win32.rs): what the
+    // kernel raises itself (signals, guard pages) takes the default.
+    if p.w32.load(core::sync::atomic::Ordering::Relaxed) != 0 {
+        return false;
     }
     let tib = t.tib();
     let mut sp = p.space.lock();

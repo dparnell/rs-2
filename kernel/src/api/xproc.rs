@@ -9,7 +9,7 @@ use core::sync::atomic::Ordering;
 
 use super::signal::{SIG_CTRLBREAK, SIG_CTRLC};
 use super::{err, Ctx};
-use crate::task::process::{self, info, TLS_DWORDS, TLS_DWORDS64};
+use crate::task::process::{self, TLS_DWORDS, TLS_DWORDS64};
 use crate::task::thread::State;
 use crate::task::Process;
 
@@ -82,7 +82,9 @@ pub fn dos_set_signal_exception_focus(c: &mut Ctx) -> u32 {
 
 /// TIB2 tib2_usMCCount: the must-complete count programs may look at.
 fn write_mc(c: &Ctx, n: u32) {
-    let tib2 = c.thread.tib() + info::TIB2;
+    // The TIB's tib_ptib2 (a Win32 thread's TIB is its TEB, whose TIB2
+    // is elsewhere).
+    let Some(tib2) = c.read_u32(c.thread.tib() + 0x0c) else { return };
     c.write_u16(tib2 + 12, n as u16);
 }
 

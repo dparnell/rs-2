@@ -169,6 +169,9 @@ pub fn user_exception(f: &mut TrapFrame) {
                         return;
                     }
                     let ok = guard_default(&p, addr as u32, write);
+                    if ok {
+                        crate::api::win32::stack_grew(&p, &t, addr as u32);
+                    }
                     if crate::api::tracing() {
                         crate::trace!("    guard page {addr:x} at {:x}: the stack grows ({ok})", f.rip);
                     }

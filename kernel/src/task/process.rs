@@ -167,6 +167,42 @@ pub struct Process {
     /// whenever one of its threads runs (api/debug.rs).
     pub dregs: [AtomicU32; 4],
     pub dr7: AtomicU32,
+    /// A Win32 program (docs/WIN32.md): its Win32 area, the PEB in the
+    /// first page and the TEB of thread n in page n (0: not Win32).
+    pub w32: AtomicU32,
+    /// W32NTDLL's exception dispatcher (Rs2W32Init), 0 until set.
+    pub w32_dispatch: AtomicU32,
+}
+
+/// The Win32 area of a Win32 process: the PEB, then a TEB per thread.
+pub const W32_AREA: u32 = (info::MAX_THREADS + 1) * vm::PAGE;
+
+/// PEB fields rs2's kernel fills in (the rest is W32NTDLL's).
+pub mod peb {
+    pub const BEING_DEBUGGED: u32 = 0x02;
+    pub const IMAGE_BASE: u32 = 0x08;
+    pub const NUMBER_OF_PROCESSORS: u32 = 0x64;
+    pub const OS_MAJOR: u32 = 0xa4;
+    pub const OS_MINOR: u32 = 0xa8;
+    pub const OS_BUILD: u32 = 0xac;
+    pub const OS_PLATFORM: u32 = 0xb0;
+}
+
+/// TEB fields.
+pub mod teb {
+    pub const EXCEPTION_LIST: u32 = 0x00;
+    pub const STACK_BASE: u32 = 0x04;
+    pub const STACK_LIMIT: u32 = 0x08;
+    /// SubSystemTib in Windows; OS/2's tib_ptib2 here, so that the TEB is
+    /// the thread's OS/2 TIB too (rs2's DLLs it calls read it).
+    pub const TIB2: u32 = 0x0c;
+    pub const VERSION: u32 = 0x10;
+    pub const ORDINAL: u32 = 0x14;
+    pub const SELF: u32 = 0x18;
+    pub const CLIENT_PID: u32 = 0x20;
+    pub const CLIENT_TID: u32 = 0x24;
+    pub const PEB: u32 = 0x30;
+    pub const DEALLOCATION_STACK: u32 = 0xe0c;
 }
 
 /// Thread-local memory: dwords per thread (in the process information area).
@@ -276,6 +312,23 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     write_u32s(&mut space, info + info::PIB, &pib);
 
     let is64 = exe.format == loader::Format::Elf64;
+    // A Win32 program: its PEB, and its stack's sizes from its header.
+    let is_w32 = exe.format == loader::Format::Pe;
+    let mut w32 = 0;
+    let mut w32_stack = (0x10_0000, 0x1000);
+    if is_w32 {
+        w32 = space.alloc(W32_AREA, pag::READ | pag::WRITE, SegKind::Data, None).map_err(|e| e.code())?;
+        space.set_mem(w32, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE).map_err(|e| e.code())?;
+        let base = exe.objects.first().map_or(0, |o| o.base);
+        let cpus = crate::smp::online_count();
+        write_u32s(&mut space, w32 + peb::IMAGE_BASE, &[base]);
+        write_u32s(&mut space, w32 + peb::NUMBER_OF_PROCESSORS, &[cpus]);
+        // Windows XP (5.1, build 2600, VER_PLATFORM_WIN32_NT).
+        write_u32s(&mut space, w32 + peb::OS_MAJOR, &[5, 1, 2600, 2]);
+        if let Some((reserve, commit)) = exe.image.as_deref().and_then(loader::peload::stack_sizes) {
+            w32_stack = (reserve, commit);
+        }
+    }
     if is64 {
         // PIB: pid, ppid, hmte, (pad), command line, environment,
         // status, type.
@@ -296,6 +349,17 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         let _ = space.set_mem(base + size - vm::PAGE, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
         let _ = space.set_mem(base + size - 2 * vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
         (base + size, 0, 0)
+    } else if is_w32 {
+        // Reserved as the program asks, the committed part at the top,
+        // then a guard page: the stack grows down through it.
+        let reserve = w32_stack.0.clamp(0x1_0000, 0x1000_0000).next_multiple_of(vm::TILE);
+        let commit = w32_stack.1.clamp(vm::PAGE, reserve - 2 * vm::PAGE).next_multiple_of(vm::PAGE);
+        let base = space.alloc(reserve, pag::READ | pag::WRITE, SegKind::Data, None).map_err(|e| e.code())?;
+        let top = base + reserve;
+        let _ = space.set_mem(top - commit, commit, pag::COMMIT | pag::READ | pag::WRITE);
+        let _ = space.set_mem(top - commit - vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
+        w32_stack = (base, top - commit);
+        (top, 0, 0)
     } else if start.stack.flat != 0 || start.stack.sel != 0 {
         (start.stack.flat, start.stack.sel, start.stack.off)
     } else {
@@ -347,6 +411,25 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         frame.rdi = hmte as u64;
         frame.rdx = env as u64;
         frame.rcx = (env + cmd_off) as u64;
+    } else if is_w32 {
+        // W32NTDLL's Rs2W32Start(entry, image base, PEB): it runs the
+        // DLLs' entry points, then the program's (docs/WIN32.md).
+        let ntdll = exe.imports.iter().find(|m| m.name == loader::peload::NTDLL).cloned();
+        let Some(st) = ntdll.and_then(|m| m.resolve_name("Rs2W32Start", 0).ok()) else {
+            crate::trace!("exec: {}: W32NTDLL has no Rs2W32Start", p.path);
+            return Err(loader::err::PROC_NOT_FOUND);
+        };
+        let sp = (stack_flat - 16) & !15;
+        let exit_stub = loader::gate::slot_address(0, 0);
+        let base = exe.objects.first().map_or(0, |o| o.base);
+        write_u32s(&mut space, sp - 4, &[exit_stub, start.entry.flat, base, w32]);
+        frame.cs = USER_CS as u64;
+        frame.rip = st.flat as u64;
+        frame.ss = USER_DS as u64;
+        frame.ds = USER_DS as u64;
+        frame.es = USER_DS as u64;
+        frame.fs = TIB_SEL as u64;
+        frame.rsp = (sp - 4) as u64;
     } else {
         // [esp] = return address (exit stub), hmod, 0, env, cmdline.
         let sp = (stack_flat - 20) & !3;
@@ -422,8 +505,10 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         debugged: core::sync::atomic::AtomicBool::new(p.traced),
         dregs: [const { AtomicU32::new(0) }; 4],
         dr7: AtomicU32::new(0),
+        w32: AtomicU32::new(w32),
+        w32_dispatch: AtomicU32::new(0),
     });
-    let stack_bottom = if is64 { stack_flat - STACK64 } else { stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000)) };
+    let stack_bottom = if is64 { stack_flat - STACK64 } else if is_w32 { w32_stack.1 } else { stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000)) };
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
     {
         let mut sp = proc.space.lock();
@@ -519,7 +604,9 @@ impl Process {
                 }
             };
             let t = Thread::new_user(self, tid, frame);
-            t.set_tib(self.info + info::TIB0 + tid * info::TIB_STRIDE);
+            // A Win32 thread's FS is its TEB, which is its OS/2 TIB too.
+            let w32 = self.w32.load(Ordering::Relaxed);
+            t.set_tib(if w32 != 0 { w32 + tid * vm::PAGE } else { self.info + info::TIB0 + tid * info::TIB_STRIDE });
             t.stack_base.store(stack_bottom, Ordering::Relaxed);
             t.stack_top.store(stack_top, Ordering::Relaxed);
             if self.exit.lock().is_some() && self.exitlist_tid.load(Ordering::Relaxed) == 0 {
@@ -531,12 +618,24 @@ impl Process {
         let tid = t.tid;
         self.next_tid.store(tid + 1, Ordering::Relaxed);
         let tib = t.tib();
-        let tib2 = tib + info::TIB2;
+        let tib2 = self.info + info::TIB0 + tid * info::TIB_STRIDE + info::TIB2;
+        let w32 = self.w32.load(Ordering::Relaxed);
         {
             let mut sp = self.space.lock();
-            // TIB: exception chain (-1 = end), stack base, stack limit, TIB2,
-            // version, ordinal.
-            write_u32s(&mut sp, tib, &[0xffff_ffff, stack_bottom, stack_top, tib2, 20, t.id]);
+            if w32 != 0 {
+                // The TEB: Windows' stack fields (base is the top, limit
+                // the lowest committed page), OS/2's TIB2, version and
+                // ordinal where Windows has fields programs do not use.
+                let _ = sp.set_mem(tib, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
+                sp.poke_bytes(tib, &[0u8; vm::PAGE as usize]);
+                write_u32s(&mut sp, tib, &[0xffff_ffff, stack_top, stack_bottom, tib2, 20, t.id, tib]);
+                write_u32s(&mut sp, tib + teb::CLIENT_PID, &[self.pid, tid]);
+                write_u32s(&mut sp, tib + teb::PEB, &[w32]);
+            } else {
+                // TIB: exception chain (-1 = end), stack base, stack
+                // limit, TIB2, version, ordinal.
+                write_u32s(&mut sp, tib, &[0xffff_ffff, stack_bottom, stack_top, tib2, 20, t.id]);
+            }
             write_u32s(&mut sp, tib2, &[tid, t.priority(), 20, 0]);
             if self.is64() {
                 // TIB: exception chain (empty: -1), stack base, stack limit,
