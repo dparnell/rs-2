@@ -772,6 +772,9 @@ file (docs/WIN32.md).
   synchronisation, processes, modules, code pages and strings, time, the
   console on VIO and KBD; entry thunks that realign the stack.
   W32TEST passes 145 checks (Open Watcom programs).
+- done: W32CRT, the C runtime as MSVCRT.DLL, MSVCR70-120, UCRTBASE and
+  the UCRT's api-ms-win-crt DLLs; MinGW-w64 programs in C and C++
+  (MTEST, MTESTM, MCPP).
 ## Milestone 5: install media
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

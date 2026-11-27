@@ -74,13 +74,15 @@ calls.
 | LoadLibrary, GetProcAddress, GetModuleHandle, GetModuleFileName | works (FreeLibrary does not unload) |
 | Code pages, the string calls, times and clocks, versions, system information | works |
 | The console: colours, the cursor, the screen buffer calls, key input | works (no mouse input, no Ctrl+C handlers yet) |
-| MSVCRT.DLL for MinGW programs | not yet: needs MinGW-w64 to build its tests |
+| The C runtime (MSVCRT.DLL, MSVCR70-120, UCRTBASE and the UCRT's `api-ms-win-crt-*` DLLs) as W32CRT: stdio, file descriptors, printf and scanf, math, time, setjmp, threads, spawn | works (MinGW-w64 programs, C and C++ with exceptions) |
 | The PEB's loader lists (Ldr) and process parameters | not yet |
 
 `W32TEST.EXE` passes its 145 checks (`cargo xtask run --headless
 --timeout 120 --init "RS2\W32TEST.EXE"` ends with `w32test done: 0
 failure(s) in 145 checks`); `HELLO32.EXE` prints its arguments and ends
-with exit code 3.
+with exit code 3; the MinGW-w64 programs `MTEST.EXE` (UCRT) and
+`MTESTM.EXE` (MSVCRT.DLL) pass their 43 checks of the C runtime, and
+`MCPP.EXE` its 7 of C++ (static constructors, the STL, exceptions).
 
 ### The PE loader
 
@@ -268,25 +270,47 @@ Not yet: mouse input, Ctrl+C and Ctrl+Break handlers
 (SetConsoleCtrlHandler is accepted and does nothing), the window title,
 several screen buffers.
 
-### The C runtime
+### The C runtime (W32CRT)
 
-Open Watcom's programs carry their C library; MinGW programs import
-MSVCRT.DLL, and MSVC-built ones their own runtime (MSVCRT, MSVCR71 ...
-MSVCR100, or the UCRT's `api-ms-win-crt-*` DLLs), which they usually
-ship beside the program but which are Microsoft's. rs2 is to provide its
-own `MSVCRT.DLL`: the C library functions, `__getmainargs`, `_initterm`,
-`_onexit`, `_iob` and `__p__iob`, the locale and ctype tables,
-`_except_handler3/4`, `_setjmp3` and `longjmp` with SEH unwind,
-`_beginthreadex`. rs2's own C library for 64-bit programs
-(docs/LIBC64.md) is a source of the portable parts. Not started: its
-tests need MinGW-w64 (i686) on the build host.
+`userland/w32crt` → `\OS2\DLL\W32CRT.DLL` is the C runtime of every
+Windows program that does not carry its own: the loader maps MSVCRT,
+MSVCR70 to MSVCR120, UCRTBASE and the UCRT's API sets (`api-ms-win-crt-
+runtime-l1-1-0` and the others) to it. It exports both runtimes' names
+(about 600): the old one's start-up (`__getmainargs`, `_initterm`,
+`__p__iob`, `_iob` and its other variables as data) and the UCRT's
+(`_configure_narrow_argv`, `__acrt_iob_func`, `__stdio_common_vfprintf`
+and the other `__stdio_common_*`). Functions are cdecl; those with
+variable arguments are shims (`exports.extra`, `NAME=va TARGET K`) that
+pass the address of the rest to the v-form.
+
+| File | What |
+|------|------|
+| start.rs | the arguments (split by Windows' rules) and the environment, `_initterm`, atexit and the DLL onexit tables, exit, abort, signals, the C locale |
+| mem.rs | malloc and friends (16-byte aligned), `_aligned_malloc` |
+| string.rs | strings, wide strings, the character class table (`_pctype`), number conversions, qsort, bsearch, rand (Microsoft's generator) |
+| fmt.rs | printf (narrow and wide; three exponent digits for the old runtime, two for the UCRT unless its options say otherwise), scanf, strtod (Rust's exact conversions) |
+| io.rs | file descriptors over Windows handles; text mode (CR LF, Ctrl+Z) |
+| stdio.rs | FILE streams: MSVCRT's FILE layout, stdin/stdout/stderr the first three of `_iob` (old `getc` macros reach `_filbuf`); line buffering on a terminal |
+| fs.rs | remove, rename, `_stat` in all six layouts, `_findfirst` in all four, directories, `_fullpath`, `_splitpath` |
+| math.rs | <math.h> on the x87 unit (core has only `abs`), the FPU control calls |
+| time.rs | time, localtime and gmtime (32- and 64-bit), mktime, strftime, clock |
+| misc.rs | setjmp/longjmp (longjmp runs the `__finally` blocks it leaves through RtlUnwind), `_beginthread(ex)`, system and `_spawn*`/`_exec*` (CreateProcess), the environment, conio |
+
+`abort` writes its callers' return addresses to the kernel's log
+(`w32crt: abort, callers ...`): look them up in the program's map.
+
+MinGW-w64's i686 GCC uses SJLJ exceptions and links winpthreads, which
+needs the program's own TLS callbacks to run before its entry point and
+`DuplicateHandle(GetCurrentThread())` to work for thread 1: both do.
 
 ### Building the test programs
 
 `userland/win32test/build.sh` builds them with Open Watcom v2's NT target
 (`wcl386 -bt=nt`), installed as for the Win16 programs (docs/WIN16.md,
-"Building the test programs"); `cargo xtask build` puts them on drive C:
-as `C:\RS2\*.EXE`:
+"Building the test programs"), and with MinGW-w64 (`brew install
+mingw-w64`: `i686-w64-mingw32-gcc`, which links against the UCRT unless
+told otherwise); `cargo xtask build` puts them on drive C: as
+`C:\RS2\*.EXE`:
 
 - `HELLO32.EXE`: the hello world; prints its arguments and PATH, ends
   with exit code 3.
@@ -295,6 +319,14 @@ as `C:\RS2\*.EXE`:
 - `W32TEST.EXE`: the checks, in groups BASIC FILE MEM THREAD SEH PROC
   STR TIME CON DLL (`W32TEST GROUP...` runs some); it imports W32DLL
   (its import library from the DLL) and starts HELLO32.
+- `MTEST.EXE`, `MTESTM.EXE`: the C runtime's checks (`mtest.c`):
+  arguments, environment, strings, conversions, printf and scanf, math,
+  files in text and binary mode, `_stat`, time, setjmp, threads, wide
+  characters; MTEST imports the UCRT's DLLs, MTESTM MSVCRT.DLL (linked
+  against `libmsvcrt-os.a`). Both end with `mtest done: 0 failure(s) in
+  43 checks`.
+- `MCPP.EXE`: C++ (`mcpp.cpp`, static libstdc++): static constructors,
+  std::string, vector, map, unique_ptr, exceptions.
 
 A load that fails names the import in the kernel's log
 (`loader:` lines); `apitrace=W32TEST` on the kernel command line traces
