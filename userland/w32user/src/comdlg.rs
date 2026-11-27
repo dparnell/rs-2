@@ -40,8 +40,11 @@ const CHX1: u16 = 0x410;
 const CHX2: u16 = 0x411;
 const RAD1: u16 = 0x420;
 const RAD2: u16 = 0x421;
+const RAD3: u16 = 0x422;
+const RAD4: u16 = 0x423;
 const GRP1: u16 = 0x430;
 const GRP2: u16 = 0x431;
+const GRP3: u16 = 0x432;
 const STC1: u16 = 0x440;
 const STC2: u16 = 0x441;
 const STC3: u16 = 0x442;
@@ -55,6 +58,7 @@ const CMB3: u16 = 0x472;
 const CMB4: u16 = 0x473;
 const EDT1: u16 = 0x480;
 const EDT2: u16 = 0x481;
+const EDT3: u16 = 0x482;
 // The colour dialog's (color.dlg).
 const COLOR_HUE: u16 = 703;
 const COLOR_SAT: u16 = 704;
@@ -116,6 +120,8 @@ const CDERR_STRUCTSIZE: u32 = 0x0001;
 const CDERR_NOTEMPLATE: u32 = 0x0003;
 const CDERR_FINDRESFAILURE: u32 = 0x0006;
 const PDERR_NODEFAULTPRN: u32 = 0x1008;
+const PDERR_RETDEFFAILURE: u32 = 0x1009;
+const PDERR_CREATEICFAILURE: u32 = 0x100a;
 const FNERR_INVALIDFILENAME: u32 = 0x3002;
 const FNERR_BUFFERTOOSMALL: u32 = 0x3003;
 const FRERR_BUFFERLENGTHZERO: u32 = 0x4001;
@@ -192,6 +198,7 @@ enum Kind {
     Color(Color),
     Font(Font),
     Find(Find),
+    Print(Print),
 }
 
 struct Cd {
@@ -423,6 +430,7 @@ pub fn dlg_proc(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
         Kind::Color(_) => color_msg(h, m, wp, lp),
         Kind::Font(_) => font_msg(h, m, wp, lp),
         Kind::Find(_) => find_msg(h, m, wp, lp),
+        Kind::Print(_) => print_msg(h, m, wp, lp),
     }
 }
 
@@ -433,6 +441,7 @@ fn init(h: u16) {
         Kind::Color(_) => color_init(h),
         Kind::Font(_) => font_init(h),
         Kind::Find(_) => find_init(h),
+        Kind::Print(_) => print_init(h),
     }
 }
 
@@ -1832,6 +1841,484 @@ fn font_msg(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     }
 }
 
+// ---- Print and Print Setup ----
+
+struct Print {
+    setup: bool,
+    printers: Vec<crate::print::Printer>,
+    /// The printer chosen (index in `printers`).
+    sel: usize,
+    /// The job properties: orientation (1 portrait, 2 landscape), paper
+    /// (DMPAPER_*), copies.
+    orient: u16,
+    paper: u16,
+    copies: u16,
+}
+
+// PRINTDLG offsets (Win32's is packed: 66 bytes).
+const PD_HWNDOWNER: usize = 4;
+const PD_HDEVMODE: usize = 8;
+const PD_HDEVNAMES: usize = 12;
+const PD_HDC: usize = 16;
+const PD_FLAGS: usize = 20;
+const PD_FROMPAGE: usize = 24;
+const PD_TOPAGE: usize = 26;
+const PD_MINPAGE: usize = 28;
+const PD_MAXPAGE: usize = 30;
+const PD_COPIES: usize = 32;
+const PD_HINSTANCE: usize = 34;
+const PD_PRINTHOOK: usize = 42;
+const PD_SETUPHOOK: usize = 46;
+const PD_PRINTTEMPLATENAME: usize = 50;
+const PD_SETUPTEMPLATENAME: usize = 54;
+const PD_HPRINTTEMPLATE: usize = 58;
+const PD_HSETUPTEMPLATE: usize = 62;
+
+const PD_SELECTION: u32 = 0x1;
+const PD_PAGENUMS: u32 = 0x2;
+const PD_NOSELECTION: u32 = 0x4;
+const PD_NOPAGENUMS: u32 = 0x8;
+const PD_COLLATE: u32 = 0x10;
+const PD_PRINTTOFILE: u32 = 0x20;
+const PD_PRINTSETUP: u32 = 0x40;
+const PD_RETURNDC: u32 = 0x100;
+const PD_RETURNIC: u32 = 0x200;
+const PD_RETURNDEFAULT: u32 = 0x400;
+const PD_SHOWHELP: u32 = 0x800;
+const PD_ENABLEPRINTHOOK: u32 = 0x1000;
+const PD_ENABLESETUPHOOK: u32 = 0x2000;
+const PD_ENABLEPRINTTEMPLATE: u32 = 0x4000;
+const PD_ENABLESETUPTEMPLATE: u32 = 0x8000;
+const PD_ENABLEPRINTTEMPLATEHANDLE: u32 = 0x10000;
+const PD_ENABLESETUPTEMPLATEHANDLE: u32 = 0x20000;
+const PD_DISABLEPRINTTOFILE: u32 = 0x80000;
+const PD_HIDEPRINTTOFILE: u32 = 0x100000;
+
+/// The paper sizes (DMPAPER_*) in rs2's PostScript driver's forms order.
+const PAPERS: [(&[u8], u16); 6] = [(b"Letter 8 1/2 x 11 in", 1), (b"A4 210 x 297 mm", 9), (b"Legal 8 1/2 x 14 in", 5), (b"A3 297 x 420 mm", 8), (b"A5 148 x 210 mm", 11), (b"Executive 7 1/4 x 10 1/2 in", 7)];
+
+fn print_template() -> Vec<u8> {
+    let mut t = Tpl::new(DLG, 36, 52, 225, 130, b"Print");
+    t.label(b"Printer:", 0xffff, 4, 4, 40, 8)
+        .item(0x82, b"", STC1, SS_NOPREFIX, 44, 4, 120, 18)
+        .button(b"Print Range", GRP1, BS_GROUPBOX, 4, 27, 132, 67)
+        .button(b"&All", RAD1, BS_AUTORADIOBUTTON | GROUP, 10, 39, 76, 12)
+        .item(0x80, b"S&election", RAD2, BS_AUTORADIOBUTTON, 10, 52, 76, 12)
+        .item(0x80, b"&Pages", RAD3, BS_AUTORADIOBUTTON, 10, 65, 76, 12)
+        .item(0x82, b"&From:", STC2, SS_RIGHT, 20, 80, 28, 9)
+        .edit(EDT1, 52, 78, 26, 12)
+        .item(0x82, b"&To:", STC3, SS_RIGHT, 80, 80, 18, 9)
+        .edit(EDT2, 102, 78, 26, 12)
+        .label(b"Print &Quality:", STC4, 4, 100, 50, 9)
+        .item(0x85, b"", CMB1, CBS_DROPDOWNLIST | WS_VSCROLL | TAB, 56, 98, 80, 36)
+        .label(b"&Copies:", STC5, 146, 100, 30, 9)
+        .edit(EDT3, 180, 98, 22, 12)
+        .button(b"Print to Fi&le", CHX1, BS_AUTOCHECKBOX | GROUP, 4, 114, 120, 12)
+        .button(b"Collate Cop&ies", CHX2, BS_AUTOCHECKBOX, 146, 114, 72, 12)
+        .button(b"OK", IDOK, BS_DEFPUSHBUTTON | GROUP, 170, 4, 50, 14)
+        .button(b"Cancel", IDCANCEL, GROUP, 170, 21, 50, 14)
+        .button(b"&Setup...", PSH1, GROUP, 170, 41, 50, 14)
+        .button(b"&Help", PSH_HELP, GROUP, 170, 58, 50, 14);
+    t.done()
+}
+
+fn setup_template() -> Vec<u8> {
+    let mut t = Tpl::new(DLG, 30, 23, 287, 122, b"Print Setup");
+    t.button(b"Printer", GRP3, BS_GROUPBOX, 4, 6, 224, 66)
+        .button(b"&Default Printer", RAD3, BS_AUTORADIOBUTTON | GROUP, 8, 16, 212, 12)
+        .item(0x82, b"", STC1, SS_NOPREFIX, 20, 30, 204, 9)
+        .item(0x80, b"Specific &Printer:", RAD4, BS_AUTORADIOBUTTON, 8, 42, 212, 12)
+        .item(0x85, b"", CMB1, CBS_DROPDOWNLIST | WS_VSCROLL | TAB | GROUP, 20, 55, 204, 80)
+        .button(b"Orientation", GRP1, BS_GROUPBOX, 4, 74, 91, 46)
+        .button(b"Po&rtrait", RAD1, BS_AUTORADIOBUTTON | GROUP, 14, 86, 70, 12)
+        .item(0x80, b"&Landscape", RAD2, BS_AUTORADIOBUTTON, 14, 102, 70, 12)
+        .button(b"Paper", GRP2, BS_GROUPBOX, 100, 74, 128, 46)
+        .label(b"Si&ze:", STC2, 104, 88, 28, 9)
+        .item(0x85, b"", CMB2, CBS_DROPDOWNLIST | WS_VSCROLL | TAB | GROUP, 134, 86, 90, 80)
+        .label(b"&Source:", STC3, 104, 104, 28, 9)
+        .item(0x85, b"", CMB3, CBS_DROPDOWNLIST | WS_VSCROLL | TAB | GROUP, 134, 102, 90, 48)
+        .button(b"OK", IDOK, BS_DEFPUSHBUTTON | GROUP, 232, 4, 50, 14)
+        .button(b"Cancel", IDCANCEL, GROUP, 232, 21, 50, 14)
+        .button(b"&Options...", PSH1, GROUP, 232, 40, 50, 14)
+        .button(b"&Help", PSH_HELP, GROUP, 232, 57, 50, 14);
+    t.done()
+}
+
+fn print_dlg(st: u32, wide: bool) -> bool {
+    *ERROR.get() = 0;
+    if st == 0 || rd32(st, 0) < 66 {
+        *ERROR.get() = CDERR_STRUCTSIZE;
+        return false;
+    }
+    let fl = rd32(st, PD_FLAGS);
+    let printers = crate::print::printers();
+    if printers.is_empty() {
+        *ERROR.get() = PDERR_NODEFAULTPRN;
+        return false;
+    }
+    // The printer and properties of hDevNames and hDevMode, else the
+    // default printer's.
+    let dflt = printers.iter().position(|p| p.default).unwrap_or(0);
+    let mut p = Print { setup: fl & PD_PRINTSETUP != 0, sel: dflt, orient: 1, paper: 1, copies: rd16(st, PD_COPIES).max(1), printers };
+    let hdn = rd32(st, PD_HDEVNAMES);
+    let dn = crate::kern::global_lock(hdn);
+    if dn != 0 {
+        // DEVNAMES: offsets in characters.
+        let u = if wide { 2 } else { 1 };
+        let dev = get_str(dn + u * rd16(dn, 2) as u32, wide).unwrap_or_default();
+        let out = get_str(dn + u * rd16(dn, 4) as u32, wide).unwrap_or_default();
+        if let Some(i) = crate::print::find(&p.printers, &dev, &out) {
+            p.sel = i;
+        }
+        crate::kern::global_unlock(hdn);
+    }
+    let hdm = rd32(st, PD_HDEVMODE);
+    let dm = crate::kern::global_lock(hdm);
+    if dm != 0 {
+        // (DEVMODEW's fields are 32 bytes on: its name is UTF-16.)
+        let dm = if wide { dm + 32 } else { dm };
+        let fields = rd32(dm, 40);
+        if fields & 0x1 != 0 {
+            p.orient = rd16(dm, 44).clamp(1, 2);
+        }
+        if fields & 0x2 != 0 {
+            p.paper = rd16(dm, 46);
+        }
+        if fields & 0x100 != 0 {
+            p.copies = rd16(dm, 54).max(1);
+        }
+        crate::kern::global_unlock(hdm);
+    } else {
+        let props = crate::print::props(&p.printers[p.sel]);
+        p.orient = if props.1 { 2 } else { 1 };
+        p.paper = PAPERS.get(props.0 as usize).map_or(1, |x| x.1);
+    }
+    if fl & PD_RETURNDEFAULT != 0 {
+        if hdn != 0 || hdm != 0 {
+            *ERROR.get() = PDERR_RETDEFFAILURE;
+            return false;
+        }
+        p.sel = dflt;
+        return print_result(st, &p, fl, wide);
+    }
+    let setup = p.setup;
+    let (use_res, use_handle, name, htpl) = if setup {
+        (fl & PD_ENABLESETUPTEMPLATE != 0, fl & PD_ENABLESETUPTEMPLATEHANDLE != 0, rd32(st, PD_SETUPTEMPLATENAME), rd32(st, PD_HSETUPTEMPLATE))
+    } else {
+        (fl & PD_ENABLEPRINTTEMPLATE != 0, fl & PD_ENABLEPRINTTEMPLATEHANDLE != 0, rd32(st, PD_PRINTTEMPLATENAME), rd32(st, PD_HPRINTTEMPLATE))
+    };
+    let ours = if setup { setup_template() } else { print_template() };
+    let Some(t) = template(use_res, use_handle, if use_handle { crate::kern::global_lock(htpl).max(htpl) } else { rd32(st, PD_HINSTANCE) }, name, wide, ours) else { return false };
+    let hook = match (setup, fl & PD_ENABLESETUPHOOK != 0, fl & PD_ENABLEPRINTHOOK != 0) {
+        (true, true, _) => rd32(st, PD_SETUPHOOK),
+        (false, _, true) => rd32(st, PD_PRINTHOOK),
+        _ => 0,
+    };
+    let cd = Cd { kind: Kind::Print(p), st, hook, wide };
+    *PRINT_RESULT.get() = None;
+    let r = run(&t, rd32(st, PD_HWNDOWNER), rd32(st, PD_HINSTANCE), cd);
+    match PRINT_RESULT.get().take() {
+        Some(p) if r == 1 => print_result(st, &p, rd32(st, PD_FLAGS), wide),
+        _ => false,
+    }
+}
+
+/// The choices of a Print or Print Setup dialog closed with OK.
+static PRINT_RESULT: Global<Option<Print>> = Global::new(None);
+
+/// Fill hDevMode, hDevNames (and hDC) from the choices: a DEVMODEA
+/// (DEVMODEW) and DEVNAMES in global memory.
+fn print_result(st: u32, p: &Print, fl: u32, wide: bool) -> bool {
+    let pr = &p.printers[p.sel];
+    let dev = crate::print::device_name(pr);
+    let out = crate::print::port_name(pr);
+    // DEVMODE: the name (32 characters), then the fields (dmSize 156,
+    // 220 for DEVMODEW).
+    let (size, name_len) = if wide { (220u32, 64usize) } else { (156u32, 32usize) };
+    let mut hdm = rd32(st, PD_HDEVMODE);
+    if hdm != 0 && crate::kern::global_size(hdm) < size {
+        hdm = crate::kern::global_realloc(hdm, size, 0x0042);
+    }
+    if hdm == 0 {
+        hdm = crate::kern::global_alloc(0x0042, size);
+    }
+    let dm = crate::kern::global_lock(hdm);
+    if dm != 0 {
+        let mut b = vec![0u8; size as usize];
+        let n = dev.len().min(31);
+        if wide {
+            for (i, c) in crate::to_wide(&dev[..n]).iter().enumerate() {
+                b[2 * i..2 * i + 2].copy_from_slice(&c.to_le_bytes());
+            }
+        } else {
+            b[..n].copy_from_slice(&dev[..n]);
+        }
+        let f = &mut b[name_len - 32..];
+        f[32..34].copy_from_slice(&0x0401u16.to_le_bytes());
+        f[34..36].copy_from_slice(&0x0100u16.to_le_bytes());
+        f[36..38].copy_from_slice(&(size as u16).to_le_bytes());
+        // DM_ORIENTATION | DM_PAPERSIZE | DM_COPIES
+        f[40..44].copy_from_slice(&0x0000_0103u32.to_le_bytes());
+        f[44..46].copy_from_slice(&p.orient.to_le_bytes());
+        f[46..48].copy_from_slice(&p.paper.to_le_bytes());
+        f[52..54].copy_from_slice(&100u16.to_le_bytes());
+        f[54..56].copy_from_slice(&p.copies.to_le_bytes());
+        f[58..60].copy_from_slice(&300u16.to_le_bytes());
+        f[60..62].copy_from_slice(&2u16.to_le_bytes());
+        unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), dm as *mut u8, b.len()) };
+        crate::kern::global_unlock(hdm);
+        wr32(st, PD_HDEVMODE, hdm);
+    }
+    // DEVNAMES: the offsets (in characters), then the driver, device and
+    // port.
+    let driver: &[u8] = b"PSCRIPT";
+    let (o1, o2) = (4 + driver.len() + 1, 4 + driver.len() + 1 + dev.len() + 1);
+    let dflt = (p.sel == p.printers.iter().position(|x| x.default).unwrap_or(usize::MAX)) as u16;
+    let mut chars: Vec<u16> = alloc::vec![4, o1 as u16, o2 as u16, dflt];
+    for s in [driver, &dev, &out] {
+        chars.extend(crate::to_wide(s));
+        chars.push(0);
+    }
+    let d: Vec<u8> = if wide {
+        chars.iter().flat_map(|c| c.to_le_bytes()).collect()
+    } else {
+        // Offsets in bytes: as the characters' (each string is as many
+        // bytes as characters in the code page), the header 8 bytes.
+        let mut v: Vec<u8> = Vec::new();
+        for (i, c) in chars[..4].iter().enumerate() {
+            let o = if i < 3 { *c + 4 } else { *c };
+            v.extend_from_slice(&o.to_le_bytes());
+        }
+        for s in [driver, &dev, &out] {
+            v.extend_from_slice(s);
+            v.push(0);
+        }
+        v
+    };
+    let mut hdn = rd32(st, PD_HDEVNAMES);
+    if hdn != 0 {
+        hdn = crate::kern::global_realloc(hdn, d.len() as u32, 0x0042);
+    }
+    if hdn == 0 {
+        hdn = crate::kern::global_alloc(0x0042, d.len() as u32);
+    }
+    let q = crate::kern::global_lock(hdn);
+    if q != 0 {
+        unsafe { core::ptr::copy_nonoverlapping(d.as_ptr(), q as *mut u8, d.len()) };
+        crate::kern::global_unlock(hdn);
+        wr32(st, PD_HDEVNAMES, hdn);
+    }
+    wr16(st, PD_COPIES, p.copies);
+    if fl & (PD_RETURNDC | PD_RETURNIC) != 0 {
+        let dm = crate::kern::global_lock(hdm);
+        let dmf = if dm == 0 { None } else { Some(if wide { dm + 32 } else { dm }) };
+        let hdc = crate::print::create_dc(pr, dmf, fl & PD_RETURNDC != 0);
+        crate::kern::global_unlock(hdm);
+        if hdc == 0 {
+            *ERROR.get() = PDERR_CREATEICFAILURE;
+            return false;
+        }
+        wr32(st, PD_HDC, hdc as u32);
+    }
+    true
+}
+
+fn print(h: u16) -> Option<&'static mut Print> {
+    match &mut state(h)?.kind {
+        Kind::Print(p) => Some(p),
+        _ => None,
+    }
+}
+
+fn printer_label(p: &crate::print::Printer) -> Vec<u8> {
+    let mut s = crate::print::device_name(p);
+    s.extend_from_slice(b" on ");
+    s.extend_from_slice(&crate::print::port_name(p));
+    s
+}
+
+fn print_init(h: u16) {
+    let Some(st) = state(h).map(|s| s.st) else { return };
+    let fl = rd32(st, PD_FLAGS);
+    if fl & PD_SHOWHELP == 0 {
+        show(h, PSH_HELP, false);
+    }
+    let Some(p) = print(h) else { return };
+    let label = printer_label(&p.printers[p.sel]);
+    if p.setup {
+        let dflt = p.printers.iter().position(|x| x.default).unwrap_or(0);
+        let mut d = b"(".to_vec();
+        d.extend_from_slice(&printer_label(&p.printers[dflt]));
+        d.push(b')');
+        let cmb = get_item(h, CMB1);
+        for x in &p.printers {
+            send_str(cmb, CB_ADDSTRING, 0, &printer_label(x));
+        }
+        let (sel, orient, paper) = (p.sel, p.orient, p.paper);
+        send(cmb, CB_SETCURSEL, sel as u32, 0);
+        set_text(h, STC1, &d);
+        check(h, if sel == dflt { RAD3 } else { RAD4 }, true);
+        check(h, if orient == 2 { RAD2 } else { RAD1 }, true);
+        let papers = get_item(h, CMB2);
+        for (name, _) in PAPERS {
+            send_str(papers, CB_ADDSTRING, 0, name);
+        }
+        send(papers, CB_SETCURSEL, PAPERS.iter().position(|x| x.1 == paper).unwrap_or(0) as u32, 0);
+        let src = get_item(h, CMB3);
+        send_str(src, CB_ADDSTRING, 0, b"Automatic");
+        send(src, CB_SETCURSEL, 0, 0);
+        return;
+    }
+    let copies = p.copies;
+    set_text(h, STC1, &label);
+    let q = get_item(h, CMB1);
+    send_str(q, CB_ADDSTRING, 0, b"300 dpi");
+    send(q, CB_SETCURSEL, 0, 0);
+    set_text(h, EDT3, alloc::format!("{copies}").as_bytes());
+    if fl & PD_NOSELECTION != 0 {
+        enable(h, RAD2, false);
+    }
+    if fl & PD_NOPAGENUMS != 0 {
+        for id in [RAD3, STC2, EDT1, STC3, EDT2] {
+            enable(h, id, false);
+        }
+    } else {
+        set_text(h, EDT1, alloc::format!("{}", rd16(st, PD_FROMPAGE)).as_bytes());
+        set_text(h, EDT2, alloc::format!("{}", rd16(st, PD_TOPAGE)).as_bytes());
+    }
+    check(h, if fl & PD_SELECTION != 0 { RAD2 } else if fl & PD_PAGENUMS != 0 { RAD3 } else { RAD1 }, true);
+    check(h, CHX1, fl & PD_PRINTTOFILE != 0);
+    check(h, CHX2, fl & PD_COLLATE != 0);
+    if fl & PD_DISABLEPRINTTOFILE != 0 {
+        enable(h, CHX1, false);
+    }
+    if fl & PD_HIDEPRINTTOFILE != 0 {
+        show(h, CHX1, false);
+    }
+}
+
+fn print_msg(h: u16, m: u16, wp: u32, _lp: u32) -> u32 {
+    if m != W_COMMAND {
+        return 0;
+    }
+    let code = (wp >> 16) as u16;
+    let wp = wp as u16;
+    let Some(st) = state(h).map(|s| s.st) else { return 0 };
+    let setup = print(h).is_some_and(|p| p.setup);
+    match wp {
+        IDOK if setup => {
+            let specific = checked(h, RAD4);
+            let sel = send(get_item(h, CMB1), CB_GETCURSEL, 0, 0) as usize;
+            let paper = send(get_item(h, CMB2), CB_GETCURSEL, 0, 0) as usize;
+            let landscape = checked(h, RAD2);
+            let Some(p) = print(h) else { return 1 };
+            let dflt = p.printers.iter().position(|x| x.default).unwrap_or(0);
+            p.sel = if specific && sel < p.printers.len() { sel } else { dflt };
+            p.orient = if landscape { 2 } else { 1 };
+            p.paper = PAPERS.get(paper).map_or(1, |x| x.1);
+            finish_print(h, p);
+            1
+        }
+        IDOK => {
+            let mut fl = rd32(st, PD_FLAGS) & !(PD_SELECTION | PD_PAGENUMS | PD_PRINTTOFILE | PD_COLLATE);
+            if checked(h, RAD2) {
+                fl |= PD_SELECTION;
+            }
+            if checked(h, RAD3) {
+                let (from, to) = (edit_value(h, EDT1), edit_value(h, EDT2));
+                let (lo, hi) = (rd16(st, PD_MINPAGE) as i32, rd16(st, PD_MAXPAGE) as i32);
+                if hi > 0 && (from < lo || to > hi || from > to) {
+                    let t = alloc::format!("The page numbers must be between {lo} and {hi}.");
+                    message(h, t.as_bytes(), 0x30);
+                    return 1;
+                }
+                wr16(st, PD_FROMPAGE, from as u16);
+                wr16(st, PD_TOPAGE, to as u16);
+                fl |= PD_PAGENUMS;
+            }
+            if checked(h, CHX1) {
+                fl |= PD_PRINTTOFILE;
+            }
+            if checked(h, CHX2) {
+                fl |= PD_COLLATE;
+            }
+            wr32(st, PD_FLAGS, fl);
+            let copies = edit_value(h, EDT3).clamp(1, 999) as u16;
+            let Some(p) = print(h) else { return 1 };
+            p.copies = copies;
+            finish_print(h, p);
+            1
+        }
+        IDCANCEL => {
+            end(h, 0);
+            1
+        }
+        PSH1 if !setup => {
+            // Print Setup, on the choices so far.
+            let Some(p) = print(h) else { return 1 };
+            let fl = rd32(st, PD_FLAGS);
+            let printers = p.printers.clone();
+            let sub = Print { setup: true, printers, sel: p.sel, orient: p.orient, paper: p.paper, copies: p.copies };
+            let (use_res, use_handle) = (fl & PD_ENABLESETUPTEMPLATE != 0, fl & PD_ENABLESETUPTEMPLATEHANDLE != 0);
+            let htpl = if use_handle { crate::kern::global_lock(rd32(st, PD_HSETUPTEMPLATE)).max(rd32(st, PD_HSETUPTEMPLATE)) } else { rd32(st, PD_HINSTANCE) };
+            let w = wide(h);
+            let Some(t) = template(use_res, use_handle, htpl, rd32(st, PD_SETUPTEMPLATENAME), w, setup_template()) else { return 1 };
+            let hook = if fl & PD_ENABLESETUPHOOK != 0 { rd32(st, PD_SETUPHOOK) } else { 0 };
+            *PRINT_RESULT.get() = None;
+            if run(&t, h as u32, rd32(st, PD_HINSTANCE), Cd { kind: Kind::Print(sub), st, hook, wide: w }) == 1 {
+                if let (Some(r), Some(p)) = (PRINT_RESULT.get().take(), print(h)) {
+                    p.sel = r.sel;
+                    p.orient = r.orient;
+                    p.paper = r.paper;
+                    let label = printer_label(&p.printers[p.sel]);
+                    set_text(h, STC1, &label);
+                }
+            }
+            1
+        }
+        PSH1 if setup => {
+            // Options: the driver's job properties.
+            let specific = checked(h, RAD4);
+            let sel = send(get_item(h, CMB1), CB_GETCURSEL, 0, 0) as usize;
+            let paper = PAPERS.get(send(get_item(h, CMB2), CB_GETCURSEL, 0, 0) as usize).map_or(1, |x| x.1);
+            let orient = if checked(h, RAD2) { 2 } else { 1 };
+            let Some(p) = print(h) else { return 1 };
+            let dflt = p.printers.iter().position(|x| x.default).unwrap_or(0);
+            let i = if specific && sel < p.printers.len() { sel } else { dflt };
+            let pr = p.printers[i].clone();
+            if let Some((o, pa)) = crate::print::job_properties(&pr, orient, paper) {
+                check(h, RAD1, o == 1);
+                check(h, RAD2, o == 2);
+                let k = PAPERS.iter().position(|x| x.1 == pa).unwrap_or(0);
+                send(get_item(h, CMB2), CB_SETCURSEL, k as u32, 0);
+            }
+            1
+        }
+        RAD3 | RAD4 if setup => 0,
+        CMB1 if setup && code == CBN_SELCHANGE => {
+            check(h, RAD3, false);
+            check(h, RAD4, true);
+            1
+        }
+        EDT1 | EDT2 if !setup && code == EN_CHANGE => {
+            // Typing page numbers chooses Pages.
+            if focus() == get_item(h, wp) {
+                check(h, RAD1, false);
+                check(h, RAD2, false);
+                check(h, RAD3, true);
+            }
+            1
+        }
+        _ => 0,
+    }
+}
+
+/// End a Print or Setup dialog with OK: its choices for print_dlg.
+fn finish_print(h: u16, p: &Print) {
+    *PRINT_RESULT.get() = Some(Print { setup: p.setup, printers: p.printers.clone(), sel: p.sel, orient: p.orient, paper: p.paper, copies: p.copies });
+    end(h, 1);
+}
+
 // ---- Find and Replace ----
 
 struct Find {
@@ -2086,19 +2573,20 @@ pub extern "stdcall" fn ReplaceTextW(st: u32) -> u32 {
     find_text(st, true, true)
 }
 
-/// PrintDlg, PageSetupDlg: no printers yet.
+/// PrintDlg(lppd): Print, or Print Setup (PD_PRINTSETUP), on the
+/// spooler's printers (print.rs).
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn PrintDlgA(_st: u32) -> i32 {
-    *ERROR.get() = PDERR_NODEFAULTPRN;
-    0
+pub extern "stdcall" fn PrintDlgA(st: u32) -> i32 {
+    print_dlg(st, false) as i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn PrintDlgW(_st: u32) -> i32 {
-    *ERROR.get() = PDERR_NODEFAULTPRN;
-    0
+pub extern "stdcall" fn PrintDlgW(st: u32) -> i32 {
+    print_dlg(st, true) as i32
 }
 
+/// PageSetupDlg: not yet (CDERR_DIALOGFAILURE would stop programs that
+/// only want a printer; they get none).
 #[unsafe(no_mangle)]
 pub extern "stdcall" fn PageSetupDlgA(_st: u32) -> i32 {
     *ERROR.get() = PDERR_NODEFAULTPRN;

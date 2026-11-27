@@ -1694,7 +1694,10 @@ pub extern "stdcall" fn AddFontMemResourceEx(_p: u32, _n: u32, _r: u32, count: u
 /// GetDeviceCaps: PM's display (true colour, or 256 colours with a
 /// palette), 96 dots per inch.
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn GetDeviceCaps(_h: u32, i: i32) -> i32 {
+pub extern "stdcall" fn GetDeviceCaps(h: u32, i: i32) -> i32 {
+    if let Some(v) = crate::print::caps(h16(h), i as u16) {
+        return v as i32;
+    }
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
     let bits = display_bits();
     let pal = bits == 8;
@@ -1743,29 +1746,47 @@ pub extern "stdcall" fn CreateCompatibleDC(_h: u32) -> u32 {
 
 /// CreateDC and CreateIC: the display (a memory DC: the screen itself
 /// is PM's); printers are not reached this way yet.
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn CreateDCA(_d: u32, _dev: u32, _o: u32, _i: u32) -> u32 {
-    bitmap::create_memory_dc() as u32
+/// CreateDC / CreateIC: a printer's DC (print.rs), or a memory DC for
+/// the display.
+fn create_dc(d: u32, dev: u32, o: u32, dm: u32, wide: bool, output: bool) -> u32 {
+    let s = |p: u32| -> Vec<u8> { if wide { crate::wide_str(p).unwrap_or_default() } else { crate::far_str(p).unwrap_or(b"").to_vec() } };
+    // (A DEVMODEW's fields after the device name are DEVMODEA's 32 bytes
+    // further on.)
+    let dm = if wide && dm != 0 { dm + 32 } else { dm };
+    match crate::print::create(&s(d), &s(dev), &s(o), dm, output) {
+        Some(h) => h as u32,
+        None => bitmap::create_memory_dc() as u32,
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn CreateDCW(_d: u32, _dev: u32, _o: u32, _i: u32) -> u32 {
-    bitmap::create_memory_dc() as u32
+pub extern "stdcall" fn CreateDCA(d: u32, dev: u32, o: u32, i: u32) -> u32 {
+    create_dc(d, dev, o, i, false, true)
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn CreateICA(_d: u32, _dev: u32, _o: u32, _i: u32) -> u32 {
-    bitmap::create_memory_dc() as u32
+pub extern "stdcall" fn CreateDCW(d: u32, dev: u32, o: u32, i: u32) -> u32 {
+    create_dc(d, dev, o, i, true, true)
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn CreateICW(_d: u32, _dev: u32, _o: u32, _i: u32) -> u32 {
-    bitmap::create_memory_dc() as u32
+pub extern "stdcall" fn CreateICA(d: u32, dev: u32, o: u32, i: u32) -> u32 {
+    create_dc(d, dev, o, i, false, false)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn CreateICW(d: u32, dev: u32, o: u32, i: u32) -> u32 {
+    create_dc(d, dev, o, i, true, false)
 }
 
 #[unsafe(no_mangle)]
 pub extern "stdcall" fn DeleteDC(h: u32) -> i32 {
     let hdc = h16(h);
+    if crate::print::is_printer(hdc) {
+        gdi::release_dc(hdc);
+        crate::print::close(hdc);
+        return 1;
+    }
     if dc(hdc).is_some_and(|d| d.kind != DcKind::Memory) {
         return 0;
     }
@@ -2612,49 +2633,87 @@ pub extern "stdcall" fn PathToRegion(_h: u32) -> u32 {
 
 // ---- Printing (no printers yet) ----
 
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn StartDocA(_h: u32, _d: u32) -> i32 {
-    crate::fail(120, -1)
+// ---- Printing (print.rs) ----
+
+/// StartDoc(hdc, DOCINFO): cbSize, lpszDocName, lpszOutput.
+fn start_doc(h: u32, di: u32, wide: bool) -> i32 {
+    let name = if di == 0 {
+        Vec::new()
+    } else {
+        let p = crate::rd32(di, 4);
+        if wide { crate::wide_str(p).unwrap_or_default() } else { crate::far_str(p).unwrap_or(b"").to_vec() }
+    };
+    sp(crate::print::start_doc(h16(h), &name))
+}
+
+/// A WIN16-style result (SP_ERROR 0xFFFF...) as Win32's (negative).
+fn sp(r: u32) -> i32 {
+    if r >= 0xfff0 { r as u16 as i16 as i32 } else { r as i32 }
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn StartDocW(_h: u32, _d: u32) -> i32 {
-    crate::fail(120, -1)
+pub extern "stdcall" fn StartDocA(h: u32, d: u32) -> i32 {
+    start_doc(h, d, false)
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn EndDoc(_h: u32) -> i32 {
-    -1
+pub extern "stdcall" fn StartDocW(h: u32, d: u32) -> i32 {
+    start_doc(h, d, true)
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn StartPage(_h: u32) -> i32 {
-    -1
+pub extern "stdcall" fn EndDoc(h: u32) -> i32 {
+    sp(crate::print::end_doc(h16(h)))
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn EndPage(_h: u32) -> i32 {
-    -1
+pub extern "stdcall" fn StartPage(h: u32) -> i32 {
+    if crate::print::in_doc(h16(h)) { 1 } else { -1 }
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn AbortDoc(_h: u32) -> i32 {
-    -1
+pub extern "stdcall" fn EndPage(h: u32) -> i32 {
+    sp(crate::print::new_frame(h16(h)))
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn SetAbortProc(_h: u32, _p: u32) -> i32 {
-    1
+pub extern "stdcall" fn AbortDoc(h: u32) -> i32 {
+    sp(crate::print::abort_doc(h16(h)))
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn Escape(_h: u32, _e: i32, _n: i32, _i: u32, _o: u32) -> i32 {
-    0
+pub extern "stdcall" fn SetAbortProc(h: u32, p: u32) -> i32 {
+    if crate::print::set_abort(h16(h), p) { 1 } else { -1 }
+}
+
+/// Escape(hdc, escape, cbIn, lpIn, lpOut): the printing escapes.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Escape(h: u32, e: i32, n: i32, i: u32, o: u32) -> i32 {
+    sp(crate::print::esc_call(h16(h), e, n, i, o))
 }
 
 #[unsafe(no_mangle)]
-pub extern "stdcall" fn ExtEscape(_h: u32, _e: i32, _n: i32, _i: u32, _no: i32, _o: u32) -> i32 {
-    0
+pub extern "stdcall" fn ExtEscape(h: u32, e: i32, n: i32, i: u32, _no: i32, o: u32) -> i32 {
+    sp(crate::print::esc_call(h16(h), e, n, i, o))
+}
+
+/// Rs2W32PrinterProfile(app, key, buf, max): WIN.INI's printer entries
+/// (print.rs `profile`; key 0: the list of keys, NUL-separated): the
+/// bytes copied, -1 for an entry that is not a printer one.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32PrinterProfile(app: u32, key: u32, buf: u32, max: i32) -> i32 {
+    let Some(v) = crate::print::profile(crate::far_str(app).unwrap_or(b""), crate::far_str(key)) else { return -1 };
+    let n = v.len().min(max.max(0) as usize);
+    if buf != 0 {
+        unsafe { core::ptr::copy_nonoverlapping(v.as_ptr(), buf as *mut u8, n) };
+    }
+    n as i32
+}
+
+/// Rs2W32QueryAbort(hdc): the abort procedure's answer (go on?).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32QueryAbort(h: u32) -> i32 {
+    crate::print::keep_going(h16(h)) as i32
 }
 
 // ---- Enhanced metafiles: none (stage 3) ----

@@ -350,6 +350,19 @@ static UINT_PTR CALLBACK font_hook(HWND h, UINT m, WPARAM wp, LPARAM lp)
     return 0;
 }
 
+static int print_hook_init;
+
+static UINT_PTR CALLBACK print_hook(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        print_hook_init = GetDlgItem(h, 0x482) != NULL;
+        PostMessageA(h, WM_COMMAND, IDOK, 0);
+    }
+    return 0;
+}
+
 static void comdlg_checks(void)
 {
     OPENFILENAMEA of;
@@ -437,7 +450,15 @@ static void comdlg_checks(void)
     check("GetFileTitleA", GetFileTitleA("c:\\a\\b.txt", t, sizeof t) == 0 && strcmp(t, "b.txt") == 0);
     memset(&pd, 0, sizeof pd);
     pd.lStructSize = sizeof pd;
-    check("PrintDlgA without printers", !PrintDlgA(&pd) && CommDlgExtendedError() == PDERR_NODEFAULTPRN);
+    pd.hwndOwner = main_wnd;
+    pd.Flags = PD_ENABLEPRINTHOOK | PD_RETURNIC | PD_NOSELECTION;
+    pd.nCopies = 2;
+    pd.lpfnPrintHook = print_hook;
+    check("PrintDlgA (OK from its hook)", PrintDlgA(&pd) && pd.hDC != NULL && print_hook_init);
+    check("PrintDlg's copies", pd.nCopies == 2);
+    DeleteDC(pd.hDC);
+    GlobalFree(pd.hDevMode);
+    GlobalFree(pd.hDevNames);
 }
 
 static void gdi_checks(void)
@@ -696,6 +717,54 @@ static void user_checks(void)
     check("IsWindow after DestroyWindow", !IsWindow(child));
 }
 
+/* ---- Printing ---- */
+
+static int abort_calls;
+
+static BOOL CALLBACK abort_proc(HDC hdc, int err)
+{
+    (void)hdc;
+    (void)err;
+    abort_calls++;
+    return TRUE;
+}
+
+static void print_checks(void)
+{
+    PRINTDLGA pd;
+    DOCINFOA di;
+    DEVNAMES *dn;
+    char b[64];
+    memset(&pd, 0, sizeof pd);
+    pd.lStructSize = sizeof pd;
+    pd.hwndOwner = main_wnd;
+    pd.Flags = PD_RETURNDEFAULT | PD_RETURNDC;
+    check("PrintDlgA (PD_RETURNDEFAULT | PD_RETURNDC)", PrintDlgA(&pd) && pd.hDC != NULL);
+    dn = (DEVNAMES *)GlobalLock(pd.hDevNames);
+    check("hDevNames: the driver and port", dn != NULL && strcmp((char *)dn + dn->wDriverOffset, "PSCRIPT") == 0 && strchr((char *)dn + dn->wOutputOffset, ':') != NULL);
+    GlobalUnlock(pd.hDevNames);
+    {
+        DEVMODEA *dm = (DEVMODEA *)GlobalLock(pd.hDevMode);
+        check("hDevMode: a DEVMODEA", dm != NULL && dm->dmSize == sizeof(DEVMODEA) && (dm->dmFields & DM_ORIENTATION));
+        GlobalUnlock(pd.hDevMode);
+    }
+    checkv("GetDeviceCaps (a printer: TECHNOLOGY, LOGPIXELSY)", GetDeviceCaps(pd.hDC, TECHNOLOGY) == DT_RASPRINTER && GetDeviceCaps(pd.hDC, LOGPIXELSY) == 300, GetDeviceCaps(pd.hDC, HORZRES));
+    check("SetAbortProc", SetAbortProc(pd.hDC, abort_proc) > 0);
+    memset(&di, 0, sizeof di);
+    di.cbSize = sizeof di;
+    di.lpszDocName = "GUI32 page";
+    check("StartDocA", StartDocA(pd.hDC, &di) > 0);
+    check("StartPage", StartPage(pd.hDC) > 0);
+    snprintf(b, sizeof b, "GUI32 printed this.");
+    check("TextOut on a printer", TextOutA(pd.hDC, 300, 300, b, (int)strlen(b)));
+    Rectangle(pd.hDC, 300, 400, 1200, 900);
+    check("EndPage (the abort procedure is asked)", EndPage(pd.hDC) > 0 && abort_calls == 1);
+    check("EndDoc", EndDoc(pd.hDC) > 0);
+    check("DeleteDC (a printer)", DeleteDC(pd.hDC));
+    GlobalFree(pd.hDevMode);
+    GlobalFree(pd.hDevNames);
+}
+
 /* ---- Hooks ---- */
 
 static HHOOK cwp_hook, cwp_hook2, gm_hook;
@@ -870,6 +939,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     comdlg_checks();
     mdi_checks();
     hook_checks();
+    print_checks();
     InvalidateRect(main_wnd, NULL, TRUE);
     pump(1500);
     /* GUI32 WAIT: the window stays until it is closed. */

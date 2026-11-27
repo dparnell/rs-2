@@ -58,6 +58,7 @@ mod listbox;
 mod mdi;
 mod menu;
 mod pm;
+mod print;
 mod region;
 mod res;
 mod scroll;

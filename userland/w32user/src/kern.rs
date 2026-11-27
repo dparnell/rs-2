@@ -36,6 +36,10 @@ pub struct Host {
     /// it, WH_CALLWNDPROC as it is sent), for the host's system-wide
     /// hooks in other processes.
     pub observe: unsafe extern "C" fn(kind: i32, m: *const crate::wnd::Msg),
+    /// Global memory (the common dialogs' hDevMode, hDevNames): `op` 0
+    /// GlobalAlloc(flags, n), 1 GlobalLock(h) (a flat pointer), 2
+    /// GlobalSize(h), 3 GlobalReAlloc(h, n, flags), 4 GlobalUnlock(h).
+    pub global: unsafe extern "C" fn(op: u32, h: u32, n: u32, flags: u32) -> u32,
     /// Flags: 1, every thread uses the first thread's queue (a Windows
     /// task's threads take turns).
     pub flags: u32,
@@ -63,7 +67,7 @@ pub fn one_queue() -> bool {
 
 // ---- W32KERN, when there is one ----
 
-const NAMES: [&[u8]; 9] = [
+const NAMES: [&[u8]; 12] = [
     b"SetLastError\0",
     b"GetModuleHandleA\0",
     b"FindResourceW\0",
@@ -73,10 +77,13 @@ const NAMES: [&[u8]; 9] = [
     b"GlobalSize\0",
     b"WaitForMultipleObjects\0",
     b"GetModuleFileNameA\0",
+    b"GlobalLock\0",
+    b"GlobalReAlloc\0",
+    b"GlobalUnlock\0",
 ];
 
 /// The addresses found: 0 not looked for yet, 1 absent.
-static PROCS: Global<[usize; 9]> = Global::new([0; 9]);
+static PROCS: Global<[usize; 12]> = Global::new([0; 12]);
 
 fn proc_(i: usize) -> Option<usize> {
     let t = PROCS.get();
@@ -125,13 +132,48 @@ pub fn resource(hinst: u32, name: *const u16, ty: *const u16) -> Option<&'static
     }
 }
 
-/// GlobalAlloc (the clipboard's handles): 0 without W32KERN.
+/// GlobalAlloc (the clipboard's handles, the common dialogs'): the
+/// host's or W32KERN's; 0 with neither.
 pub fn global_alloc(flags: u32, n: u32) -> u32 {
+    if let Some(h) = host() {
+        return unsafe { (h.global)(0, 0, n, flags) };
+    }
     kern!(5, fn(u32, u32) -> u32).map_or(0, |f| unsafe { f(flags, n) })
 }
 
-pub fn global_size(h: u32) -> u32 {
-    kern!(6, fn(u32) -> u32).map_or(0, |f| unsafe { f(h) })
+pub fn global_size(g: u32) -> u32 {
+    if let Some(h) = host() {
+        return unsafe { (h.global)(2, g, 0, 0) };
+    }
+    kern!(6, fn(u32) -> u32).map_or(0, |f| unsafe { f(g) })
+}
+
+/// GlobalLock: the block's address (0 for none).
+pub fn global_lock(g: u32) -> u32 {
+    if g == 0 {
+        return 0;
+    }
+    if let Some(h) = host() {
+        return unsafe { (h.global)(1, g, 0, 0) };
+    }
+    kern!(9, fn(u32) -> u32).map_or(0, |f| unsafe { f(g) })
+}
+
+pub fn global_unlock(g: u32) {
+    if let Some(h) = host() {
+        unsafe { (h.global)(4, g, 0, 0) };
+        return;
+    }
+    if let Some(f) = kern!(11, fn(u32) -> u32) {
+        unsafe { f(g) };
+    }
+}
+
+pub fn global_realloc(g: u32, n: u32, flags: u32) -> u32 {
+    if let Some(h) = host() {
+        return unsafe { (h.global)(3, g, n, flags) };
+    }
+    kern!(10, fn(u32, u32, u32) -> u32).map_or(0, |f| unsafe { f(g, n, flags) })
 }
 
 /// WaitForMultipleObjects; WAIT_TIMEOUT without W32KERN.
