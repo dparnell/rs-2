@@ -153,6 +153,145 @@ static void pump(DWORD ms)
     }
 }
 
+/* ---- Dialogs ---- */
+
+static int dlg_init, dlg_clicked;
+static HWND modeless;
+
+static INT_PTR CALLBACK test_dlg(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)lp;
+    switch (m) {
+    case WM_INITDIALOG:
+        dlg_init++;
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDC_CHECK && HIWORD(wp) == BN_CLICKED)
+            dlg_clicked++;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static INT_PTR CALLBACK modal_dlg(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    switch (m) {
+    case WM_INITDIALOG:
+        check("modal WM_INITDIALOG's lParam", lp == 77);
+        PostMessageA(h, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDOK)
+            EndDialog(h, 42);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static int w_dlg_text_ok;
+
+static INT_PTR CALLBACK w_dlg(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    WCHAR b[40];
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        SetDlgItemTextW(h, IDC_EDIT, L"wide text");
+        GetDlgItemTextW(h, IDC_EDIT, b, 40);
+        w_dlg_text_ok = lstrcmpW(b, L"wide text") == 0;
+        EndDialog(h, 7);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void dialog_checks(void)
+{
+    char t[100];
+    HWND d, list, combo, edit;
+    int ok = 0, v;
+    MSG msg;
+
+    d = CreateDialogParamA(inst, MAKEINTRESOURCEA(IDD_TEST), main_wnd, test_dlg, 0);
+    modeless = d;
+    check("CreateDialogParamA", d != NULL);
+    if (!d)
+        return;
+    check("WM_INITDIALOG", dlg_init == 1);
+    edit = GetDlgItem(d, IDC_EDIT);
+    list = GetDlgItem(d, IDC_LIST);
+    combo = GetDlgItem(d, IDC_COMBO);
+    check("GetDlgItem (the controls)", edit && list && combo && GetDlgItem(d, IDOK) && GetDlgItem(d, IDC_PIC));
+    GetClassNameA(edit, t, sizeof t);
+    check("the edit control's class", lstrcmpiA(t, "Edit") == 0);
+    ShowWindow(d, SW_SHOW);
+    check("the focus is on the first tab stop", GetFocus() == edit);
+
+    SetDlgItemTextA(d, IDC_EDIT, "hello");
+    GetDlgItemTextA(d, IDC_EDIT, t, sizeof t);
+    check("SetDlgItemText / GetDlgItemText", strcmp(t, "hello") == 0);
+    SendMessageA(edit, EM_SETSEL, 1, 3);
+    {
+        DWORD a = 0, b = 0;
+        SendMessageA(edit, EM_GETSEL, (WPARAM)&a, (LPARAM)&b);
+        check("EM_SETSEL / EM_GETSEL", a == 1 && b == 3);
+    }
+    SendMessageA(edit, EM_REPLACESEL, FALSE, (LPARAM) "ipp");
+    GetWindowTextA(edit, t, sizeof t);
+    check("EM_REPLACESEL", strcmp(t, "hipplo") == 0);
+    SetDlgItemInt(d, IDC_EDIT, (UINT)-42, TRUE);
+    v = (int)GetDlgItemInt(d, IDC_EDIT, &ok, TRUE);
+    checkv("SetDlgItemInt / GetDlgItemInt (signed)", ok && v == -42, v);
+
+    SendMessageA(list, LB_ADDSTRING, 0, (LPARAM) "pear");
+    SendMessageA(list, LB_ADDSTRING, 0, (LPARAM) "apple");
+    SendMessageA(list, LB_ADDSTRING, 0, (LPARAM) "fig");
+    checkv("LB_GETCOUNT", SendMessageA(list, LB_GETCOUNT, 0, 0) == 3, (long)SendMessageA(list, LB_GETCOUNT, 0, 0));
+    SendMessageA(list, LB_GETTEXT, 0, (LPARAM)t);
+    check("LBS_SORT: LB_GETTEXT(0)", strcmp(t, "apple") == 0);
+    check("LB_FINDSTRINGEXACT", SendMessageA(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM) "fig") == 1);
+    SendMessageA(list, LB_SETCURSEL, 2, 0);
+    check("LB_SETCURSEL / LB_GETCURSEL", SendMessageA(list, LB_GETCURSEL, 0, 0) == 2);
+    SendMessageA(list, LB_SETITEMDATA, 1, 0x1234);
+    check("LB_SETITEMDATA / LB_GETITEMDATA", SendMessageA(list, LB_GETITEMDATA, 1, 0) == 0x1234);
+    check("LB_GETTEXTLEN", SendMessageA(list, LB_GETTEXTLEN, 2, 0) == 4);
+
+    SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM) "first");
+    SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM) "second");
+    SendMessageA(combo, CB_SETCURSEL, 1, 0);
+    check("CB_GETCURSEL", SendMessageA(combo, CB_GETCURSEL, 0, 0) == 1);
+    GetWindowTextA(combo, t, sizeof t);
+    check("a drop-down list's text is its selection", strcmp(t, "second") == 0);
+    SendMessageA(combo, CB_GETLBTEXT, 0, (LPARAM)t);
+    check("CB_GETLBTEXT", strcmp(t, "first") == 0);
+    check("CB_GETCOUNT", SendMessageA(combo, CB_GETCOUNT, 0, 0) == 2);
+
+    CheckDlgButton(d, IDC_CHECK, BST_CHECKED);
+    check("CheckDlgButton / IsDlgButtonChecked", IsDlgButtonChecked(d, IDC_CHECK) == BST_CHECKED);
+    SendMessageA(GetDlgItem(d, IDC_CHECK), BM_CLICK, 0, 0);
+    check("BM_CLICK toggles an auto check box", IsDlgButtonChecked(d, IDC_CHECK) == BST_UNCHECKED);
+    check("BN_CLICKED reaches the dialog procedure", dlg_clicked == 1);
+    CheckRadioButton(d, IDC_R1, IDC_R2, IDC_R2);
+    check("CheckRadioButton", IsDlgButtonChecked(d, IDC_R2) && !IsDlgButtonChecked(d, IDC_R1));
+    v = (int)SendMessageA(d, DM_GETDEFID, 0, 0);
+    check("DM_GETDEFID", HIWORD(v) == DC_HASDEFID && LOWORD(v) == IDOK);
+
+    /* The dialog manager's keys: Tab from the edit control. */
+    SetFocus(edit);
+    PostMessageA(edit, WM_KEYDOWN, VK_TAB, 0);
+    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
+        if (!IsDialogMessageA(d, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+    check("IsDialogMessage: Tab moves the focus", GetFocus() == list);
+
+    /* Modal dialogs. */
+    checkv("DialogBoxParamA's result (EndDialog)", DialogBoxParamA(inst, MAKEINTRESOURCEA(IDD_TEST), main_wnd, modal_dlg, 77) == 42, 0);
+    checkv("DialogBoxParamW", DialogBoxParamW(inst, MAKEINTRESOURCEW(IDD_TEST), main_wnd, w_dlg, 0) == 7, 0);
+    check("a W dialog procedure's text", w_dlg_text_ok);
+}
+
 static void gdi_checks(void)
 {
     HDC screen = GetDC(NULL), mem = CreateCompatibleDC(screen);
@@ -442,6 +581,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     check("IsWindowVisible", IsWindowVisible(main_wnd));
     user_checks();
     gdi_checks();
+    dialog_checks();
     InvalidateRect(main_wnd, NULL, TRUE);
     pump(1500);
     /* GUI32 WAIT: the window stays until it is closed. */
@@ -451,6 +591,8 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
             DispatchMessageA(&msg);
         }
     }
+    if (modeless)
+        DestroyWindow(modeless);
     {
         int d = got_destroy, n = got_ncdestroy;
         DestroyWindow(main_wnd);

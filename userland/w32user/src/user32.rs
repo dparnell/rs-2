@@ -29,7 +29,13 @@ fn str_arg(p: u32, wide: bool) -> Option<Vec<u8>> {
 unsafe extern "C" {
     fn __w32t_DefWindowProcA();
     fn __w32t_DefWindowProcW();
+    fn __w32t_DefDlgProcA();
     fn __w32t_Rs2ScrollBarProc();
+    fn __w32t_Rs2ButtonProc();
+    fn __w32t_Rs2StaticProc();
+    fn __w32t_Rs2EditProc();
+    fn __w32t_Rs2ListBoxProc();
+    fn __w32t_Rs2ComboBoxProc();
 }
 
 /// The address programs see of an exported procedure (its entry thunk).
@@ -37,18 +43,63 @@ pub fn thunk(f: unsafe extern "C" fn()) -> u32 {
     f as *const () as usize as u32
 }
 
-/// The built-in classes and procedures.
+/// DefDlgProcA's entry.
+pub fn def_dlg_a() -> unsafe extern "C" fn() {
+    __w32t_DefDlgProcA
+}
+
+/// The built-in classes and procedures: (name, atom, procedure's entry,
+/// the procedure, class style, extra bytes, cursor, brush).
 pub fn register_builtin() {
     wnd::add_native(thunk(__w32t_DefWindowProcA), wnd::def_window_proc);
     wnd::add_native(thunk(__w32t_DefWindowProcW), def_window_proc_w);
-    wnd::add_native(thunk(__w32t_Rs2ScrollBarProc), crate::scroll::control_proc);
-    wnd::register_system(b"SCROLLBAR", 0x8084, wnd::CS_DBLCLKS | wnd::CS_PARENTDC, thunk(__w32t_Rs2ScrollBarProc), 0, 32512, 0);
+    let dbl = wnd::CS_DBLCLKS | wnd::CS_PARENTDC;
+    let classes: [(&[u8], u16, unsafe extern "C" fn(), wnd::Native, u32, u32, u32); 8] = [
+        (b"BUTTON", 0x8080, __w32t_Rs2ButtonProc, crate::ctl::button, dbl, 0, 0),
+        (b"STATIC", 0x8081, __w32t_Rs2StaticProc, crate::ctl::static_, wnd::CS_PARENTDC, 0, 0),
+        (b"EDIT", 0x8082, __w32t_Rs2EditProc, crate::edit::proc_, dbl, 0, 0),
+        (b"LISTBOX", 0x8083, __w32t_Rs2ListBoxProc, crate::listbox::proc_, dbl, 0, 0),
+        (b"COMBOBOX", 0x8084, __w32t_Rs2ComboBoxProc, crate::listbox::combo_proc, dbl, 0, 0),
+        (b"COMBOLBOX", 0x8085, __w32t_Rs2ListBoxProc, crate::listbox::proc_, dbl, 0, 0),
+        (b"SCROLLBAR", 0x8086, __w32t_Rs2ScrollBarProc, crate::scroll::control_proc, dbl, 0, 0),
+        (b"#32770", 0x8002, __w32t_DefDlgProcA, crate::dialog::def_dlg_proc, wnd::CS_DBLCLKS | 0x0800, crate::dialog::DLGWINDOWEXTRA, 0),
+    ];
+    for (name, atom, entry, f, style, extra, brush) in classes {
+        wnd::add_native(thunk(entry), f);
+        let cursor = if name == b"EDIT" { 32513 } else { 32512 };
+        wnd::register_system(name, atom, style, thunk(entry), extra, cursor, brush);
+    }
 }
 
 /// DefWindowProcW as a native procedure (it takes the W form: natives
 /// are given the A form, so this is DefWindowProcA).
 fn def_window_proc_w(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     wnd::def_window_proc(h, m, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2ButtonProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::ctl::button(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2StaticProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::ctl::static_(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2EditProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::edit::proc_(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2ListBoxProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::listbox::proc_(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2ComboBoxProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::listbox::combo_proc(hw(h), m as u16, wp, lp)
 }
 
 /// The SCROLLBAR class's procedure (programs see its address).

@@ -5,3 +5,12 @@
 #define IDM_EXIT 101
 #define IDM_ABOUT 102
 #define IDS_HELLO 200
+#define IDD_TEST 300
+#define IDC_LABEL 301
+#define IDC_EDIT 302
+#define IDC_LIST 303
+#define IDC_COMBO 304
+#define IDC_CHECK 305
+#define IDC_R1 306
+#define IDC_R2 307
+#define IDC_PIC 308

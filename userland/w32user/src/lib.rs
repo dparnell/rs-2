@@ -16,8 +16,10 @@
 //! - user32.rs: USER32's entry points;
 //! - gdi.rs, bitmap.rs, region.rs, draw.rs: GDI (DCs, objects, text,
 //!   drawing, bitmaps and DIBs, regions); gdi32.rs: GDI32's entry points;
-//! - scroll.rs, caret.rs, icon.rs, menu.rs: scroll bars, the caret,
-//!   icons and cursors, menus;
+//! - ctl.rs (BUTTON, STATIC), edit.rs (EDIT), listbox.rs (LISTBOX,
+//!   COMBOBOX), scroll.rs (SCROLLBAR and window scroll bars): the
+//!   built-in controls; dialog.rs: dialogs and the dialog manager;
+//! - caret.rs, icon.rs, menu.rs: the caret, icons and cursors, menus;
 //! - res.rs: resources (through W32KERN's FindResource).
 //!
 //! Text is kept in the process's code page (ANSI); the W calls and
@@ -39,10 +41,14 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 mod bitmap;
 mod caret;
+mod ctl;
+mod dialog;
 mod draw;
+mod edit;
 mod gdi;
 mod gdi32;
 mod icon;
+mod listbox;
 mod menu;
 mod pm;
 mod region;

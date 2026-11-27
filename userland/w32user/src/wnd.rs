@@ -1928,6 +1928,17 @@ pub fn key_state(vk: u16) -> u16 {
     (if s & 0x8000 != 0 { 0x8000 } else { 0 }) | (s & 1) as u16
 }
 
+/// MessageBeep(0).
+pub fn call_beep() {
+    unsafe { WinAlarm(HWND_DESKTOP, 2) };
+}
+
+/// Move and size a window to a rectangle of its parent's (or the
+/// screen's) coordinates.
+pub fn move_to(h: u16, r: [i32; 4]) {
+    move_window(h, r[0], r[1], r[2] - r[0], r[3] - r[1], SWP_MOVE | SWP_SIZE);
+}
+
 pub fn key_down(vk: u16) -> bool {
     key_state(vk) & 0x8000 != 0
 }
