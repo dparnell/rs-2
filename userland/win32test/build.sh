@@ -21,7 +21,7 @@ wcl386 -q -bt=nt -bd -l=nt_dll -fe=W32DLL.DLL "$dir/w32dll.c"
 wlib -q -n w32dll.lib +W32DLL.DLL
 mv W32DLL.DLL "$dir/bin/"
 for src in "$dir"/*.c; do
-    [ "$(basename "$src")" = mtest.c ] && continue
+    case "$(basename "$src")" in mtest.c | gui32.c) continue ;; esac
     name=$(basename "$src" .c | tr a-z A-Z)
     imp=
     case "$name" in
@@ -40,6 +40,9 @@ if command -v i686-w64-mingw32-gcc >/dev/null 2>&1; then
         -lmingw32 -lgcc -lgcc_eh -lmingwex -lmsvcrt-os -lkernel32 -luser32 -ladvapi32 \
         -lmingw32 -lgcc -lmingwex -lmsvcrt-os -lkernel32
     i686-w64-mingw32-g++ -O1 -static -o "$dir/bin/MCPP.EXE" "$dir/mcpp.cpp"
+    # GUI32: a GUI program (USER32, GDI32) with resources.
+    (cd "$dir" && i686-w64-mingw32-windres gui32.rc -o obj/gui32res.o)
+    i686-w64-mingw32-gcc -O1 -mwindows -o "$dir/bin/GUI32.EXE" "$dir/gui32.c" "$dir/obj/gui32res.o"
 else
     echo "win32test: MinGW-w64 (i686-w64-mingw32-gcc) not found: no MinGW programs"
 fi

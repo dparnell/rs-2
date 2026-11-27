@@ -1,18 +1,59 @@
-//! W32USER.DLL: USER32 of rs2's Win32 layer (docs/WIN32.md). Stage 1 has
-//! what console programs import: the character calls, wsprintf and
-//! MessageBox (on the console's standard error). Windows and messages
-//! come in stage 2, on a core shared with WIN16.
+//! W32USER.DLL: USER32 and GDI32 of rs2's Win32 layer (docs/WIN32.md).
+//! The kernel's PE loader sends programs' imports of USER32 and GDI32
+//! here: one DLL, because windows, DCs and GDI objects share their state.
+//!
+//! The window manager and GDI are WIN16's (userland/win16) in 32-bit
+//! form: every Windows window is a PM window (a frame for a top-level
+//! one), messages are translated both ways and coordinates flipped
+//! (Windows' y grows down), and DCs are PM presentation spaces in RGB
+//! mode. Handles stay small numbers, the same kinds WIN16 gives out:
+//! windows 0x4004 and up, GDI objects 0x0100 and up, DCs 0x8002 and up,
+//! menus and icons in ranges of their own.
+//!
+//! - text.rs: the character calls and wsprintf;
+//! - pm.rs: the PMWIN and PMGPI calls this is built on;
+//! - wnd.rs: classes, windows, messages, painting, DefWindowProc;
+//! - user32.rs: USER32's entry points;
+//! - gdi.rs, bitmap.rs, region.rs, draw.rs: GDI (DCs, objects, text,
+//!   drawing, bitmaps and DIBs, regions); gdi32.rs: GDI32's entry points;
+//! - scroll.rs, caret.rs, icon.rs, menu.rs: scroll bars, the caret,
+//!   icons and cursors, menus;
+//! - res.rs: resources (through W32KERN's FindResource).
+//!
+//! Text is kept in the process's code page (ANSI); the W calls and
+//! windows of classes registered with RegisterClassW convert.
 
 #![no_std]
 #![no_main]
 #![allow(non_snake_case)]
 #![allow(clippy::missing_safety_doc)]
+#![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 extern crate alloc;
 extern crate os2;
 
 use alloc::vec::Vec;
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+mod bitmap;
+mod caret;
+mod draw;
+mod gdi;
+mod gdi32;
+mod icon;
+mod menu;
+mod pm;
+mod region;
+mod res;
+mod scroll;
+mod text;
 mod thunks;
+mod user32;
+mod wnd;
+
+pub use pm::trace;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
@@ -20,216 +61,99 @@ pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
 }
 
-unsafe extern "C" {
+unsafe extern "stdcall" {
     #[link_name = "W32KERN.MultiByteToWideChar"]
-    fn MultiByteToWideChar(cp: u32, flags: u32, s: *const u8, n: i32, d: *mut u16, size: i32) -> i32;
+    pub fn MultiByteToWideChar(cp: u32, flags: u32, s: *const u8, n: i32, d: *mut u16, size: i32) -> i32;
     #[link_name = "W32KERN.WideCharToMultiByte"]
-    fn WideCharToMultiByte(cp: u32, flags: u32, s: *const u16, n: i32, d: *mut u8, size: i32, dflt: *const u8, used: *mut i32) -> i32;
+    pub fn WideCharToMultiByte(cp: u32, flags: u32, s: *const u16, n: i32, d: *mut u8, size: i32, dflt: *const u8, used: *mut i32) -> i32;
+    #[link_name = "W32KERN.SetLastError"]
+    pub fn SetLastError(e: u32);
+    #[link_name = "W32KERN.GetModuleHandleA"]
+    pub fn GetModuleHandleA(name: *const u8) -> u32;
 }
 
-/// A code page byte's character and back (the process code page).
-fn to_char(b: u8) -> char {
-    if b.is_ascii() {
-        return b as char;
+/// State of the DLL (its data is per process). Window procedures may
+/// call back in: callers keep borrows short.
+pub struct Global<T>(UnsafeCell<T>);
+unsafe impl<T> Sync for Global<T> {}
+impl<T> Global<T> {
+    pub const fn new(v: T) -> Self {
+        Global(UnsafeCell::new(v))
     }
-    let mut w = 0u16;
-    unsafe { MultiByteToWideChar(0, 0, &b, 1, &mut w, 1) };
-    char::from_u32(w as u32).unwrap_or('?')
-}
-
-fn to_byte(c: char) -> Option<u8> {
-    if c.is_ascii() {
-        return Some(c as u8);
-    }
-    let w = c as u32;
-    if w > 0xffff {
-        return None;
-    }
-    let w = w as u16;
-    let mut b = 0u8;
-    let mut used = 0;
-    unsafe { WideCharToMultiByte(0, 0, &w, 1, &mut b, 1, core::ptr::null(), &mut used) };
-    (used == 0).then_some(b)
-}
-
-fn upper(b: u8) -> u8 {
-    let mut u = to_char(b).to_uppercase();
-    match (u.next(), u.next()) {
-        (Some(c), None) => to_byte(c).unwrap_or(b),
-        _ => b,
+    #[allow(clippy::mut_from_ref)]
+    pub fn get(&self) -> &mut T {
+        unsafe { &mut *self.0.get() }
     }
 }
 
-fn lower(b: u8) -> u8 {
-    let mut l = to_char(b).to_lowercase();
-    match (l.next(), l.next()) {
-        (Some(c), None) => to_byte(c).unwrap_or(b),
-        _ => b,
+/// A spin lock for the few tables threads change at the same time.
+pub struct Lock(AtomicBool);
+impl Lock {
+    pub const fn new() -> Lock {
+        Lock(AtomicBool::new(false))
     }
-}
-
-fn wcase(c: u16, up: bool) -> u16 {
-    match char::from_u32(c as u32) {
-        Some(ch) => {
-            let mut it: alloc::vec::IntoIter<char> = if up { ch.to_uppercase().collect::<Vec<_>>() } else { ch.to_lowercase().collect::<Vec<_>>() }.into_iter();
-            match (it.next(), it.next()) {
-                (Some(x), None) if (x as u32) < 0x10000 => x as u16,
-                _ => c,
-            }
+    pub fn with<R>(&self, f: impl FnOnce() -> R) -> R {
+        while self.0.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            unsafe { os2::DosSleep(0) };
         }
-        None => c,
+        let r = f();
+        self.0.store(false, Ordering::Release);
+        r
     }
 }
 
-/// CharUpperA: a string in place, or (HIWORD 0) one character.
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharUpperA(s: *mut u8) -> *mut u8 {
-    if (s as u32) < 0x10000 {
-        return upper(s as u32 as u8) as u32 as *mut u8;
+// ---- Threads and their PM message queues ----
+
+/// A thread's PM anchor block and message queue, made on its first
+/// window or message call (as Windows makes a thread's queue).
+#[derive(Clone, Copy)]
+pub struct Queue {
+    pub tid: u32,
+    pub hab: u32,
+    pub hmq: u32,
+}
+
+static QUEUES: Global<Vec<Queue>> = Global::new(Vec::new());
+static QLOCK: Lock = Lock::new();
+
+/// The thread's ID (the TEB's ClientId.UniqueThread).
+pub fn tid() -> u32 {
+    let v: u32;
+    unsafe { core::arch::asm!("mov {0}, dword ptr fs:[0x24]", out(reg) v, options(nostack, readonly)) };
+    v
+}
+
+/// The thread's queue, made if it has none (hmq 0: PM refused, as for a
+/// program that is not a PM one).
+pub fn queue() -> Queue {
+    let t = tid();
+    if let Some(q) = QLOCK.with(|| QUEUES.get().iter().find(|q| q.tid == t).copied()) {
+        return q;
     }
-    let mut p = s;
-    unsafe {
-        while *p != 0 {
-            *p = upper(*p);
-            p = p.add(1);
-        }
+    let hab = unsafe { pm::WinInitialize(0) };
+    let hmq = unsafe { pm::WinCreateMsgQueue(hab, 0) };
+    let q = Queue { tid: t, hab, hmq };
+    QLOCK.with(|| QUEUES.get().push(q));
+    if hmq != 0 {
+        wnd::queue_created(hab);
     }
-    s
+    q
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharLowerA(s: *mut u8) -> *mut u8 {
-    if (s as u32) < 0x10000 {
-        return lower(s as u32 as u8) as u32 as *mut u8;
-    }
-    let mut p = s;
-    unsafe {
-        while *p != 0 {
-            *p = lower(*p);
-            p = p.add(1);
-        }
-    }
-    s
+/// The thread's anchor block.
+pub fn hab() -> u32 {
+    queue().hab
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharUpperW(s: *mut u16) -> *mut u16 {
-    if (s as u32) < 0x10000 {
-        return wcase(s as u32 as u16, true) as u32 as *mut u16;
-    }
-    let mut p = s;
-    unsafe {
-        while *p != 0 {
-            *p = wcase(*p, true);
-            p = p.add(1);
-        }
-    }
-    s
+/// The queue of a thread, if it has one.
+pub fn queue_of(t: u32) -> Option<Queue> {
+    QLOCK.with(|| QUEUES.get().iter().find(|q| q.tid == t).copied())
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharLowerW(s: *mut u16) -> *mut u16 {
-    if (s as u32) < 0x10000 {
-        return wcase(s as u32 as u16, false) as u32 as *mut u16;
-    }
-    let mut p = s;
-    unsafe {
-        while *p != 0 {
-            *p = wcase(*p, false);
-            p = p.add(1);
-        }
-    }
-    s
-}
+// ---- Strings ----
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharUpperBuffA(s: *mut u8, n: u32) -> u32 {
-    for i in 0..n as usize {
-        unsafe { *s.add(i) = upper(*s.add(i)) };
-    }
-    n
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharLowerBuffA(s: *mut u8, n: u32) -> u32 {
-    for i in 0..n as usize {
-        unsafe { *s.add(i) = lower(*s.add(i)) };
-    }
-    n
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharNextA(s: *const u8) -> *const u8 {
-    if unsafe { *s } == 0 { s } else { unsafe { s.add(1) } }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharPrevA(start: *const u8, s: *const u8) -> *const u8 {
-    if s > start { unsafe { s.sub(1) } } else { start }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharNextW(s: *const u16) -> *const u16 {
-    if unsafe { *s } == 0 { s } else { unsafe { s.add(1) } }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharPrevW(start: *const u16, s: *const u16) -> *const u16 {
-    if s > start { unsafe { s.sub(1) } } else { start }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn CharToOemA(s: *const u8, d: *mut u8) -> i32 {
-    let mut i = 0;
-    unsafe {
-        loop {
-            let c = *s.add(i);
-            *d.add(i) = c;
-            if c == 0 {
-                break;
-            }
-            i += 1;
-        }
-    }
-    1
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn OemToCharA(s: *const u8, d: *mut u8) -> i32 {
-    unsafe { CharToOemA(s, d) }
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharAlphaA(c: u8) -> i32 {
-    to_char(c).is_alphabetic() as i32
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharAlphaNumericA(c: u8) -> i32 {
-    to_char(c).is_alphanumeric() as i32
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharUpperA(c: u8) -> i32 {
-    to_char(c).is_uppercase() as i32
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharLowerA(c: u8) -> i32 {
-    to_char(c).is_lowercase() as i32
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharAlphaW(c: u16) -> i32 {
-    char::from_u32(c as u32).is_some_and(|c| c.is_alphabetic()) as i32
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn IsCharAlphaNumericW(c: u16) -> i32 {
-    char::from_u32(c as u32).is_some_and(|c| c.is_alphanumeric()) as i32
-}
-
-unsafe fn cstr<'a>(p: *const u8) -> &'a [u8] {
+/// The bytes of a NUL-terminated string.
+pub unsafe fn cstr<'a>(p: *const u8) -> &'a [u8] {
     if p.is_null() {
         return &[];
     }
@@ -240,7 +164,7 @@ unsafe fn cstr<'a>(p: *const u8) -> &'a [u8] {
     unsafe { core::slice::from_raw_parts(p, n) }
 }
 
-unsafe fn wstr<'a>(p: *const u16) -> &'a [u16] {
+pub unsafe fn wstr<'a>(p: *const u16) -> &'a [u16] {
     if p.is_null() {
         return &[];
     }
@@ -251,187 +175,220 @@ unsafe fn wstr<'a>(p: *const u16) -> &'a [u16] {
     unsafe { core::slice::from_raw_parts(p, n) }
 }
 
-fn narrow(w: &[u16]) -> Vec<u8> {
-    w.iter().map(|&c| char::from_u32(c as u32).and_then(to_byte).unwrap_or(b'?')).collect()
+/// A string argument as bytes; a resource ID or atom (below 0x10000) as
+/// None.
+pub fn far_str<'a>(p: u32) -> Option<&'a [u8]> {
+    if p >> 16 == 0 { None } else { Some(unsafe { cstr(p as *const u8) }) }
 }
 
-/// MessageBoxA: the caption and text on standard error; the first button
-/// is the answer (IDOK, or IDYES for MB_YESNO and MB_YESNOCANCEL).
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn MessageBoxA(_hwnd: u32, text: *const u8, caption: *const u8, ty: u32) -> i32 {
-    let mut v = Vec::new();
-    v.extend_from_slice(b"\r\n[");
-    v.extend_from_slice(unsafe { cstr(caption) });
-    v.extend_from_slice(b"] ");
-    v.extend_from_slice(unsafe { cstr(text) });
-    v.extend_from_slice(b"\r\n");
-    let mut n = 0;
-    unsafe { os2::DosWrite(2, v.as_ptr(), v.len() as u32, &mut n) };
-    match ty & 0xf {
-        3 | 4 => 6, // IDYES
-        2 => 3,     // MB_ABORTRETRYIGNORE: IDABORT
-        5 => 4,     // MB_RETRYCANCEL: IDRETRY
-        _ => 1,     // IDOK
+/// A W string argument in the process code page; None for an ID.
+pub fn wide_str(p: u32) -> Option<Vec<u8>> {
+    if p >> 16 == 0 { None } else { Some(narrow(unsafe { wstr(p as *const u16) })) }
+}
+
+/// UTF-16 to the process code page.
+pub fn narrow(w: &[u16]) -> Vec<u8> {
+    if w.is_empty() {
+        return Vec::new();
     }
+    let mut v = alloc::vec![0u8; w.len() * 2 + 1];
+    let n = unsafe { WideCharToMultiByte(0, 0, w.as_ptr(), w.len() as i32, v.as_mut_ptr(), v.len() as i32, core::ptr::null(), core::ptr::null_mut()) };
+    v.truncate(n.max(0) as usize);
+    v
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn MessageBoxW(hwnd: u32, text: *const u16, caption: *const u16, ty: u32) -> i32 {
-    let mut t = narrow(unsafe { wstr(text) });
-    t.push(0);
-    let mut c = narrow(unsafe { wstr(caption) });
-    c.push(0);
-    unsafe { MessageBoxA(hwnd, t.as_ptr(), c.as_ptr(), ty) }
+/// The process code page to UTF-16.
+pub fn to_wide(b: &[u8]) -> Vec<u16> {
+    if b.is_empty() {
+        return Vec::new();
+    }
+    let mut v = alloc::vec![0u16; b.len() + 1];
+    let n = unsafe { MultiByteToWideChar(0, 0, b.as_ptr(), b.len() as i32, v.as_mut_ptr(), v.len() as i32) };
+    v.truncate(n.max(0) as usize);
+    v
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn MessageBoxExA(hwnd: u32, text: *const u8, caption: *const u8, ty: u32, _lang: u16) -> i32 {
-    unsafe { MessageBoxA(hwnd, text, caption, ty) }
+/// A NUL-terminated copy.
+pub fn z(s: &[u8]) -> Vec<u8> {
+    let mut v = s.to_vec();
+    v.push(0);
+    v
 }
 
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn MessageBeep(_ty: u32) -> i32 {
-    1
+pub fn zw(s: &[u16]) -> Vec<u16> {
+    let mut v = s.to_vec();
+    v.push(0);
+    v
 }
 
-// ---- wsprintf ----
-
-/// wvsprintfA(buf, fmt, args): %[-][0][width][.prec][l|h]{s,c,d,i,u,x,X,%}
-/// (Windows' wsprintf has no floating point); at most 1024 characters.
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn wvsprintfA(buf: *mut u8, fmt: *const u8, args: *const u32) -> i32 {
-    let f = unsafe { cstr(fmt) };
-    let out = unsafe { format(f, args, false) };
-    let n = out.len().min(1024);
+/// Copy text to a buffer of `max` characters (NUL-terminated, truncated
+/// to fit): the characters copied.
+pub fn copy_out(t: &[u8], buf: *mut u8, max: i32) -> usize {
+    if buf.is_null() || max <= 0 {
+        return 0;
+    }
+    let n = t.len().min(max as usize - 1);
     unsafe {
-        core::ptr::copy_nonoverlapping(out.as_ptr(), buf, n);
+        core::ptr::copy_nonoverlapping(t.as_ptr(), buf, n);
         *buf.add(n) = 0;
     }
-    n as i32
+    n
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "stdcall" fn wvsprintfW(buf: *mut u16, fmt: *const u16, args: *const u32) -> i32 {
-    let f: Vec<u8> = narrow(unsafe { wstr(fmt) });
-    let out = unsafe { format(&f, args, true) };
-    let n = out.len().min(1024);
-    for (i, &b) in out[..n].iter().enumerate() {
-        let mut w = b as u16;
-        if !b.is_ascii() {
-            unsafe { MultiByteToWideChar(0, 0, &b, 1, &mut w, 1) };
-        }
-        unsafe { *buf.add(i) = w };
+pub fn copy_out_w(t: &[u16], buf: *mut u16, max: i32) -> usize {
+    if buf.is_null() || max <= 0 {
+        return 0;
     }
-    unsafe { *buf.add(n) = 0 };
-    n as i32
-}
-
-unsafe fn format(f: &[u8], mut args: *const u32, wide: bool) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    let mut next = || {
-        let v = unsafe { *args };
-        args = unsafe { args.add(1) };
-        v
-    };
-    while i < f.len() {
-        if f[i] != b'%' {
-            out.push(f[i]);
-            i += 1;
-            continue;
-        }
-        i += 1;
-        let (mut left, mut zero) = (false, false);
-        while i < f.len() && (f[i] == b'-' || f[i] == b'0' || f[i] == b'#') {
-            if f[i] == b'-' {
-                left = true;
-            } else if f[i] == b'0' {
-                zero = true;
-            }
-            i += 1;
-        }
-        let mut width = 0usize;
-        while i < f.len() && f[i].is_ascii_digit() {
-            width = width * 10 + (f[i] - b'0') as usize;
-            i += 1;
-        }
-        let mut prec: Option<usize> = None;
-        if i < f.len() && f[i] == b'.' {
-            i += 1;
-            let mut p = 0;
-            while i < f.len() && f[i].is_ascii_digit() {
-                p = p * 10 + (f[i] - b'0') as usize;
-                i += 1;
-            }
-            prec = Some(p);
-        }
-        let mut long_wide = false;
-        while i < f.len() && matches!(f[i], b'l' | b'h' | b'L') {
-            long_wide = f[i] == b'l';
-            i += 1;
-        }
-        if i >= f.len() {
-            break;
-        }
-        let c = f[i];
-        i += 1;
-        let s: Vec<u8> = match c {
-            b'%' => alloc::vec![b'%'],
-            b'c' | b'C' => alloc::vec![next() as u8],
-            b's' | b'S' => {
-                let p = next();
-                // %s is the call's own width; %ls / %S the other one.
-                let w = (wide && c == b's') || (!wide && (c == b'S' || long_wide));
-                let mut v = if w { narrow(unsafe { wstr(p as *const u16) }) } else { unsafe { cstr(p as *const u8) }.to_vec() };
-                if p == 0 {
-                    v = b"(null)".to_vec();
-                }
-                if let Some(pr) = prec {
-                    v.truncate(pr);
-                }
-                v
-            }
-            b'd' | b'i' => alloc::format!("{}", next() as i32).into_bytes(),
-            b'u' => alloc::format!("{}", next()).into_bytes(),
-            b'x' => alloc::format!("{:x}", next()).into_bytes(),
-            b'X' => alloc::format!("{:X}", next()).into_bytes(),
-            b'p' => alloc::format!("{:08X}", next()).into_bytes(),
-            _ => alloc::vec![c],
-        };
-        let pad = width.saturating_sub(s.len());
-        if left {
-            out.extend_from_slice(&s);
-            out.extend(core::iter::repeat_n(b' ', pad));
-        } else if zero && matches!(c, b'd' | b'i' | b'u' | b'x' | b'X') {
-            let (sign, digits) = if s.first() == Some(&b'-') { (&s[..1], &s[1..]) } else { (&s[..0], &s[..]) };
-            out.extend_from_slice(sign);
-            out.extend(core::iter::repeat_n(b'0', pad));
-            out.extend_from_slice(digits);
-        } else {
-            out.extend(core::iter::repeat_n(b' ', pad));
-            out.extend_from_slice(&s);
-        }
+    let n = t.len().min(max as usize - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(t.as_ptr(), buf, n);
+        *buf.add(n) = 0;
     }
-    out
+    n
 }
 
-// wsprintfA(buf, fmt, ...) and wsprintfW are cdecl with variable
-// arguments: they pass the address of the arguments to wvsprintf.
+/// The pointer of a flat address (WIN16's 16:16 addresses are flat here).
+pub fn flat(p: u32) -> *mut u8 {
+    p as *mut u8
+}
+
+// ---- RECT and POINT ----
+
+/// A RECT (left, top, right, bottom: 32-bit).
+pub fn read_rect(p: u32) -> Option<[i32; 4]> {
+    if p == 0 {
+        return None;
+    }
+    let q = p as *const i32;
+    Some(unsafe { [q.read_unaligned(), q.add(1).read_unaligned(), q.add(2).read_unaligned(), q.add(3).read_unaligned()] })
+}
+
+pub fn write_rect(p: u32, r: [i32; 4]) {
+    if p == 0 {
+        return;
+    }
+    let q = p as *mut i32;
+    for (i, v) in r.iter().enumerate() {
+        unsafe { q.add(i).write_unaligned(*v) };
+    }
+}
+
+pub fn read_point(p: u32) -> Option<(i32, i32)> {
+    if p == 0 {
+        return None;
+    }
+    let q = p as *const i32;
+    Some(unsafe { (q.read_unaligned(), q.add(1).read_unaligned()) })
+}
+
+pub fn write_point(p: u32, v: (i32, i32)) {
+    if p == 0 {
+        return;
+    }
+    let q = p as *mut i32;
+    unsafe {
+        q.write_unaligned(v.0);
+        q.add(1).write_unaligned(v.1);
+    }
+}
+
+pub fn rd32(p: u32, o: u32) -> u32 {
+    unsafe { ((p + o) as *const u32).read_unaligned() }
+}
+
+pub fn wr32(p: u32, o: u32, v: u32) {
+    unsafe { ((p + o) as *mut u32).write_unaligned(v) }
+}
+
+pub fn rd16(p: u32, o: u32) -> u16 {
+    unsafe { ((p + o) as *const u16).read_unaligned() }
+}
+
+/// `SET W32TRACE=1`: trace windows and messages to the kernel log.
+pub fn tracing() -> bool {
+    static T: Global<u8> = Global::new(2);
+    let t = T.get();
+    if *t == 2 {
+        let mut v: *const u8 = core::ptr::null();
+        *t = (unsafe { os2::DosScanEnv(b"W32TRACE\0".as_ptr(), &mut v) } == 0 && !v.is_null() && unsafe { *v } != b'0') as u8;
+    }
+    *t == 1
+}
+
+/// Call Windows code: a window procedure or callback with four
+/// arguments (stdcall; esp is restored whatever it pops).
+pub fn call4(f: u32, a: u32, b: u32, c: u32, d: u32) -> u32 {
+    unsafe { rs2_w32u_call4(f, a, b, c, d) }
+}
+
 core::arch::global_asm!(
-    ".globl wsprintfA",
-    "wsprintfA:",
-    "lea eax, [esp+12]",
-    "push eax",
-    "push dword ptr [esp+12]",
-    "push dword ptr [esp+12]",
-    "call __w32t_wvsprintfA",
-    "ret",
-    ".globl wsprintfW",
-    "wsprintfW:",
-    "lea eax, [esp+12]",
-    "push eax",
-    "push dword ptr [esp+12]",
-    "push dword ptr [esp+12]",
-    "call __w32t_wvsprintfW",
+    ".globl rs2_w32u_call4",
+    "rs2_w32u_call4:",
+    "push ebp",
+    "mov ebp, esp",
+    "push ebx",
+    "push esi",
+    "push edi",
+    "push dword ptr [ebp+24]",
+    "push dword ptr [ebp+20]",
+    "push dword ptr [ebp+16]",
+    "push dword ptr [ebp+12]",
+    "call dword ptr [ebp+8]",
+    "lea esp, [ebp-12]",
+    "pop edi",
+    "pop esi",
+    "pop ebx",
+    "pop ebp",
     "ret",
 );
+
+/// Callbacks with two, three and five arguments (stdcall).
+pub fn call4_2(f: u32, a: u32, b: u32) -> u32 {
+    unsafe { rs2_w32u_calln(f, 2, [a, b, 0, 0, 0].as_ptr()) }
+}
+
+pub fn call4_3(f: u32, a: u32, b: u32, c: u32) -> u32 {
+    unsafe { rs2_w32u_calln(f, 3, [a, b, c, 0, 0].as_ptr()) }
+}
+
+pub fn call4_5(f: u32, a: u32, b: u32, c: u32, d: u32, e: u32) -> u32 {
+    unsafe { rs2_w32u_calln(f, 5, [a, b, c, d, e].as_ptr()) }
+}
+
+// rs2_w32u_calln(f, n, args): push args[n-1]..args[0], call f.
+core::arch::global_asm!(
+    ".globl rs2_w32u_calln",
+    "rs2_w32u_calln:",
+    "push ebp",
+    "mov ebp, esp",
+    "push ebx",
+    "push esi",
+    "push edi",
+    "mov ecx, [ebp+12]",
+    "mov esi, [ebp+16]",
+    "2:",
+    "test ecx, ecx",
+    "jz 3f",
+    "dec ecx",
+    "push dword ptr [esi+ecx*4]",
+    "jmp 2b",
+    "3:",
+    "call dword ptr [ebp+8]",
+    "lea esp, [ebp-12]",
+    "pop edi",
+    "pop esi",
+    "pop ebx",
+    "pop ebp",
+    "ret",
+);
+
+unsafe extern "C" {
+    fn rs2_w32u_calln(f: u32, n: u32, args: *const u32) -> u32;
+    fn rs2_w32u_call4(f: u32, a: u32, b: u32, c: u32, d: u32) -> u32;
+}
+
+/// Set the thread's last error, giving a value back.
+pub fn fail<T>(e: u32, v: T) -> T {
+    unsafe { SetLastError(e) };
+    v
+}

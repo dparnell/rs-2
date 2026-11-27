@@ -927,6 +927,8 @@ pub const WIN32_MODULES: &[(&str, &str)] = &[
     ("KERNEL32", "W32KERN"),
     ("NTDLL", "W32NTDLL"),
     ("USER32", "W32USER"),
+    ("GDI32", "W32USER"),
+    ("MSIMG32", "W32USER"),
     // The C runtimes: Windows' own MSVCRT.DLL, Visual C++'s and the UCRT.
     ("MSVCRT", "W32CRT"),
     ("MSVCR70", "W32CRT"),

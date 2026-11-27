@@ -1,6 +1,6 @@
 [package]
 name = "w32user-dll"
-description = "W32USER.DLL: USER32 of rs2's Win32 layer (stage 1: strings, message boxes) (docs/WIN32.md)"
+description = "W32USER.DLL: USER32 and GDI32 of rs2's Win32 layer, on PM and GPI (docs/WIN32.md)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,4 +11,4 @@ name = "w32user"
 path = "src/lib.rs"
 
 [dependencies]
-os2 = { path = "../os2" }
+os2 = { path = "../os2", features = ["heap"] }

@@ -1,0 +1,29 @@
+#include <windows.h>
+#include "gui32.h"
+
+IDI_MAIN ICON "gui32.ico"
+
+IDM_MAIN MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Hello", IDM_HELLO
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About", IDM_ABOUT
+    END
+END
+
+IDA_MAIN ACCELERATORS
+BEGIN
+    "H", IDM_HELLO, VIRTKEY, CONTROL
+    VK_F1, IDM_ABOUT, VIRTKEY
+END
+
+STRINGTABLE
+BEGIN
+    IDS_HELLO "Hello, resources"
+END
