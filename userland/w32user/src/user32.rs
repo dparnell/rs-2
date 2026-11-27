@@ -26,6 +26,10 @@ unsafe extern "C" {
     fn __w32t_Rs2EditProc();
     fn __w32t_Rs2ListBoxProc();
     fn __w32t_Rs2ComboBoxProc();
+    fn __w32t_Rs2MDIClientProc();
+    fn __w32t_Rs2DefFrameNative();
+    fn __w32t_DefMDIChildProcA();
+    fn __w32t_DefMDIChildProcW();
 }
 
 /// The address programs see of an exported procedure (its entry thunk).
@@ -44,7 +48,9 @@ pub fn register_builtin() {
     wnd::add_native(thunk(__w32t_DefWindowProcA), wnd::def_window_proc);
     wnd::add_native(thunk(__w32t_DefWindowProcW), def_window_proc_w);
     let dbl = wnd::CS_DBLCLKS | wnd::CS_PARENTDC;
-    let classes: [(&[u8], u16, unsafe extern "C" fn(), wnd::Native, u32, u32, u32); 8] = [
+    wnd::add_native(thunk(__w32t_DefMDIChildProcA), crate::mdi::def_child_proc);
+    wnd::add_native(thunk(__w32t_DefMDIChildProcW), crate::mdi::def_child_proc);
+    let classes: [(&[u8], u16, unsafe extern "C" fn(), wnd::Native, u32, u32, u32); 9] = [
         (b"BUTTON", 0x8080, __w32t_Rs2ButtonProc, crate::ctl::button, dbl, 0, 0),
         (b"STATIC", 0x8081, __w32t_Rs2StaticProc, crate::ctl::static_, wnd::CS_PARENTDC, 0, 0),
         (b"EDIT", 0x8082, __w32t_Rs2EditProc, crate::edit::proc_, dbl, 0, 0),
@@ -52,9 +58,12 @@ pub fn register_builtin() {
         (b"COMBOBOX", 0x8084, __w32t_Rs2ComboBoxProc, crate::listbox::combo_proc, dbl, 0, 0),
         (b"COMBOLBOX", 0x8085, __w32t_Rs2ListBoxProc, crate::listbox::proc_, dbl, 0, 0),
         (b"SCROLLBAR", 0x8086, __w32t_Rs2ScrollBarProc, crate::scroll::control_proc, dbl, 0, 0),
+        // COLOR_APPWORKSPACE + 1
+        (b"MDICLIENT", 0x8087, __w32t_Rs2MDIClientProc, crate::mdi::client_proc, 0, 0, 13),
         (b"#32770", 0x8002, __w32t_DefDlgProcA, crate::dialog::def_dlg_proc, wnd::CS_DBLCLKS | 0x0800, crate::dialog::DLGWINDOWEXTRA, 0),
     ];
     wnd::add_native(crate::comdlg::proc_addr(), crate::comdlg::dlg_proc);
+    wnd::add_native(thunk(__w32t_Rs2DefFrameNative), def_frame_native);
     for (name, atom, entry, f, style, extra, brush) in classes {
         wnd::add_native(thunk(entry), f);
         let cursor = if name == b"EDIT" { 32513 } else { 32512 };
@@ -91,6 +100,76 @@ pub extern "stdcall" fn Rs2ListBoxProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 
 #[unsafe(no_mangle)]
 pub extern "stdcall" fn Rs2ComboBoxProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
     crate::listbox::combo_proc(hw(h), m as u16, wp, lp)
+}
+
+/// The MDICLIENT class's procedure.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2MDIClientProc(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::mdi::client_proc(hw(h), m as u16, wp, lp)
+}
+
+// ---- MDI (mdi.rs) ----
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn DefFrameProcA(h: u32, mc: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::mdi::def_frame_proc(hw(h), hw(mc), m as u16, wp, lp)
+}
+
+/// The MDI client of the DefFrameProcW being converted.
+static FRAME_CLIENT: crate::Global<u16> = crate::Global::new(0);
+
+fn def_frame_native(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
+    crate::mdi::def_frame_proc(h, *FRAME_CLIENT.get(), m, wp, lp)
+}
+
+/// DefFrameProcW: the text messages converted to the A form.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn DefFrameProcW(h: u32, mc: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    let saved = core::mem::replace(FRAME_CLIENT.get(), hw(mc));
+    let r = wnd::call_conv(thunk(__w32t_Rs2DefFrameNative), false, hw(h), m as u16, wp, lp, true);
+    *FRAME_CLIENT.get() = saved;
+    r
+}
+
+/// DefFrameProcW's A side, a native (call_conv calls it with the A form).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2DefFrameNative(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    def_frame_native(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn DefMDIChildProcA(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    crate::mdi::def_child_proc(hw(h), m as u16, wp, lp)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn DefMDIChildProcW(h: u32, m: u32, wp: u32, lp: u32) -> u32 {
+    wnd::call_conv(thunk(__w32t_DefMDIChildProcA), false, hw(h), m as u16, wp, lp, true)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn TranslateMDISysAccel(mc: u32, p: u32) -> i32 {
+    wnd::Msg::read(p).is_some_and(|m| crate::mdi::translate_accel(hw(mc), &m)) as i32
+}
+
+fn create_mdi_window(class: u32, title: u32, style: u32, x: i32, y: i32, cx: i32, cy: i32, mc: u32, hi: u32, lp: u32, wide: bool) -> u32 {
+    let cs = [class, title, hi, x as u32, y as u32, cx as u32, cy as u32, style, lp];
+    crate::mdi::create(hw(mc), cs.as_ptr() as u32, wide) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn CreateMDIWindowA(class: u32, title: u32, style: u32, x: i32, y: i32, cx: i32, cy: i32, mc: u32, hi: u32, lp: u32) -> u32 {
+    create_mdi_window(class, title, style, x, y, cx, cy, mc, hi, lp, false)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn CreateMDIWindowW(class: u32, title: u32, style: u32, x: i32, y: i32, cx: i32, cy: i32, mc: u32, hi: u32, lp: u32) -> u32 {
+    create_mdi_window(class, title, style, x, y, cx, cy, mc, hi, lp, true)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn ArrangeIconicWindows(h: u32) -> u32 {
+    crate::mdi::arrange_iconic(hw(h))
 }
 
 /// The SCROLLBAR class's procedure (programs see its address).
@@ -256,7 +335,7 @@ pub extern "stdcall" fn SetClassWord(h: u32, i: i32, v: u32) -> u32 {
 
 // ---- Windows ----
 
-fn create_window(ex: u32, class: u32, title: u32, style: u32, x: i32, y: i32, cx: i32, cy: i32, parent: u32, menu: u32, hi: u32, param: u32, wide: bool) -> u32 {
+pub fn create_window(ex: u32, class: u32, title: u32, style: u32, x: i32, y: i32, cx: i32, cy: i32, parent: u32, menu: u32, hi: u32, param: u32, wide: bool) -> u32 {
     let cname = ClassName::of(class, wide);
     let Some(ci) = wnd::find_class(&cname, hi) else {
         if crate::tracing() {

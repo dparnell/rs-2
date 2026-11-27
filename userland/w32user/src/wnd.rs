@@ -913,9 +913,11 @@ pub fn create(c: &Create) -> u16 {
     let [mut x, mut y, mut cx, mut cy] = c.pos;
     let child = style & WS_CHILD != 0;
     let parent = c.parent;
-    let framed = is_framed(style);
+    // An MDI child is a PM frame inside the MDI client (mdi.rs).
+    let mdi_child = child && style & WS_CAPTION == WS_CAPTION && crate::mdi::is_client(parent);
+    let framed = is_framed(style) || mdi_child;
     let edge = if c.exstyle & WS_EX_CLIENTEDGE != 0 { 0x8000_0000 } else { 0 };
-    let nc = style & (WS_BORDER | WS_DLGFRAME | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL | if child { WS_CAPTION } else { 0 }) | edge;
+    let nc = if mdi_child { 0 } else { style & (WS_BORDER | WS_DLGFRAME | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL | if child { WS_CAPTION } else { 0 }) | edge };
     if child && wnd(parent).is_none() {
         return crate::fail(1406, 0); // ERROR_TLW_WITH_WSCHILD
     }
@@ -945,7 +947,9 @@ pub fn create(c: &Create) -> u16 {
     let (frame, client) = if framed {
         let mut fcf = frame_flags(style, c.exstyle, parent != 0);
         let mut client = 0;
-        let f = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, b"Win32Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
+        let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
+        let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
+        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win32Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
         if f != 0 {
             let old = unsafe { WinSubclassWindow(f, std_frame_proc) };
             STD_FRAME_PROC.store(old, core::sync::atomic::Ordering::Relaxed);
@@ -1018,7 +1022,9 @@ pub fn create(c: &Create) -> u16 {
     }
     if framed {
         // The menu: the one given, or the class's.
-        let m = if c.menu != 0 {
+        let m = if child {
+            0
+        } else if c.menu != 0 {
             c.menu
         } else {
             let name = u().classes[ci].menu.clone();
@@ -1027,9 +1033,10 @@ pub fn create(c: &Create) -> u16 {
         if m != 0 {
             crate::menu::set_menu(hwnd, m);
         }
+        let ph = if mdi_child { wnd(parent).map_or(sy, |w| client_height(w.client)) } else { sy };
         unsafe {
             WinSendMsg(frame, WM_UPDATEFRAME, 0, 0);
-            WinSetWindowPos(frame, HWND_TOP, x, sy - y - cy, cx, cy, SWP_MOVE | SWP_SIZE);
+            WinSetWindowPos(frame, HWND_TOP, x, ph - y - cy, cx, cy, SWP_MOVE | SWP_SIZE);
         }
     } else {
         layout_frame(hwnd);
@@ -1124,6 +1131,15 @@ static STD_FRAME_PROC: core::sync::atomic::AtomicUsize = core::sync::atomic::Ato
 extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let old = STD_FRAME_PROC.load(core::sync::atomic::Ordering::Relaxed);
     let old: WndProc = unsafe { core::mem::transmute(old) };
+    // An MDI child's title bar buttons: Windows' WM_SYSCOMMAND to the
+    // child (DefMDIChildProc maximizes it the MDI way).
+    if msg == WM_SYSCOMMAND {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created && w.style & WS_CHILD != 0).map(|w| w.hwnd) {
+            if crate::mdi::pm_syscommand(h, mp1 & 0xffff) {
+                return 0;
+            }
+        }
+    }
     if msg == WM_SYSCOMMAND && mp1 & 0xffff < 0x8000 {
         if let Some(h) = by_frame(pmh).filter(|w| w.created).map(|w| w.hwnd) {
             let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
@@ -2434,7 +2450,7 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         // BeginPaint erases (WM_ERASEBKGND).
         WM_ERASEBACKGROUND => 0,
         WM_COMMAND | WM_INITMENU | WM_MENUSELECT | WM_MENUEND => crate::menu::pm_message(h, msg, mp1, mp2),
-        0x0036 | 0x0037 => match crate::menu::owner_item(h, msg, mp2 as *mut u8) {
+        0x0036 | 0x0037 => match crate::mdi::owner_item(msg, mp2 as *mut u8).or_else(|| crate::menu::owner_item(h, msg, mp2 as *mut u8)) {
             Some(r) => r,
             None => unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) },
         },

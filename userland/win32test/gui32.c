@@ -696,6 +696,93 @@ static void user_checks(void)
     check("IsWindow after DestroyWindow", !IsWindow(child));
 }
 
+/* ---- MDI ---- */
+
+static HWND mdi_client;
+static int mdi_activations;
+
+static LRESULT CALLBACK mdi_frame_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (m == WM_CREATE) {
+        CLIENTCREATESTRUCT ccs;
+        ccs.hWindowMenu = GetSubMenu(GetMenu(h), 0);
+        ccs.idFirstChild = 5000;
+        mdi_client = CreateWindowExA(0, "MDICLIENT", NULL, WS_CHILD | WS_CLIPCHILDREN | WS_VISIBLE, 0, 0, 0, 0, h, (HMENU)1, inst, &ccs);
+        return 0;
+    }
+    return DefFrameProcA(h, mdi_client, m, wp, lp);
+}
+
+static LRESULT CALLBACK mdi_child_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (m == WM_MDIACTIVATE && (HWND)lp == h)
+        mdi_activations++;
+    return DefMDIChildProcA(h, m, wp, lp);
+}
+
+static void mdi_checks(void)
+{
+    WNDCLASSA wc;
+    HWND frame, a, b, c;
+    HMENU bar, win;
+    MDICREATESTRUCTA mcs;
+    BOOL max = FALSE;
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = mdi_frame_proc;
+    wc.hInstance = inst;
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = "GUI32Frame";
+    RegisterClassA(&wc);
+    wc.lpfnWndProc = mdi_child_proc;
+    wc.lpszClassName = "GUI32Doc";
+    check("RegisterClassA (MDI child)", RegisterClassA(&wc) != 0);
+    bar = CreateMenu();
+    win = CreatePopupMenu();
+    AppendMenuA(win, MF_STRING, 100, "&Tile");
+    AppendMenuA(bar, MF_POPUP, (UINT_PTR)win, "&Window");
+    frame = CreateWindowExA(0, "GUI32Frame", "MDI frame", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 60, 60, 500, 360, NULL, bar, inst, NULL);
+    check("MDI frame and client", frame != NULL && mdi_client != NULL);
+    ShowWindow(frame, SW_SHOW);
+    memset(&mcs, 0, sizeof mcs);
+    mcs.szClass = "GUI32Doc";
+    mcs.szTitle = "Doc A";
+    mcs.hOwner = inst;
+    mcs.x = mcs.y = mcs.cx = mcs.cy = CW_USEDEFAULT;
+    a = (HWND)SendMessageA(mdi_client, WM_MDICREATE, 0, (LPARAM)&mcs);
+    b = CreateMDIWindowA("GUI32Doc", "Doc B", 0, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, mdi_client, inst, 0);
+    check("WM_MDICREATE, CreateMDIWindowA", a != NULL && b != NULL);
+    check("an MDI child's parent is the client", GetParent(a) == mdi_client);
+    check("WM_MDIGETACTIVE (the newest)", (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&max) == b && !max);
+    check("WM_MDIACTIVATE reached the children", mdi_activations == 2);
+    check("the Window menu lists the children", GetMenuItemCount(win) == 4 && GetMenuItemID(win, 2) == 5000 && GetMenuItemID(win, 3) == 5001);
+    SendMessageA(mdi_client, WM_MDINEXT, (WPARAM)b, 0);
+    check("WM_MDINEXT", (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0) == a);
+    SendMessageA(mdi_client, WM_MDIMAXIMIZE, (WPARAM)a, 0);
+    SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&max);
+    check("WM_MDIMAXIMIZE", max && IsZoomed(a));
+    {
+        char t[80];
+        GetWindowTextA(frame, t, sizeof t);
+        check("the frame's title while maximized", strcmp(t, "MDI frame - [Doc A]") == 0);
+    }
+    c = CreateMDIWindowA("GUI32Doc", "Doc C", 0, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, mdi_client, inst, 0);
+    SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&max);
+    check("a new child is maximized too", max && IsZoomed(c));
+    SendMessageA(mdi_client, WM_MDIRESTORE, (WPARAM)c, 0);
+    SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&max);
+    check("WM_MDIRESTORE", !max && !IsZoomed(c));
+    check("WM_MDITILE", SendMessageA(mdi_client, WM_MDITILE, MDITILE_VERTICAL, 0) != 0);
+    SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)c, 0);
+    check("WM_MDIDESTROY", !IsWindow(c) && GetMenuItemCount(win) == 4);
+    check("the next child is active", (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0) != NULL);
+    pump(200);
+    DestroyWindow(frame);
+    check("DestroyWindow (MDI frame)", !IsWindow(a) && !IsWindow(mdi_client));
+}
+
+/* ---- WinMain ---- */
+
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
 {
     WNDCLASSEXA wc;
@@ -731,6 +818,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     gdi_checks();
     dialog_checks();
     comdlg_checks();
+    mdi_checks();
     InvalidateRect(main_wnd, NULL, TRUE);
     pump(1500);
     /* GUI32 WAIT: the window stays until it is closed. */

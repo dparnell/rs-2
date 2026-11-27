@@ -54,6 +54,7 @@ mod gdi32;
 mod icon;
 mod kern;
 mod listbox;
+mod mdi;
 mod menu;
 mod pm;
 mod region;
