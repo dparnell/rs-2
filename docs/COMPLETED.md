@@ -758,6 +758,20 @@ Microsoft file (docs/WIN16.md).
   `RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`/`RS2\DDESRV16.EXE`, W16TEST's
   stage-3 checks
 
+
+## Native Win32
+
+32-bit Windows (PE) programs as OS/2 processes, without any Microsoft
+file (docs/WIN32.md).
+
+- done (stage 1): the PE parser (os2-exe) and loader, the system DLLs'
+  names mapped to rs2's W32NTDLL, W32KERN and W32USER; the PEB and a TEB
+  per thread (the TEB is the thread's OS/2 TIB); exceptions handed to
+  W32NTDLL's dispatcher in user mode (RS2API 430-434), SEH and RtlUnwind;
+  DllMain and TLS; KERNEL32's files, memory, heaps, threads and
+  synchronisation, processes, modules, code pages and strings, time, the
+  console on VIO and KBD; entry thunks that realign the stack.
+  W32TEST passes 145 checks (Open Watcom programs).
 ## Milestone 5: install media
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

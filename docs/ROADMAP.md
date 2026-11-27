@@ -88,8 +88,8 @@ Microsoft file (docs/WIN16.md).
 32-bit Windows (PE) programs as OS/2 processes, on rs2 DLLs that share
 WIN16's USER and GDI core (plan: docs/WIN32.md).
 
-- stage 1: the PE loader, TEB/PEB, SEH, KERNEL32's core, the console,
-  MSVCRT
+- stage 1's rest: MSVCRT.DLL (MinGW programs), the PEB's loader lists,
+  Ctrl+C handlers and mouse input in the console, FreeLibrary unloading
 - stage 2: USER32 and GDI32 on the shared core, COMDLG32
 - stage 3: COMCTL32, SHELL32, WINMM, Winsock, OLE
 

@@ -1,6 +1,6 @@
-# Native Win32 (plan)
+# Native Win32
 
-This is a plan; nothing here is built yet.
+Stage 1 (console programs) works; stages 2 and 3 are plans.
 
 rs2 runs Windows 3.x programs as ordinary OS/2 processes on its own
 WIN16.DLL (docs/WIN16.md). This plan does the same for 32-bit Windows
@@ -52,206 +52,253 @@ Bigger, because:
 | later | Win64 (PE32+) on rs2's long-mode path (docs/API64.md) | |
 
 The test programs are built with Open Watcom (`wcl386 -bt=nt`, on the
-developer disk: docs/DEVDISK.md) and MinGW-w64 (i686), as WIN16's are
-with Open Watcom's `-bt=windows` (docs/WIN16.md, "Building the test
-programs"). A `W32TEST.EXE`, like W16TEST, checks each stage's calls.
+developer disk: docs/DEVDISK.md) and, for MSVCRT, MinGW-w64 (i686), as
+WIN16's are with Open Watcom's `-bt=windows` (docs/WIN16.md, "Building
+the test programs"). `W32TEST.EXE`, like W16TEST, checks each stage's
+calls.
 
 ## Stage 1: the kernel and the console
+
+### Status
+
+| What | State |
+|------|-------|
+| PE32 programs and DLLs loaded (relocated, imports bound, the system DLLs' names mapped) | works |
+| The PEB, a TEB per thread (FS), the program's stack from its header, growing through a guard page | works |
+| DllMain (process and thread attach and detach), `.tls` blocks and callbacks, TlsAlloc slots | works |
+| Structured exceptions: CPU exceptions, RaiseException, `_try`/`_except`/`_finally`, RtlUnwind, EXCEPTION_CONTINUE_EXECUTION with a changed context, the unhandled exception filter | works |
+| Files, directories, searches, paths, drives | works |
+| VirtualAlloc/Free/Query/Protect, heaps, GlobalAlloc/LocalAlloc | works |
+| Threads, events, mutexes, semaphores, critical sections, waits on one or many, Interlocked | works |
+| CreateProcess, waiting for a child, its exit code; the environment and the command line | works |
+| LoadLibrary, GetProcAddress, GetModuleHandle, GetModuleFileName | works (FreeLibrary does not unload) |
+| Code pages, the string calls, times and clocks, versions, system information | works |
+| The console: colours, the cursor, the screen buffer calls, key input | works (no mouse input, no Ctrl+C handlers yet) |
+| MSVCRT.DLL for MinGW programs | not yet: needs MinGW-w64 to build its tests |
+| The PEB's loader lists (Ldr) and process parameters | not yet |
+
+`W32TEST.EXE` passes its 145 checks (`cargo xtask run --headless
+--timeout 120 --init "RS2\W32TEST.EXE"` ends with `w32test done: 0
+failure(s) in 145 checks`); `HELLO32.EXE` prints its arguments and ends
+with exit code 3.
 
 ### The PE loader
 
 `kernel/src/loader/peload.rs`, beside `lxload.rs`, `neload.rs` and
-`elfload.rs`. `crates/os2-exe` already tells the formats apart by the header the
-MZ stub's `e_lfanew` (0x3C) points to (`os2_exe::detect`: NE, LX, LE or
-PE); the PE parser goes in that crate, beside its NE and LX ones, so
-that tools on the host can use it too.
+`elfload.rs`, on the PE parser in `crates/os2-exe` (`pe.rs`;
+`os2_exe::detect` reports `Format::Pe`, and `cargo run -p os2-exe
+--example peinfo -- FILE` prints a module's headers, sections, imports
+and exports on the host).
 
-For a PE32 image (machine 0x14C, optional header magic 0x10B) it:
+A PE module is **one object**: its headers and sections at their RVAs,
+readable, writable and executable. A program goes into its process's
+private arena at its preferred base (Open Watcom and MSVC link at
+0x400000, often without relocations); if that is taken and the image has
+relocations, it goes elsewhere and is relocated (the in-memory header's
+ImageBase is updated). A DLL goes into the shared arena at its preferred
+base if that is free, else anywhere, relocated; all of it is per-process
+instance data, as sections are 4 KB aligned and the arena's objects 64
+KB. Section protections are not applied yet.
 
-1. **Maps the image.** Headers and sections at their virtual addresses,
-   with their protections (code read/execute, `.rdata` read-only, data
-   read/write), uninitialised tails zeroed. Sections are file-backed and
-   loaded on demand as LX pages are, where the file alignment allows it.
-2. **Picks the address.** An EXE goes at its preferred base, almost
-   always 0x00400000. Many EXEs are linked without relocations
-   (`IMAGE_FILE_RELOCS_STRIPPED`), so there is no other choice. The
-   address lies in the private arena below `SHARED_FLOOR` (0x04000000,
-   `kernel/src/vm.rs`), so it is free if the image is mapped before the
-   process allocates anything else. An image that would reach the
-   shared arena's floor is refused unless it can be relocated.
-   DLLs prefer 0x10000000, which lies in the range the shared arena may
-   grow into, so a DLL is normally relocated. That is fine: DLLs keep
-   their relocations.
-3. **Applies base relocations** (`.reloc`: HIGHLOW, and ABSOLUTE as
-   padding) when the image is not at its preferred base.
-4. **Resolves imports.** The import directory names each DLL and its
-   functions by name or ordinal (the hint speeds up the name lookup).
-   The loader writes the addresses into the import address table, then
-   makes the IAT read-only again if its section is. Forwarded exports
-   (`NTDLL.RtlAllocateHeap` as KERNEL32's `HeapAlloc`) are followed.
-   Bound imports are ignored (the binding never matches rs2's DLLs), and
-   delay-load imports are left to the program's own helper, which calls
-   LoadLibrary and GetProcAddress.
-5. **Maps the system DLL names** through a table like WIN16's
-   `WIN16_MODULES`: `KERNEL32` → rs2's `W32KERN`, `USER32` → `W32USER`
-   and so on (the rs2 names are below). Unlike Win16, Win32 imports
-   mostly by name, so the rs2 DLLs export Windows' names; where programs
-   import by ordinal (MFC's DLLs, COMCTL32's and SHLWAPI's ordinal-only
-   entries) the rs2 DLL exports those ordinals too. Any other name loads
-   the program's own DLL from the program's directory, then the current
-   directory, then LIBPATH and PATH (Windows' search order, roughly).
-6. **Sets up TLS.** The `.tls` directory gives the template, the size of
-   the zero fill, the index variable and the callbacks. Each thread gets
-   a copy of the block, its pointer in the TEB's TLS array, and the
-   callbacks are called with DLL_PROCESS_ATTACH / DLL_THREAD_ATTACH like
-   DllMain.
-7. **Calls DllMain** of each DLL it loads (`DLL_PROCESS_ATTACH`, in
-   dependency order), and with `DLL_THREAD_ATTACH`/`DETACH` and
-   `DLL_PROCESS_DETACH` as threads and the process start and end.
-   OS/2's DLL initialisation calls (`_DLL_InitTerm`) stay for rs2's own
-   DLLs.
-8. **Enters the program** at the entry point on a stack of the header's
-   reserve size with its commit size committed, the rest grown through
-   a guard page as OS/2 stacks are (MSVC's `__chkstk` and MinGW's
-   `___chkstk_ms` probe the stack a page at a time and rely on this).
+**Imports** are bound when the module is loaded. `WIN32_MODULES`
+(`kernel/src/loader/mod.rs`) maps the system DLLs to rs2's: `KERNEL32` →
+`W32KERN`, `NTDLL` → `W32NTDLL`, `USER32` → `W32USER`. These are LX DLLs
+that export Windows' names. Any other DLL is looked for in the program's
+directory, then along the LIBPATH. An import that does not resolve is
+logged (`loader: X.EXE: import KERNEL32.DLL.Foo not found (in
+W32KERN)`) and the load fails with ERROR_PROC_NOT_FOUND, as on Windows.
+Exports (by name and by ordinal, forwarders included) are the module's
+OS/2 exports, so DosQueryProcAddr, and with it GetProcAddress, finds
+them. A program also gets W32NTDLL, whose `Rs2W32Start` the kernel starts
+it at.
 
-`DosQueryAppType` already recognises PE files (`kernel/src/api/module.rs`:
-FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31, as IBM's does), and the subsystem field (2 GUI, 3 console) decides whether the
-process is a PM process or a windowed/full-screen VIO one, as the NE
-WINDOWAPI flags do. `DosExecPgm`, CMD and the shell start PE programs
-like any other.
+The kernel runs no initialisation for PE modules (their `init` is none):
+DllMain and TLS are W32NTDLL's business. `DosQueryAppType` reports
+FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31 (and FAPPTYP_DLL); the subsystem
+makes a GUI program a PM process and a console program a text one. A
+file with a PE signature that is not a PE32 i386 image is
+ERROR_INVALID_EXE_SIGNATURE, as OS/2 says of all of them.
 
-The loader's modules are visible to OS/2's module calls
-(`DosQueryModuleHandle`, `DosQueryProcAddr` on a PE DLL) only as far as
-rs2's W32KERN needs them for LoadLibrary and GetProcAddress.
+### The PEB and the TEBs
 
-### The TEB and the PEB
+A Win32 process gets a **Win32 area** of 0x3FD pages
+(`task/process.rs`, `W32_AREA`, reserved at exec): the PEB in the first
+page, the TEB of thread n in page n, committed when the thread is made.
+The kernel fills in the PEB's ImageBaseAddress (0x08),
+NumberOfProcessors (0x64) and the version (0xA4: 5.1, build 2600,
+VER_PLATFORM_WIN32_NT).
 
-Win32 code reaches its thread's data through FS. OS/2 does the same with
-its TIB, and the first words even agree:
+A Win32 thread's **TEB is its OS/2 TIB**: `Thread::tib` is the TEB, FS
+(`TIB_SEL`) points at it, and DosGetInfoBlocks returns it. The first
+words agree:
 
 | Offset | Win32 TEB | OS/2 TIB |
 |--------|-----------|----------|
-| 0x00 | ExceptionList (SEH chain) | tib_pexchain (exception chain) |
-| 0x04 | StackBase (top, high address) | tib_pstack (bottom, low address) |
-| 0x08 | StackLimit (lowest committed, low address) | tib_pstacklimit (top, high address) |
-| 0x0C | SubSystemTib | tib_ptib2 |
-| 0x18 | Self (the TEB's flat address) | |
-| 0x20 | ClientId: process and thread IDs | |
-| 0x2C | ThreadLocalStoragePointer (the `.tls` blocks) | |
-| 0x30 | ProcessEnvironmentBlock (PEB) | |
+| 0x00 | ExceptionList | tib_pexchain |
+| 0x04 | StackBase (the top) | tib_pstack (OS/2: the bottom) |
+| 0x08 | StackLimit (the lowest committed page) | tib_pstacklimit (OS/2: the top) |
+| 0x0C | SubSystemTib: here OS/2's tib_ptib2, in the process information area as for any thread | tib_ptib2 |
+| 0x10, 0x14 | FiberData, ArbitraryUserPointer: OS/2's version and ordinal | tib_version, tib_ordinal |
+| 0x18 | Self | |
+| 0x20 | ClientId (process, thread) | |
+| 0x2C | ThreadLocalStoragePointer (W32NTDLL's `.tls` blocks) | |
+| 0x30 | ProcessEnvironmentBlock | |
 | 0x34 | LastErrorValue | |
-| 0xE10 | TlsSlots[64] (TlsAlloc) | |
-| 0xF94 | TlsExpansionSlots | |
+| 0xE10 | TlsSlots[64] | |
 
-The exception chain is at the same place; the stack bounds are swapped.
-OS/2's TIBs are 0x40 bytes apart in the process information area
-(`kernel/src/task/process.rs`, `info::TIB_STRIDE`), so a TEB cannot go
-there. A Win32 process gets a 4 KB TEB per thread in its private memory,
-and `gdt::set_tib_base` gives `TIB_SEL` that TEB's base and a 0xFFF
-limit on each switch to a Win32 thread. The thread keeps its OS/2 TIB
-too (DosGetInfoBlocks returns it, and rs2's own DLLs called by the
-program use it); the kernel reads the exception chain from whichever
-block FS points at, which is the same offset in both.
+The stack fields are Windows' (rs2's own DLLs do not read them, except
+HELPMGR, which a Win32 program does not use). When the stack grows
+through its guard page the kernel moves StackLimit down
+(`api/win32.rs`, `stack_grew`): compilers' stack probes compare with it.
+Thread 1's stack is the header's reserve with its commit committed at
+the top and a guard page under it; CreateThread's threads get a
+committed stack of at least 1 MB.
 
-The PEB, one per process, carries what programs and runtimes read:
-BeingDebugged (0x02), ImageBaseAddress (0x08), Ldr (0x0C, the loader's
-module lists: InLoadOrder, InMemoryOrder, InInitializationOrder, each
-LDR_DATA_TABLE_ENTRY with base, entry, size and the names in UTF-16),
-ProcessParameters (0x10: the command line, image path, current
-directory, standard handles and environment, as UNICODE_STRINGs),
-ProcessHeap (0x18), NumberOfProcessors (0x64), the OS version (0xA4:
-5.1 to start with, Windows XP, which most programs of interest accept).
-Packers, copy protection and some runtimes walk Ldr; it has to be kept
-right as DLLs load and unload.
+### Exceptions
 
-### Structured exception handling
+The kernel does not walk a Win32 process's handlers: Win32 handlers
+take another context record and return other values than OS/2's. As NT
+does with KiUserExceptionDispatcher, it hands every CPU exception of a
+Win32 process (after a debugger's first chance) to a **dispatcher in
+user mode**, W32NTDLL's, which registered itself with `Rs2W32Init`
+(RS2API 430). The kernel puts an EXCEPTION_RECORD and a CONTEXT (i386,
+0x2CC bytes; control, integer and segment registers) 512 bytes below the
+thread's stack pointer and calls the dispatcher with them.
 
-rs2's 32-bit exception dispatch (`kernel/src/api/exceptions.rs`) already
-does what Win32 SEH needs: walk the registration records from FS:[0],
-call each handler in user mode with a return through the API gate,
-resume, search on, or unwind (`EH_UNWINDING`, DosUnwindException). The
-exception codes are the same numbers (0xC0000005 for an access
-violation, 0xC0000094 for an integer divide by zero, ...), and so is the
-report record's start (code, flags, nested record, address, the number of
-parameters, the parameters). A Win32 thread gets its own flavour of the
-dispatch:
+The exception codes are NT's, which are not OS/2's beyond the access
+violation (0xC0000005, with NT's parameters: 0 read, 1 write, 8
+execute): integer divide by zero is 0xC0000094 (OS/2: 0xC000009B),
+illegal instruction 0xC000001D (0xC000001C), breakpoint 0x80000003 (its
+address the INT 3's, as Windows reports it), single step 0x80000004, the
+floating point ones 0xC000008D-0xC0000093.
 
-- **The context record** is Win32's CONTEXT: ContextFlags, the debug
-  registers, the 112-byte FLOATING_SAVE_AREA, GS FS ES DS, EDI ESI EBX
-  EDX ECX EAX, EBP EIP CS EFLAGS ESP SS, then 512 bytes of FXSAVE
-  (ExtendedRegisters). OS/2's has a different order (EAX before EBX) and
-  no debug registers; programs and C++ runtimes read and write it by
-  offset.
-- **Handler results** differ: Win32's ExceptionContinueExecution is 0 and
-  ExceptionContinueSearch 1, where OS/2 uses 0xFFFFFFFF and 0.
-  ExceptionNestedException (2) and ExceptionCollidedUnwind (3) are
-  Win32's own.
-- **Unwinding** is RtlUnwind in W32NTDLL (forwarded from KERNEL32), a
-  user-mode walk of the chain calling handlers with EXCEPTION_UNWINDING
-  (2, the same bit as OS/2's EH_UNWINDING), then restoring FS:[0]. It
-  needs no kernel call; RaiseException uses the dispatch.
-- **No handler**: SetUnhandledExceptionFilter's filter runs; with none,
-  or if it returns EXCEPTION_CONTINUE_SEARCH, the process ends with the
-  exception code as its exit code and rs2's trap screen (POPUPLOG), as
-  an OS/2 program's would.
-- **Vectored handlers** (AddVectoredExceptionHandler, XP) run before the
-  frame chain.
-- **C++ exceptions** are SEH exceptions with code 0xE06D7363 (MSVC) and
-  need nothing more of the kernel; MinGW's DWARF-2 or SJLJ unwinding
-  uses none of this except RaiseException for its foreign exceptions.
+The dispatcher (`userland/w32ntdll`) walks the registration records from
+FS:[0], calling each handler as `(record, frame, context, dispatcher
+context)` through a shim that keeps EBX, ESI, EDI and EBP and the stack
+whatever the handler does. ExceptionContinueExecution (0) resumes in the
+context through `Rs2W32Continue` (431, NtContinue); ExceptionContinueSearch
+(1) goes on. With no handler left the unhandled exception filter runs
+(SetUnhandledExceptionFilter); EXCEPTION_EXECUTE_HANDLER ends the process
+with the exception code, EXCEPTION_CONTINUE_EXECUTION resumes, and
+EXCEPTION_CONTINUE_SEARCH (also W32KERN's UnhandledExceptionFilter
+without a filter) goes to `Rs2W32Unhandled` (432): the kernel's default
+action, the trap screen and POPUPLOG as for an OS/2 program, with the
+OS/2 code.
 
-### KERNEL32 for stage 1
+RaiseException is W32NTDLL's `Rs2W32Raise`, which captures the caller's
+registers (as after its return) and runs the same dispatcher.
+**RtlUnwind** calls the handlers of the frames above its target with
+EXCEPTION_UNWINDING (and EXCEPTION_EXIT_UNWIND for a whole unwind),
+takes each off the chain and returns to its caller with the return
+value, as Windows on i386 does. Signals and the kernel's own exceptions
+(DosKillThread, a guard page) take the default action in a Win32
+process: its handlers never see OS/2's.
 
-`userland/win32/kernel` → `W32KERN.DLL` (exports Windows' KERNEL32
-names), with `W32NTDLL.DLL` for the handful of NTDLL calls programs and
-runtimes import directly (RtlUnwind, RtlZeroMemory, RtlMoveMemory,
-NtQueryInformationProcess for version checks, RtlGetVersion). Each call
-is `extern "stdcall"` in Rust, on rs2's Dos* calls:
+Not yet: nested-exception frames (an exception in a handler is
+dispatched afresh), vectored handlers, the floating point state in the
+CONTEXT.
 
-| Area | Calls | On |
-|------|-------|----|
-| Files | CreateFile, ReadFile, WriteFile, SetFilePointer(Ex), CloseHandle, GetFileSize(Ex), GetFileAttributes(Ex), FindFirstFile/FindNextFile, DeleteFile, MoveFile(Ex), CopyFile, CreateDirectory, RemoveDirectory, GetFullPathName, GetTempPath, GetFileTime, FlushFileBuffers, LockFile | DosOpen and friends; long names on HPFS and JFS; FILETIME from OS/2's date and time |
-| Handles | one handle table per process: files, processes, threads, events, mutexes, semaphores, file mappings, console buffers; DuplicateHandle, inheritance | the OS/2 handles underneath |
-| Memory | VirtualAlloc/Free/Protect/Query, HeapCreate/Alloc/Free/ReAlloc/Size, the process heap, GlobalAlloc and LocalAlloc (the Win16 names over the heap), IsBadReadPtr | DosAllocMem, DosSetMem, DosQueryMem (VirtualAlloc of MEM_RESERVE is a reservation without commit; high memory for large reservations) |
-| Processes | CreateProcess, GetExitCodeProcess, ExitProcess, TerminateProcess, GetCommandLine, GetEnvironmentStrings, Get/SetEnvironmentVariable, GetModuleFileName, GetStartupInfo, GetCurrentProcess(Id) | DosExecPgm (the command line passed whole; Win32 programs parse their own), DosWaitChild, DosKillProcess |
-| Threads | CreateThread, ExitThread, GetExitCodeThread, Suspend/ResumeThread, Sleep, SwitchToThread, Get/SetThreadPriority, TlsAlloc/Get/Set/Free | DosCreateThread with a TEB made first; DosSleep; DosSetPriority |
-| Synchronisation | events (manual and auto reset), mutexes, semaphores, critical sections, WaitForSingleObject, WaitForMultipleObjects (all or any), InterlockedXxx | rs2's event, mutex and muxwait semaphores; critical sections spin then block on an event, all in user mode until contention |
-| Modules | LoadLibrary(Ex), FreeLibrary, GetProcAddress, GetModuleHandle, the resource calls (FindResource, LoadResource, LockResource, SizeofResource) | the PE loader through a kernel call; resources read from the mapped image |
-| Time | GetSystemTime(AsFileTime), GetLocalTime, GetTickCount, QueryPerformanceCounter/Frequency, the time zone calls | DosGetDateTime, the TZ variable, the TSC rs2 already calibrates |
-| Strings and NLS | MultiByteToWideChar, WideCharToMultiByte, GetACP, GetOEMCP, CompareString, LCMapString, GetLocaleInfo, lstrlen/lstrcpy and friends | UCONV and ULS (docs/UTILITIES.md, the NLS files); the ANSI code page is the process's OS/2 code page mapped to its Windows twin (850 → 1252) |
-| Errors | GetLastError, SetLastError, FormatMessage | LastError in the TEB; OS/2 error codes mapped to Windows' (they share most numbers below 100: 2 file not found, 5 access denied) |
-| System | GetVersion(Ex), GetSystemInfo, GetSystemDirectory, GetWindowsDirectory, GetComputerName, GetDiskFreeSpace(Ex), GetDriveType, GetLogicalDrives | the directories are rs2's `\WIN32` (made at install; no Windows files in it) |
+### W32NTDLL, W32KERN, W32USER
+
+`userland/w32ntdll` → `\OS2\DLL\W32NTDLL.DLL`:
+
+- `Rs2W32Start(entry, base, peb)`, where a program starts: it registers
+  the dispatcher, asks the kernel for the process's PE modules
+  (`Rs2W32Modules`, RS2API 433: image bases and module handles,
+  dependencies first), gives each with a TLS directory its index and
+  thread 1 its block, calls the DLLs' entry points with
+  DLL_PROCESS_ATTACH, and then the program's entry point; when that
+  returns, the DLLs get DLL_PROCESS_DETACH and the process ends with its
+  value. A DLL whose DllMain refuses ends it with
+  STATUS_DLL_INIT_FAILED.
+- `Rs2W32ThreadAttach`/`Detach`, `Rs2W32ProcessDetach`,
+  `Rs2W32InitModules` (for LoadLibrary), `Rs2W32HmteOfBase` and
+  `Rs2W32BaseOfHmte`, the unhandled filter; RtlUnwind, RtlRaiseException,
+  RtlCaptureContext, RtlZeroMemory/MoveMemory/FillMemory, RtlGetVersion,
+  NtCurrentTeb.
+
+`userland/w32kern` → `\OS2\DLL\W32KERN.DLL`, KERNEL32 (about 300 calls),
+by area:
+
+| File | What | On |
+|------|------|----|
+| handles.rs | the handle table (HANDLE = (index + 1) × 4: files, searches, waitable objects); the standard handles start as OS/2's 0, 1, 2 | |
+| file.rs | CreateFile (dispositions, share modes, CONIN$/CONOUT$; handles not inherited unless asked), Read/WriteFile, SetFilePointer, sizes, times, attributes, Find*File, Delete/Move/CopyFile, directories, GetFullPathName, temporary files, drives, free space | DosOpen, DosQueryPathInfo, DosFindFirst... |
+| mem.rs | VirtualAlloc/Free/Query/Protect, IsBad*Ptr; heaps; GlobalAlloc and LocalAlloc (handles are pointers) | DosAllocMem, DosSetMem, DosQueryMem; a reservation at a given address through `Rs2W32AllocAt` (RS2API 434) |
+| sync.rs | threads, waits, events, mutexes, semaphores (named ones shared within the process), critical sections, TLS slots, Interlocked | waitable objects under one lock; a waiting thread waits on its own OS/2 event semaphore, which whoever changes an object posts |
+| process.rs | the command line (OS/2's as Windows' one string), the environment (a copy, given to children), CreateProcess (search order, STARTF_USESTDHANDLES, a current directory), exit codes, modules | DosExecPgm, DosWaitChild (children are looked at every 20 ms while waited for), DosLoadModule, DosQueryProcAddr |
+| text.rs | code pages (ANSI and OEM are the process's OS/2 page, 437 or 850, so its bytes need no translation; UTF-16 through that page's table; UTF-8), lstr*, CompareString, LCMapString, GetStringType, GetLocaleInfo (US English) | |
+| time.rs | system and local time, FILETIME conversions, time zone, tick count, performance counter | DosGetDateTime, DosTmrQueryTime |
+| console.rs | the console | VIO and KBD (16-bit, through os2::vio::call16) |
+| misc.rs | versions (XP), system information, the Windows directory (`\WIN32` on the boot drive), errors, FormatMessage, OutputDebugString (to the kernel's log) | |
+
+Module handles are image bases for PE modules and OS/2 module handles
+for rs2's DLLs (GetModuleHandle("KERNEL32") is W32KERN's handle, which
+GetProcAddress takes). Error codes are OS/2's, which are Windows' for
+most numbers.
+
+`userland/w32user` → `\OS2\DLL\W32USER.DLL`, stage 1's USER32: the
+character calls, wsprintf (and wvsprintf), MessageBox on standard
+error.
+
+**Stack alignment.** Windows programs (as OS/2 ones) keep the stack
+4-byte aligned, and Rust code for i686 assumes 16: its SSE stores to the
+stack fault on a misaligned one. Every exported stdcall function is
+therefore reached through a thunk (`src/thunks.rs`, made with
+`exports.def` by `tools/scripts/gen_w32_exports.py` from the functions'
+signatures) that realigns the stack, copies the arguments and calls it.
+Run the script after adding or changing an exported function;
+`exports.extra` holds forwarders and fixed ordinals. Callbacks into
+Windows code go through a shim that saves the registers and restores the
+stack (`rs2_call4`).
 
 ### The console
 
-Win32 console programs use the console API, not VIO. `W32KERN` puts it
-on rs2's VIO, KBD and MOU calls in the program's session (a windowed VIO
-session from PM, or full screen): GetStdHandle, WriteConsole and
-ReadConsole (A and W), WriteFile and ReadFile on console handles,
-SetConsoleMode (line input, echo, processed output), the screen buffer
-calls (SetConsoleCursorPosition, SetConsoleTextAttribute,
-FillConsoleOutputCharacter/Attribute, ReadConsoleOutput,
-WriteConsoleOutput, ScrollConsoleScreenBuffer, the buffer info),
-ReadConsoleInput and PeekConsoleInput (key and mouse events from KBD and
-MOU), SetConsoleCtrlHandler (Ctrl+C and Ctrl+Break from OS/2's signals),
-SetConsoleTitle (the window list title), AllocConsole/FreeConsole for
-GUI programs. Standard handles redirected by CMD are files and pipes,
-not consoles, and ReadFile/WriteFile go to them directly.
+The console is the session's screen. Text goes out with DosWrite while
+the colour is the session's; in another colour (SetConsoleTextAttribute)
+through VioWrtCharStrAtt, with control characters through VioWrtTTY.
+The screen buffer calls (the cursor, filling characters and attributes,
+reading and writing cells, scrolling) are VIO's on the whole screen; key
+input (ReadConsoleInput, PeekConsoleInput, GetNumberOfConsoleInputEvents)
+is KbdCharIn and KbdPeek, with virtual key codes for the letters,
+digits, cursor keys, function keys and the editing keys. ReadFile and
+ReadConsole on the console read a line with OS/2's line editing.
+
+Not yet: mouse input, Ctrl+C and Ctrl+Break handlers
+(SetConsoleCtrlHandler is accepted and does nothing), the window title,
+several screen buffers.
 
 ### The C runtime
 
-MinGW programs import MSVCRT.DLL; MSVC-built programs import their own
-runtime (MSVCRT, MSVCR71 ... MSVCR100, or the UCRT's
-`api-ms-win-crt-*` DLLs), which they usually ship beside the program but
-which are Microsoft's. rs2 provides its own `MSVCRT.DLL`
-(`userland/win32/msvcrt`): the C library functions, `__getmainargs`,
-`_initterm`, `_onexit`, `_iob` and `__p__iob`, the locale and ctype
-tables, `_except_handler3/4`, `_setjmp3` and `longjmp` with SEH unwind,
+Open Watcom's programs carry their C library; MinGW programs import
+MSVCRT.DLL, and MSVC-built ones their own runtime (MSVCRT, MSVCR71 ...
+MSVCR100, or the UCRT's `api-ms-win-crt-*` DLLs), which they usually
+ship beside the program but which are Microsoft's. rs2 is to provide its
+own `MSVCRT.DLL`: the C library functions, `__getmainargs`, `_initterm`,
+`_onexit`, `_iob` and `__p__iob`, the locale and ctype tables,
+`_except_handler3/4`, `_setjmp3` and `longjmp` with SEH unwind,
 `_beginthreadex`. rs2's own C library for 64-bit programs
-(docs/LIBC64.md) is a source of the portable parts. The versioned names
-(MSVCR71 ...) map to the same DLL in the name table; the UCRT forwarders
-come in stage 3.
+(docs/LIBC64.md) is a source of the portable parts. Not started: its
+tests need MinGW-w64 (i686) on the build host.
+
+### Building the test programs
+
+`userland/win32test/build.sh` builds them with Open Watcom v2's NT target
+(`wcl386 -bt=nt`), installed as for the Win16 programs (docs/WIN16.md,
+"Building the test programs"); `cargo xtask build` puts them on drive C:
+as `C:\RS2\*.EXE`:
+
+- `HELLO32.EXE`: the hello world; prints its arguments and PATH, ends
+  with exit code 3.
+- `W32DLL.DLL`: a DLL with a DllMain that counts its calls, exporting a
+  function, a variable and a function that finds its own base.
+- `W32TEST.EXE`: the checks, in groups BASIC FILE MEM THREAD SEH PROC
+  STR TIME CON DLL (`W32TEST GROUP...` runs some); it imports W32DLL
+  (its import library from the DLL) and starts HELLO32.
+
+A load that fails names the import in the kernel's log
+(`loader:` lines); `apitrace=W32TEST` on the kernel command line traces
+the program's OS/2 calls, among them W32KERN's on its behalf.
 
 ## Stage 2: windows on a core shared with WIN16
 
