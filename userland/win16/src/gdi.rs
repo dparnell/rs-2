@@ -500,9 +500,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 }
             })
         }
+        // GetDeviceCaps(hdc, index): a true colour display has 24 bits per
+        // pel (W32USER says 32 to Win32 programs; its bitmaps are 24).
         80 => {
             let (h, i) = (a.w(), a.i());
-            sx(unsafe { GetDeviceCaps(d(h), i32_(i)) } as u16)
+            let v = unsafe { GetDeviceCaps(d(h), i32_(i)) };
+            if i == 12 && v == 32 {
+                return 24;
+            }
+            sx(v as u16)
         }
         81 => unsafe { GetMapMode(d(a.w())) },
         82 => {

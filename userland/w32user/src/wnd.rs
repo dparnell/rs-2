@@ -680,7 +680,7 @@ pub fn proc_form(p: u32) -> Option<bool> {
 pub fn queue_created(hab: u32) {
     unsafe {
         // CS_MOVENOTIFY: WM_MOVE when a window moves.
-        WinRegisterClass(hab, b"Win32Wnd\0".as_ptr(), pm_wndproc, 0x0001, 4);
+        WinRegisterClass(hab, client_class().as_ptr(), pm_wndproc, 0x0001, 4);
         WinRegisterClass(hab, b"Win32Frame\0".as_ptr(), frame_proc, 0, 4);
     }
     crate::scroll::register(hab);
@@ -688,6 +688,13 @@ pub fn queue_created(hab: u32) {
         return;
     }
     crate::user32::register_builtin();
+}
+
+/// The PM class of the windows' client windows: `Win16Wnd` in a Windows
+/// 3.x task (WIN16's DDE and clipboard know other tasks' windows by it),
+/// else `Win32Wnd`.
+pub fn client_class() -> &'static [u8] {
+    if crate::kern::host().is_some() { b"Win16Wnd\0" } else { b"Win32Wnd\0" }
 }
 
 /// What RegisterClass(Ex) is given.
@@ -966,7 +973,7 @@ pub fn create(c: &Create) -> u16 {
         let mut client = 0;
         let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
         let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
-        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win32Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
+        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, client_class().as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
         if f != 0 {
             let old = unsafe { WinSubclassWindow(f, std_frame_proc) };
             STD_FRAME_PROC.store(old, core::sync::atomic::Ordering::Relaxed);
@@ -981,10 +988,10 @@ pub fn create(c: &Create) -> u16 {
         let clip = pm_clip_children(style) | siblings;
         if nc != 0 {
             let f = unsafe { WinCreateWindow(pm_parent, b"Win32Frame\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN | siblings, x, pmy, cx, cy, pm_parent, behind, c.menu, core::ptr::null(), core::ptr::null()) };
-            let cl = unsafe { WinCreateWindow(f, b"Win32Wnd\0".as_ptr(), text.as_ptr(), clip | crate::pm::WS_VISIBLE, 0, 0, cx, cy, f, HWND_TOP, FID_CLIENT, core::ptr::null(), core::ptr::null()) };
+            let cl = unsafe { WinCreateWindow(f, client_class().as_ptr(), text.as_ptr(), clip | crate::pm::WS_VISIBLE, 0, 0, cx, cy, f, HWND_TOP, FID_CLIENT, core::ptr::null(), core::ptr::null()) };
             (f, cl)
         } else {
-            let h = unsafe { WinCreateWindow(pm_parent, b"Win32Wnd\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu, core::ptr::null(), core::ptr::null()) };
+            let h = unsafe { WinCreateWindow(pm_parent, client_class().as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu, core::ptr::null(), core::ptr::null()) };
             (h, h)
         }
     };
@@ -1615,7 +1622,15 @@ pub fn set_focus(h: u16) -> u16 {
         if style & WS_DISABLED != 0 {
             return 0;
         }
-        if style & WS_CHILD == 0 || parent == 0 {
+        if style & WS_CHILD == 0 {
+            break;
+        }
+        // A child of the desktop (a drop-down list: SetParent(NULL))
+        // takes no focus.
+        if parent == 0 {
+            if style & WS_POPUP == 0 {
+                return 0;
+            }
             break;
         }
         t = parent;

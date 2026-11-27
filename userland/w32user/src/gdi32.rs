@@ -233,6 +233,10 @@ fn read_dib(h: u16, bmi: *const u8, bits: *mut u8, start: i32, scans: i32) -> i3
         q.extend_from_slice(unsafe { core::slice::from_raw_parts(bmi.add(cb), 4 * n) });
     }
     let got = bitmap::with_ps(h, |hps, _| unsafe { GpiQueryBitmapBits(hps, start, scans, buf.as_mut_ptr(), q.as_mut_ptr()) }).unwrap_or(0).max(0) as usize;
+    // PM gives the colour table of 1, 4 and 8-bit bits: the caller's.
+    if direct && bpp <= 8 && q.len() >= 40 + 4 * n {
+        unsafe { core::ptr::copy_nonoverlapping(q.as_ptr().add(40), bmi.add(cb) as *mut u8, 4 * n) };
+    }
     let dstride = (w * bpp as usize).div_ceil(32) * 4;
     let total = dh.unsigned_abs() as usize;
     let m = masks(bmi, bpp, comp);
@@ -246,8 +250,10 @@ fn read_dib(h: u16, bmi: *const u8, bits: *mut u8, start: i32, scans: i32) -> i3
         c << shift & mask
     };
     for y in 0..got {
-        let row = start as usize + y;
-        let drow = if dh < 0 { total.saturating_sub(1 + row) } else { row };
+        // The buffer holds the scans asked for, from `start` up (a top-down
+        // DIB's from its top down).
+        let drow = if dh < 0 { (got).saturating_sub(1 + y) } else { y };
+        let _ = total;
         let s = &buf[y * qstride..(y + 1) * qstride];
         let d = unsafe { core::slice::from_raw_parts_mut(bits.add(drow * dstride), dstride) };
         if direct {
@@ -1606,6 +1612,18 @@ fn enum_fonts(h: u32, name: &[u8], f: u32, lp: u32, wide: bool) -> i32 {
         text_metrics(mem as u32, tm.as_mut_ptr() as u32, wide);
         gdi::release_dc(mem);
         gdi::delete_object(fo);
+        // NEWTEXTMETRIC's TrueType fields after TEXTMETRIC (56 bytes, 60
+        // for W): ntmFlags (NTM_ITALIC 1, NTM_BOLD 0x20, NTM_REGULAR 0x40),
+        // ntmSizeEM, ntmCellHeight, ntmAvgWidth.
+        if wf.tt {
+            let o = if wide { 60 } else { 56 };
+            let rd = |k: usize| i32::from_le_bytes(tm[k..k + 4].try_into().unwrap());
+            let flags = if italic { 1 } else { 0 } | if weight >= 700 { 0x20 } else { 0 } | if !italic && weight < 700 { 0x40 } else { 0 };
+            let (height, internal, ave) = (rd(0), rd(12), rd(20));
+            for (i, v) in [flags, 2048, (height - internal) as u32, ave as u32].iter().enumerate() {
+                tm[o + 4 * i..o + 4 * i + 4].copy_from_slice(&v.to_le_bytes());
+            }
+        }
         // ENUMLOGFONTEX: LOGFONT (the cell height, the average width),
         // full name (64), style (32), script (32).
         let mut lf = logfont(&ft, wide);

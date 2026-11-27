@@ -122,6 +122,7 @@ const EM_LINESCROLL: u32 = 0xb6;
 const EM_REPLACESEL: u32 = 0xc2;
 const EM_GETLINE: u32 = 0xc4;
 const EM_SETTABSTOPS: u32 = 0xcb;
+const EM_SETHANDLE: u32 = 0xbc;
 const EM_SETWORDBREAKPROC: u32 = 0xd0;
 const EM_GETWORDBREAKPROC: u32 = 0xd1;
 const LB_ADDSTRING: u32 = 0x180;
@@ -472,6 +473,12 @@ fn ctl_to32(h: u16, m: u32, wp: u16, lp: u32, f: &mut dyn FnMut(u32, u32, u32) -
         }
         EM_SETWORDBREAKPROC => f(m, w, proc16to32(lp)),
         EM_GETWORDBREAKPROC => proc32to16(f(m, w, lp)),
+        // EM_SETHANDLE(hlocal): a local block of the control's instance
+        // segment (its text, for W32USER).
+        EM_SETHANDLE if wp != 0 => {
+            let seg = unsafe { GetWindowLongA(h as u32, (-6i32) as u32) } as u16;
+            f(m, flat((seg as u32) << 16 | w) as u32, lp)
+        }
         LB_ADDSTRING | LB_INSERTSTRING | LB_SELECTSTRING | LB_FINDSTRING | LB_FINDSTRINGEXACT => {
             let wi = if m == LB_ADDSTRING { w } else { ix(wp) };
             f(m, wi, if lb_strings(h, false) { p as u32 } else { lp })
