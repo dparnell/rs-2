@@ -1,16 +1,15 @@
 //! The character calls (CharUpper, IsCharAlpha...) and wsprintf.
 
 use alloc::vec::Vec;
-use crate::{cstr, narrow, wstr, MultiByteToWideChar, WideCharToMultiByte};
+use crate::{cstr, narrow, wstr};
+use crate::kern::{byte_to_wide, wide_to_byte};
 
 /// A code page byte's character and back (the process code page).
 pub fn to_char(b: u8) -> char {
     if b.is_ascii() {
         return b as char;
     }
-    let mut w = 0u16;
-    unsafe { MultiByteToWideChar(0, 0, &b, 1, &mut w, 1) };
-    char::from_u32(w as u32).unwrap_or('?')
+    char::from_u32(byte_to_wide(b) as u32).unwrap_or('?')
 }
 
 pub fn to_byte(c: char) -> Option<u8> {
@@ -21,11 +20,8 @@ pub fn to_byte(c: char) -> Option<u8> {
     if w > 0xffff {
         return None;
     }
-    let w = w as u16;
-    let mut b = 0u8;
-    let mut used = 0;
-    unsafe { WideCharToMultiByte(0, 0, &w, 1, &mut b, 1, core::ptr::null(), &mut used) };
-    (used == 0).then_some(b)
+    let b = wide_to_byte(w as u16);
+    (b != b'?').then_some(b)
 }
 
 pub fn upper(b: u8) -> u8 {
@@ -231,10 +227,7 @@ pub unsafe extern "stdcall" fn wvsprintfW(buf: *mut u16, fmt: *const u16, args: 
     let out = unsafe { format(&f, args, true) };
     let n = out.len().min(1024);
     for (i, &b) in out[..n].iter().enumerate() {
-        let mut w = b as u16;
-        if !b.is_ascii() {
-            unsafe { MultiByteToWideChar(0, 0, &b, 1, &mut w, 1) };
-        }
+        let w = byte_to_wide(b);
         unsafe { *buf.add(i) = w };
     }
     unsafe { *buf.add(n) = 0 };

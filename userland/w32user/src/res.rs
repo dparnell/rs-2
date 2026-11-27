@@ -16,14 +16,6 @@ pub const RT_ACCELERATOR: u16 = 9;
 pub const RT_GROUP_CURSOR: u16 = 12;
 pub const RT_GROUP_ICON: u16 = 14;
 
-unsafe extern "stdcall" {
-    #[link_name = "W32KERN.FindResourceW"]
-    fn FindResourceW(h: u32, name: *const u16, ty: *const u16) -> u32;
-    #[link_name = "W32KERN.LoadResource"]
-    fn LoadResource(h: u32, r: u32) -> u32;
-    #[link_name = "W32KERN.SizeofResource"]
-    fn SizeofResource(h: u32, r: u32) -> u32;
-}
 
 /// A resource name: an ID or a string (as UTF-16, as the resource
 /// directory has it).
@@ -71,15 +63,7 @@ pub fn find(hinst: u32, ty: u16, name: &Name) -> Option<&'static [u8]> {
             z.as_ptr()
         }
     };
-    unsafe {
-        let r = FindResourceW(hinst, np, ty as usize as *const u16);
-        if r == 0 {
-            return None;
-        }
-        let p = LoadResource(hinst, r);
-        let n = SizeofResource(hinst, r);
-        (p != 0).then(|| core::slice::from_raw_parts(p as *const u8, n as usize))
-    }
+    crate::kern::resource(hinst, np, ty as usize as *const u16)
 }
 
 /// A string of a string table (blocks of 16 counted UTF-16 strings).

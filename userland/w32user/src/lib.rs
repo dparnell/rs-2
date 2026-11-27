@@ -44,6 +44,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 mod bitmap;
 mod caret;
 mod comdlg;
+mod cptab;
 mod ctl;
 mod dialog;
 mod draw;
@@ -51,6 +52,7 @@ mod edit;
 mod gdi;
 mod gdi32;
 mod icon;
+mod kern;
 mod listbox;
 mod menu;
 mod pm;
@@ -70,16 +72,6 @@ pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
 }
 
-unsafe extern "stdcall" {
-    #[link_name = "W32KERN.MultiByteToWideChar"]
-    pub fn MultiByteToWideChar(cp: u32, flags: u32, s: *const u8, n: i32, d: *mut u16, size: i32) -> i32;
-    #[link_name = "W32KERN.WideCharToMultiByte"]
-    pub fn WideCharToMultiByte(cp: u32, flags: u32, s: *const u16, n: i32, d: *mut u8, size: i32, dflt: *const u8, used: *mut i32) -> i32;
-    #[link_name = "W32KERN.SetLastError"]
-    pub fn SetLastError(e: u32);
-    #[link_name = "W32KERN.GetModuleHandleA"]
-    pub fn GetModuleHandleA(name: *const u8) -> u32;
-}
 
 /// State of the DLL (its data is per process). Window procedures may
 /// call back in: callers keep borrows short.
@@ -125,10 +117,17 @@ pub struct Queue {
 static QUEUES: Global<Vec<Queue>> = Global::new(Vec::new());
 static QLOCK: Lock = Lock::new();
 
-/// The thread's ID (the TEB's ClientId.UniqueThread).
+/// The thread's ID (TIB2's, which a Win32 TEB points at as an OS/2 TIB
+/// does); for a Windows 3.x task, whose threads take turns, the first
+/// thread's.
 pub fn tid() -> u32 {
+    if kern::one_queue() {
+        return 1;
+    }
     let v: u32;
-    unsafe { core::arch::asm!("mov {0}, dword ptr fs:[0x24]", out(reg) v, options(nostack, readonly)) };
+    unsafe {
+        core::arch::asm!("mov {0}, dword ptr fs:[0x0c]", "mov {0}, dword ptr [{0}]", out(reg) v, options(nostack, readonly));
+    }
     v
 }
 
@@ -197,24 +196,12 @@ pub fn wide_str(p: u32) -> Option<Vec<u8>> {
 
 /// UTF-16 to the process code page.
 pub fn narrow(w: &[u16]) -> Vec<u8> {
-    if w.is_empty() {
-        return Vec::new();
-    }
-    let mut v = alloc::vec![0u8; w.len() * 2 + 1];
-    let n = unsafe { WideCharToMultiByte(0, 0, w.as_ptr(), w.len() as i32, v.as_mut_ptr(), v.len() as i32, core::ptr::null(), core::ptr::null_mut()) };
-    v.truncate(n.max(0) as usize);
-    v
+    w.iter().map(|&c| kern::wide_to_byte(c)).collect()
 }
 
 /// The process code page to UTF-16.
 pub fn to_wide(b: &[u8]) -> Vec<u16> {
-    if b.is_empty() {
-        return Vec::new();
-    }
-    let mut v = alloc::vec![0u16; b.len() + 1];
-    let n = unsafe { MultiByteToWideChar(0, 0, b.as_ptr(), b.len() as i32, v.as_mut_ptr(), v.len() as i32) };
-    v.truncate(n.max(0) as usize);
-    v
+    b.iter().map(|&c| kern::byte_to_wide(c)).collect()
 }
 
 /// A NUL-terminated copy.
@@ -398,6 +385,6 @@ unsafe extern "C" {
 
 /// Set the thread's last error, giving a value back.
 pub fn fail<T>(e: u32, v: T) -> T {
-    unsafe { SetLastError(e) };
+    kern::set_last_error(e);
     v
 }

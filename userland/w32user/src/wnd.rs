@@ -449,6 +449,56 @@ pub fn native_depth() -> u32 {
     u().native_depth
 }
 
+// ---- 16-bit procedures ----
+
+/// The 16-bit procedures of a Windows 3.x task (WIN16, kern.rs), as
+/// W32USER keeps them: 0xFFFF0000 + their index here, as Wine's winproc
+/// handles (no code is at those addresses). WIN16 converts 16:16
+/// procedure addresses to these and back, and the host calls them.
+static PROCS16: Global<Vec<u32>> = Global::new(Vec::new());
+
+pub fn proc16(far: u32) -> u32 {
+    if far == 0 {
+        return 0;
+    }
+    let v = PROCS16.get();
+    let i = v.iter().position(|&f| f == far).unwrap_or_else(|| {
+        v.push(far);
+        v.len() - 1
+    });
+    0xffff_0000 | i as u32
+}
+
+/// The 16:16 address of a 16-bit procedure's handle.
+pub fn far16(p: u32) -> Option<u32> {
+    if p >> 16 != 0xffff {
+        return None;
+    }
+    PROCS16.get().get((p & 0xffff) as usize).copied()
+}
+
+/// Rs2W32Proc16(far): the handle of a 16-bit procedure (0 for 0).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32Proc16(far: u32) -> u32 {
+    proc16(far)
+}
+
+/// Rs2W32Far16(proc): a 16-bit procedure's 16:16 address, 0 if `proc`
+/// is not one.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32Far16(p: u32) -> u32 {
+    far16(p).unwrap_or(0)
+}
+
+/// Call a procedure of the shape (a, b, c, d): a window, dialog or timer
+/// procedure, the program's (stdcall) or a 16-bit one through the host.
+pub fn call_proc4(p: u32, a: u32, b: u32, c: u32, d: u32) -> u32 {
+    if let Some(f) = far16(p) {
+        return crate::kern::host().map_or(0, |hst| unsafe { (hst.call16)(0, f, a, b, c, d) });
+    }
+    call4(p, a, b, c, d)
+}
+
 /// Call a window procedure with a message in its own form.
 fn raw_call(p: u32, h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     if p == 0 {
@@ -463,7 +513,7 @@ fn raw_call(p: u32, h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     if crate::tracing() {
         trace(format_args!("W32 msg {h:#x} {m:#x} {wp:#x} {lp:#x}"));
     }
-    call4(p, h as u32, m as u32, wp, lp)
+    call_proc4(p, h as u32, m as u32, wp, lp)
 }
 
 /// Call a procedure that takes the W (`proc_wide`) or A form with a
@@ -552,6 +602,12 @@ pub fn deliver(hwnd: u16, msg: u16, wp: u32, lp: u32, wide: bool) -> u32 {
 
 /// Send a message (A form) to a window: its procedure, now.
 pub fn send(hwnd: u16, msg: u16, wp: u32, lp: u32) -> u32 {
+    if hwnd == 0xffff || wnd(hwnd).is_none() {
+        // All top-level windows, or another task's window (the host).
+        if let Some(r) = crate::kern::send_foreign(hwnd as u32, msg as u32, wp, lp) {
+            return r;
+        }
+    }
     if hwnd == 0xffff {
         for h in top_levels() {
             send(h, msg, wp, lp);
@@ -710,7 +766,7 @@ pub fn find_class(name: &ClassName, hinst: u32) -> Option<usize> {
         ClassName::Name(n) => !c.name.is_empty() && c.name.eq_ignore_ascii_case(n),
         ClassName::Atom(a) => c.atom == *a && *a != 0,
     };
-    let exe = unsafe { crate::GetModuleHandleA(core::ptr::null()) };
+    let exe = crate::kern::exe();
     let hinst = if hinst == 0 { exe } else { hinst };
     s.classes
         .iter()
@@ -2096,11 +2152,18 @@ pub fn get_message(h: u16, lo: u32, hi: u32, peek: Option<u32>) -> Option<Msg> {
     let hab = queue().hab;
     let filter = if h == 0 { 0 } else { wnd(h).map_or(0, |w| w.client) };
     let ranged = lo != 0 || hi != 0;
+    // PeekMessage that finds nothing lets the host's other tasks run,
+    // then looks once more (unless PM_NOYIELD).
+    let mut yielded = crate::kern::host().is_none();
     loop {
+        crate::kern::poll(false);
         let mut q = QMsg::default();
         match peek {
             None if !ranged => {
-                unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
+                if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
+                    crate::kern::poll(true);
+                }
+                crate::kern::wait(|| unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) });
             }
             None => match peek_range(hab, filter, lo, hi.max(lo), true) {
                 Some(m) => q = m,
@@ -2109,18 +2172,31 @@ pub fn get_message(h: u16, lo: u32, hi: u32, peek: Option<u32>) -> Option<Msg> {
                     unsafe { WinPeekMsg(hab, &mut q, 0, 0, 0, PM_NOREMOVE) };
                     let mut w = QMsg::default();
                     if unsafe { WinPeekMsg(hab, &mut w, 0, 0, 0, PM_NOREMOVE) } == 0 {
-                        unsafe { os2::DosSleep(10) };
+                        crate::kern::poll(true);
+                        crate::kern::wait(|| unsafe { os2::DosSleep(10) });
                     }
                     continue;
                 }
             },
             Some(fl) if ranged => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
                 Some(m) => q = m,
-                None => return None,
+                None => {
+                    if fl & 2 != 0 || yielded {
+                        return None;
+                    }
+                    crate::kern::poll(true);
+                    yielded = true;
+                    continue;
+                }
             },
             Some(fl) => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
-                    return None;
+                    if fl & 2 != 0 || yielded {
+                        return None;
+                    }
+                    crate::kern::poll(true);
+                    yielded = true;
+                    continue;
                 }
                 let ours = q.msg == WM_QUIT || win_message(&q).is_some();
                 if !ours || fl & 1 != 0 {
@@ -2133,6 +2209,9 @@ pub fn get_message(h: u16, lo: u32, hi: u32, peek: Option<u32>) -> Option<Msg> {
             return Some(Msg { hwnd: 0, msg: W_QUIT as u32, wp: q.mp1, lp: 0, time: q.time, x: q.x, y: sy - 1 - q.y });
         }
         let Some((mut hwnd, msg, wp, mut lp)) = win_message(&q) else {
+            if crate::kern::foreign(&q) {
+                continue;
+            }
             if q.msg == WM_REALIZEPALETTE && q.hwnd == 0 {
                 palette_changed(q.mp1);
                 continue;
@@ -2171,7 +2250,8 @@ pub fn wait_message() {
     let hab = queue().hab;
     let mut q = QMsg::default();
     while unsafe { WinPeekMsg(hab, &mut q, 0, 0, 0, PM_NOREMOVE) } == 0 {
-        unsafe { os2::DosSleep(10) };
+        crate::kern::poll(true);
+        crate::kern::wait(|| unsafe { os2::DosSleep(10) });
     }
 }
 
@@ -2211,7 +2291,7 @@ pub fn dispatch(m: &Msg, wide: bool) -> u32 {
     // A timer's procedure gets WM_TIMER itself.
     if msg == W_TIMER && m.lp != 0 {
         let t = unsafe { WinGetCurrentTime(queue().hab) };
-        return call4(m.lp, h as u32, W_TIMER as u32, m.wp, t);
+        return call_proc4(m.lp, h as u32, W_TIMER as u32, m.wp, t);
     }
     if wnd(h).is_none() {
         return 0;

@@ -10,16 +10,6 @@ use crate::res::Name;
 use crate::wnd::{self, hw, wnd, ClassName, Msg, NewClass};
 use crate::{far_str, read_rect, rd32, wide_str, wr32, write_point, write_rect};
 
-unsafe extern "stdcall" {
-    #[link_name = "W32KERN.GlobalAlloc"]
-    fn GlobalAlloc(flags: u32, n: u32) -> u32;
-    #[link_name = "W32KERN.GlobalSize"]
-    fn GlobalSize(h: u32) -> u32;
-    #[link_name = "W32KERN.WaitForMultipleObjects"]
-    fn WaitForMultipleObjects(n: u32, hs: *const u32, all: i32, timeout: u32) -> u32;
-    #[link_name = "W32KERN.GetTickCount"]
-    fn GetTickCount() -> u32;
-}
 
 /// A string argument (A or W) in the process code page; None for an ID.
 fn str_arg(p: u32, wide: bool) -> Option<Vec<u8>> {
@@ -912,11 +902,7 @@ pub extern "stdcall" fn FlashWindowEx(p: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "stdcall" fn GetWindowModuleFileNameA(_h: u32, b: u32, n: u32) -> u32 {
-    unsafe extern "stdcall" {
-        #[link_name = "W32KERN.GetModuleFileNameA"]
-        fn GetModuleFileNameA(h: u32, b: u32, n: u32) -> u32;
-    }
-    unsafe { GetModuleFileNameA(0, b, n) }
+    crate::kern::module_file_name(0, b, n)
 }
 
 // ---- Properties ----
@@ -1113,10 +1099,10 @@ pub extern "stdcall" fn WaitMessage() -> i32 {
 /// MsgWaitForMultipleObjects(Ex): until a handle is signalled (the
 /// handle's index) or input comes (WAIT_OBJECT_0 + n), polling both.
 fn msg_wait(n: u32, hs: *const u32, all: bool, timeout: u32) -> u32 {
-    let start = unsafe { GetTickCount() };
+    let start = crate::kern::tick_count();
     loop {
         if n > 0 {
-            let r = unsafe { WaitForMultipleObjects(n, hs, all as i32, 0) };
+            let r = crate::kern::wait_objects(n, hs, all as i32, 0);
             if r != 0x102 {
                 return r;
             }
@@ -1124,7 +1110,7 @@ fn msg_wait(n: u32, hs: *const u32, all: bool, timeout: u32) -> u32 {
         if wnd::input_waiting() {
             return n;
         }
-        if timeout != 0xffff_ffff && unsafe { GetTickCount() }.wrapping_sub(start) >= timeout {
+        if timeout != 0xffff_ffff && crate::kern::tick_count().wrapping_sub(start) >= timeout {
             return 0x102;
         }
         unsafe { os2::DosSleep(10) };
@@ -3091,14 +3077,14 @@ pub extern "stdcall" fn GetClipboardData(f: u32) -> u32 {
     let Some(t) = crate::caret::clip_text() else { return 0 };
     if f == 13 {
         let w = crate::zw(&crate::to_wide(&t));
-        let g = unsafe { GlobalAlloc(0x40, 2 * w.len() as u32) };
+        let g = crate::kern::global_alloc(0x40, 2 * w.len() as u32);
         if g != 0 {
             unsafe { core::ptr::copy_nonoverlapping(w.as_ptr(), g as *mut u16, w.len()) };
         }
         return g;
     }
     let z = crate::z(&t);
-    let g = unsafe { GlobalAlloc(0x40, z.len() as u32) };
+    let g = crate::kern::global_alloc(0x40, z.len() as u32);
     if g != 0 {
         unsafe { core::ptr::copy_nonoverlapping(z.as_ptr(), g as *mut u8, z.len()) };
     }
@@ -3110,7 +3096,7 @@ pub extern "stdcall" fn SetClipboardData(f: u32, g: u32) -> u32 {
     if g == 0 {
         return 0;
     }
-    let n = unsafe { GlobalSize(g) } as usize;
+    let n = crate::kern::global_size(g) as usize;
     let t = match f {
         1 | 7 => {
             let b = unsafe { core::slice::from_raw_parts(g as *const u8, n) };
