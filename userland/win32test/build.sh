@@ -42,7 +42,7 @@ if command -v i686-w64-mingw32-gcc >/dev/null 2>&1; then
     i686-w64-mingw32-g++ -O1 -static -o "$dir/bin/MCPP.EXE" "$dir/mcpp.cpp"
     # GUI32: a GUI program (USER32, GDI32) with resources.
     (cd "$dir" && i686-w64-mingw32-windres gui32.rc -o obj/gui32res.o)
-    i686-w64-mingw32-gcc -O1 -mwindows -o "$dir/bin/GUI32.EXE" "$dir/gui32.c" "$dir/obj/gui32res.o"
+    i686-w64-mingw32-gcc -O1 -mwindows -o "$dir/bin/GUI32.EXE" "$dir/gui32.c" "$dir/obj/gui32res.o" -lcomdlg32
 else
     echo "win32test: MinGW-w64 (i686-w64-mingw32-gcc) not found: no MinGW programs"
 fi

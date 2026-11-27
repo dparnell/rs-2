@@ -620,9 +620,10 @@ pub fn dialog_box(hinst: u32, t: &[u8], owner: u16, proc_: u32, param: u32, unic
             post(0, W_QUIT, m.wp, 0);
             break;
         }
-        if !is_dialog_message(h, &m, unicode) {
+        // (The loop's messages are in the A form, whatever the dialog.)
+        if !is_dialog_message(h, &m, false) {
             translate(&m);
-            dispatch(&m, unicode);
+            dispatch(&m, false);
         }
     }
     let r = dlg(h).map_or(-1, |d| d.result);

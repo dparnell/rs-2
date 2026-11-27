@@ -64,6 +64,7 @@ pub fn register_builtin() {
         (b"SCROLLBAR", 0x8086, __w32t_Rs2ScrollBarProc, crate::scroll::control_proc, dbl, 0, 0),
         (b"#32770", 0x8002, __w32t_DefDlgProcA, crate::dialog::def_dlg_proc, wnd::CS_DBLCLKS | 0x0800, crate::dialog::DLGWINDOWEXTRA, 0),
     ];
+    wnd::add_native(crate::comdlg::proc_addr(), crate::comdlg::dlg_proc);
     for (name, atom, entry, f, style, extra, brush) in classes {
         wnd::add_native(thunk(entry), f);
         let cursor = if name == b"EDIT" { 32513 } else { 32512 };
@@ -1222,7 +1223,7 @@ unsafe extern "C" {
 
 /// RegisterWindowMessage: PM's atom table (0xC000 and up), the same
 /// in every process.
-fn register_message(name: &[u8]) -> u32 {
+pub fn register_message(name: &[u8]) -> u32 {
     if name.is_empty() {
         return 0;
     }

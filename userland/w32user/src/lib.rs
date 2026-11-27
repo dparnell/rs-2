@@ -1,6 +1,7 @@
-//! W32USER.DLL: USER32 and GDI32 of rs2's Win32 layer (docs/WIN32.md).
-//! The kernel's PE loader sends programs' imports of USER32 and GDI32
-//! here: one DLL, because windows, DCs and GDI objects share their state.
+//! W32USER.DLL: USER32, GDI32 and COMDLG32 of rs2's Win32 layer
+//! (docs/WIN32.md). The kernel's PE loader sends programs' imports of
+//! USER32, GDI32, MSIMG32 and COMDLG32 here: one DLL, because windows,
+//! DCs and GDI objects share their state.
 //!
 //! The window manager and GDI are WIN16's (userland/win16) in 32-bit
 //! form: every Windows window is a PM window (a frame for a top-level
@@ -19,6 +20,7 @@
 //! - ctl.rs (BUTTON, STATIC), edit.rs (EDIT), listbox.rs (LISTBOX,
 //!   COMBOBOX), scroll.rs (SCROLLBAR and window scroll bars): the
 //!   built-in controls; dialog.rs: dialogs and the dialog manager;
+//! - comdlg.rs: COMDLG32's common dialogs;
 //! - caret.rs, icon.rs, menu.rs: the caret, icons and cursors, menus;
 //! - res.rs: resources (through W32KERN's FindResource).
 //!
@@ -41,6 +43,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 mod bitmap;
 mod caret;
+mod comdlg;
 mod ctl;
 mod dialog;
 mod draw;

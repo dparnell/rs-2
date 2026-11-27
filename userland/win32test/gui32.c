@@ -7,11 +7,16 @@
  *     i686-w64-mingw32-gcc -O1 -mwindows -o GUI32.EXE gui32.c gui32res.o
  */
 #include <windows.h>
+#include <commdlg.h>
+#include <dlgs.h>
 #include <stdio.h>
 #include <string.h>
 #include "gui32.h"
 
 static int failures, checks;
+static UINT find_msg;
+static int find_seen;
+static char find_what[40];
 static HINSTANCE inst;
 static HWND main_wnd;
 
@@ -104,6 +109,8 @@ static LRESULT CALLBACK main_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         got_ncdestroy++;
         break;
     }
+    if (m == find_msg && find_msg)
+        find_seen++;
     return DefWindowProcA(h, m, wp, lp);
 }
 
@@ -290,6 +297,147 @@ static void dialog_checks(void)
     checkv("DialogBoxParamA's result (EndDialog)", DialogBoxParamA(inst, MAKEINTRESOURCEA(IDD_TEST), main_wnd, modal_dlg, 77) == 42, 0);
     checkv("DialogBoxParamW", DialogBoxParamW(inst, MAKEINTRESOURCEW(IDD_TEST), main_wnd, w_dlg, 0) == 7, 0);
     check("a W dialog procedure's text", w_dlg_text_ok);
+}
+
+/* ---- The common dialogs: hooks press OK ---- */
+
+
+static UINT_PTR CALLBACK file_hook(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        SetDlgItemTextA(h, edt1, "C:\\RS2\\GUI32.EXE");
+        PostMessageA(h, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return 0;
+}
+
+static UINT_PTR CALLBACK file_hook_w(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        SetDlgItemTextW(h, edt1, L"C:\\RS2\\HELLO32.EXE");
+        PostMessageW(h, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return 0;
+}
+
+static UINT_PTR CALLBACK color_hook(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        /* The ninth basic colour (red), then OK. */
+        PostMessageA(h, WM_COMMAND, MAKEWPARAM(800 + 8, BN_CLICKED), 0);
+        PostMessageA(h, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return 0;
+}
+
+static UINT_PTR CALLBACK font_hook(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    (void)wp;
+    (void)lp;
+    if (m == WM_INITDIALOG) {
+        PostMessageA(h, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return 0;
+}
+
+static void comdlg_checks(void)
+{
+    OPENFILENAMEA of;
+    OPENFILENAMEW ofw;
+    CHOOSECOLORA cc;
+    CHOOSEFONTA cf;
+    LOGFONTA lf;
+    FINDREPLACEA fr;
+    PRINTDLGA pd;
+    COLORREF cust[16];
+    char file[260] = "", title[64] = "";
+    WCHAR wfile[260] = L"";
+    char t[64];
+    HWND fd;
+
+    memset(&of, 0, sizeof of);
+    of.lStructSize = sizeof of;
+    of.hwndOwner = main_wnd;
+    of.lpstrFilter = "Programs\0*.exe\0All files\0*.*\0";
+    of.lpstrFile = file;
+    of.nMaxFile = sizeof file;
+    of.lpstrFileTitle = title;
+    of.nMaxFileTitle = sizeof title;
+    of.lpstrInitialDir = "C:\\RS2";
+    of.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLEHOOK;
+    of.lpfnHook = file_hook;
+    check("GetOpenFileNameA", GetOpenFileNameA(&of));
+    check("lpstrFile", lstrcmpiA(file, "c:\\rs2\\gui32.exe") == 0);
+    check("lpstrFileTitle", lstrcmpiA(title, "gui32.exe") == 0);
+    checkv("nFileOffset, nFileExtension", of.nFileOffset == 7 && of.nFileExtension == 13, of.nFileExtension);
+
+    memset(&ofw, 0, sizeof ofw);
+    ofw.lStructSize = sizeof ofw;
+    ofw.hwndOwner = main_wnd;
+    ofw.lpstrFilter = L"All files\0*.*\0";
+    ofw.lpstrFile = wfile;
+    ofw.nMaxFile = 260;
+    ofw.Flags = OFN_FILEMUSTEXIST | OFN_ENABLEHOOK;
+    ofw.lpfnHook = file_hook_w;
+    check("GetOpenFileNameW", GetOpenFileNameW(&ofw));
+    check("GetOpenFileNameW's file", lstrcmpiW(wfile, L"c:\\rs2\\hello32.exe") == 0);
+
+    memset(&cc, 0, sizeof cc);
+    memset(cust, 0xff, sizeof cust);
+    cc.lStructSize = sizeof cc;
+    cc.hwndOwner = main_wnd;
+    cc.lpCustColors = cust;
+    cc.Flags = CC_ENABLEHOOK;
+    cc.lpfnHook = color_hook;
+    check("ChooseColorA", ChooseColorA(&cc));
+    checkv("ChooseColor's colour", cc.rgbResult == RGB(255, 0, 0), (long)cc.rgbResult);
+
+    memset(&cf, 0, sizeof cf);
+    memset(&lf, 0, sizeof lf);
+    lf.lfHeight = -16;
+    lf.lfWeight = FW_BOLD;
+    strcpy(lf.lfFaceName, "Courier New");
+    cf.lStructSize = sizeof cf;
+    cf.hwndOwner = main_wnd;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_ENABLEHOOK;
+    cf.lpfnHook = font_hook;
+    check("ChooseFontA", ChooseFontA(&cf));
+    checkv("ChooseFont's LOGFONT", strcmp(lf.lfFaceName, "Courier New") == 0 && lf.lfWeight == FW_BOLD, lf.lfWeight);
+    checkv("ChooseFont's iPointSize", cf.iPointSize == 120, cf.iPointSize);
+
+    find_msg = RegisterWindowMessageA(FINDMSGSTRINGA);
+    memset(&fr, 0, sizeof fr);
+    strcpy(find_what, "abc");
+    fr.lStructSize = sizeof fr;
+    fr.hwndOwner = main_wnd;
+    fr.lpstrFindWhat = find_what;
+    fr.wFindWhatLen = sizeof find_what;
+    fr.Flags = FR_DOWN;
+    fd = FindTextA(&fr);
+    check("FindTextA", fd != NULL);
+    GetDlgItemTextA(fd, edt1, t, sizeof t);
+    check("FindText shows the text", strcmp(t, "abc") == 0);
+    SetDlgItemTextA(fd, edt1, "needle");
+    SendMessageA(fd, WM_COMMAND, IDOK, 0);
+    check("FINDMSGSTRING to the owner (FR_FINDNEXT)", find_seen == 1 && (fr.Flags & FR_FINDNEXT) && strcmp(find_what, "needle") == 0);
+    SendMessageA(fd, WM_COMMAND, IDCANCEL, 0);
+    check("FR_DIALOGTERM, and the dialog goes", find_seen == 2 && (fr.Flags & FR_DIALOGTERM) && !IsWindow(fd));
+
+    check("GetFileTitleA", GetFileTitleA("c:\\a\\b.txt", t, sizeof t) == 0 && strcmp(t, "b.txt") == 0);
+    memset(&pd, 0, sizeof pd);
+    pd.lStructSize = sizeof pd;
+    check("PrintDlgA without printers", !PrintDlgA(&pd) && CommDlgExtendedError() == PDERR_NODEFAULTPRN);
 }
 
 static void gdi_checks(void)
@@ -582,9 +730,44 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     user_checks();
     gdi_checks();
     dialog_checks();
+    comdlg_checks();
     InvalidateRect(main_wnd, NULL, TRUE);
     pump(1500);
     /* GUI32 WAIT: the window stays until it is closed. */
+    /* GUI32 OPEN, COLOR, FONT: that dialog stays up (for a look). */
+    if (strstr(cmd, "open")) {
+        OPENFILENAMEA o;
+        char f[260] = "";
+        memset(&o, 0, sizeof o);
+        o.lStructSize = sizeof o;
+        o.hwndOwner = main_wnd;
+        o.lpstrFilter = "Programs (*.exe)\0*.exe\0All files (*.*)\0*.*\0";
+        o.lpstrFile = f;
+        o.nMaxFile = sizeof f;
+        o.lpstrInitialDir = "C:\\RS2";
+        GetOpenFileNameA(&o);
+    }
+    if (strstr(cmd, "color")) {
+        CHOOSECOLORA c;
+        COLORREF cu[16];
+        memset(&c, 0, sizeof c);
+        c.lStructSize = sizeof c;
+        c.hwndOwner = main_wnd;
+        c.lpCustColors = cu;
+        c.Flags = CC_FULLOPEN;
+        ChooseColorA(&c);
+    }
+    if (strstr(cmd, "font")) {
+        CHOOSEFONTA c;
+        LOGFONTA l;
+        memset(&c, 0, sizeof c);
+        memset(&l, 0, sizeof l);
+        c.lStructSize = sizeof c;
+        c.hwndOwner = main_wnd;
+        c.lpLogFont = &l;
+        c.Flags = CF_SCREENFONTS | CF_EFFECTS;
+        ChooseFontA(&c);
+    }
     if (strstr(cmd, "wait")) {
         while (GetMessageA(&msg, NULL, 0, 0) > 0) {
             TranslateMessage(&msg);
