@@ -782,6 +782,12 @@ file (docs/WIN32.md).
   W32KERN (FindResource...).
 - done (stage 2): COMDLG32 in W32USER: Open, Save As, Color, Font,
   Find and Replace, A and W. GUI32 passes 129 checks.
+- done (stage 2): one window manager. WIN16's USER, GDI and COMMDLG are
+  a facade over W32USER (16-bit messages and structures converted both
+  ways, NE resources in Win32's forms, W32USER's host interface for the
+  task's side); MDI, hooks, printing and PrintDlg moved to W32USER for
+  both. WIN16 shrank from 30,900 lines to 17,800. W16TEST (0 failures),
+  GUI32 (163 checks) and W32TEST pass.
 ## Milestone 5: install media
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

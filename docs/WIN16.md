@@ -18,6 +18,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 | INT 21h from Windows programs (and DOS3Call): files, version, exit | works (the calls the C runtime makes) |
 | Global and local memory, huge blocks (`__AHINCR`) | works |
 | Window classes, top-level and child windows, the message loop | works |
+| USER, GDI and COMMDLG as a facade over W32USER, the window manager Win32 programs use ("One window manager") | works (W16TEST, the test programs, PFE and Open Watcom's samples checked) |
 | WM_PAINT, BeginPaint/EndPaint, TextOut, DrawText, FillRect, lines | works |
 | MessageBox | works (PM's message box for now) |
 | Moving, sizing, closing (Alt+F4, the system menu) from PM | works |
@@ -264,11 +265,70 @@ DLL's state would have to become per task, and the scheduler would be
 WIN16's own. It stays possible as an option for programs that need it
 (like Win-OS/2's common seamless session).
 
+## One window manager
+
+WIN16's USER and GDI are a facade over W32USER (docs/WIN32.md), the
+window manager and GDI of rs2's Win32 programs: one copy of Windows'
+window manager for both kinds of program, as Wine's USER.EXE16 is a
+thunking layer over its USER32. W32USER was WIN16's own window manager,
+GDI, dialogs, controls, menus, MDI, printing and common dialogs, moved
+to 32 bits; WIN16 now loads it and calls its Win32 calls.
+
+- **The host.** At InitApp WIN16 registers itself as W32USER's host
+  (`Rs2W32UserHost`, w32user `kern.rs`): W32USER then calls the host for
+  a 16-bit procedure (a window, dialog, timer, hook, abort or font
+  enumeration procedure), on each pass of the message loop (TOOLHELP's
+  notifications, Yield, the Win16Lock while waiting), for PM messages it
+  does not know (other tasks' W16X messages, PM programs' DDE, the
+  clipboard's), for messages to other tasks' windows, for global memory
+  (the task's 16-bit blocks for PrintDlg's hDevMode and hDevNames) and
+  for the program's resources. A Win16 task has no W32KERN: W32USER finds
+  W32KERN's calls when first used, and does without them here. The task's
+  threads share one queue (a debugger's stop runs as the task).
+- **Procedures.** W32USER keeps a 16-bit procedure as a handle
+  (0xFFFF0000 + n, as Wine's winprocs); GetWindowLong and GetClassInfo
+  give the program its 16:16 address back, and W32USER's built-in
+  procedures (the controls', DefWindowProc, DefDlgProc, MDICLIENT's, the
+  common dialogs') are WIN16's entries 2-11, 2107, 2308 and 2447 to the
+  program, which convert and call them.
+- **Messages** (`msg16.rs`) are converted both ways, as Wine's
+  WINPROC_CallProc16To32A: W32USER keeps the Win32 form, a 16-bit
+  procedure gets the Win16 one. WPARAM is 16 bits, so WM_COMMAND,
+  WM_HSCROLL, WM_MENUSELECT, WM_ACTIVATE, WM_PARENTNOTIFY, WM_MDIACTIVATE...
+  carry their handle or code in LPARAM's other half; WM_CTLCOLORxxx is
+  WM_CTLCOLOR with a type; CREATESTRUCT, MDICREATESTRUCT, WINDOWPOS,
+  MINMAXINFO, NCCALCSIZE_PARAMS and the owner-draw structures are copied
+  to 16-bit memory and back; the controls' messages are numbered from
+  WM_USER in Win16 (EM_SETSEL is WM_USER+1, as is LB_ADDSTRING), so a
+  16-bit one means what the window's built-in class says (W32USER's
+  `Rs2W32Builtin`: its class procedure, so subclassed windows and
+  superclasses count). The common dialogs' structures are the program's
+  own in its hooks (WM_INITDIALOG, FINDMSGSTRING...).
+- **Resources** (`tmpl16.rs`): icons, cursors and bitmaps are the same in
+  both; menus, dialog templates, string tables and accelerator tables are
+  converted to Win32's forms (UTF-16 through W32USER's own table) when
+  W32USER asks for them, so LoadMenu, DialogBox, LoadString, a class's
+  menu and a dialog's icons work on the program's NE resources.
+- **Handles** are W32USER's small numbers, the same kinds WIN16 gave out
+  (windows 0x4004 and up, GDI objects 0x0100, DCs 0x8002, menus 0xA004,
+  icons 0xE000); accelerator tables get 16-bit handles of WIN16's.
+- **What stays WIN16's**: KERNEL, DOS, the clipboard's formats, DDE and
+  DDEML between tasks, TOOLHELP, STRESS, the profile files, VER, LZEXPAND,
+  SHELL, and the system-wide hooks other tasks see.
+
+A Win16 task's PM windows are of class `Win16Wnd` (a Win32 program's
+are `Win32Wnd`): DDE between tasks knows them by it. Some details below
+still say where things were in WIN16 before; the code is W32USER's
+(`userland/w32user/src`): `wnd.rs` (windows and messages), `gdi.rs`,
+`gdi32.rs`, `bitmap.rs`, `region.rs` (GDI), `ctl.rs`, `edit.rs`,
+`listbox.rs`, `scroll.rs`, `dialog.rs`, `menu.rs`, `mdi.rs`, `icon.rs`,
+`caret.rs`, `comdlg.rs` and `print.rs`.
+
 ## Windows and messages
 
-`userland/win16/src/user.rs`.
+W32USER's `wnd.rs` (WIN16's facade: `userland/win16/src/user.rs`).
 
-- **HWNDs.** A Windows HWND is a handle in WIN16's window table. A
+- **HWNDs.** A Windows HWND is a handle in W32USER's window table. A
   top-level window is a PM frame window, with the frame controls from
   the window style (WS_CAPTION: title bar and a window list entry,
   WS_SYSMENU, WS_THICKFRAME: sizing border, WS_MINIMIZEBOX,
@@ -310,7 +370,7 @@ WIN16's own. It stays possible as an option for programs that need it
 
 ## Painting and GDI
 
-`userland/win16/src/gdi.rs`. An HDC is a handle over the HPS of a window,
+W32USER's `gdi.rs` and `gdi32.rs` (WIN16's facade: `userland/win16/src/gdi.rs`). An HDC is a handle over the HPS of a window,
 from BeginPaint (WinBeginPaint) or GetDC (WinGetPS), switched to RGB mode,
 with the client height for the y flip. COLORREFs (0x00BBGGRR) become
 PM's RGB (0x00RRGGBB). BeginPaint sends WM_ERASEBKGND and fills the
@@ -374,8 +434,8 @@ W16TEST's palette checks pass in both (run it with and without
 
 **Built-in controls.** BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX (and its
 list, COMBOLBOX) and SCROLLBAR are WIN16's own window classes, with
-window procedures in Rust (`ctl.rs`, `edit.rs`, `listbox.rs`,
-`scroll.rs`) that draw Windows 3.1-style controls through WIN16's GDI on
+window procedures in Rust (W32USER's `ctl.rs`, `edit.rs`, `listbox.rs`,
+`scroll.rs`) that draw Windows 3.1-style controls through its GDI on
 the control's DC, not PM controls. Windows programs depend on the
 controls' Windows behaviour in detail: their messages (BM_, EM_, LB_,
 CB_, the scroll bar calls) and notifications (WM_COMMAND with the code in
@@ -407,7 +467,7 @@ button).
 
 **Plain windows and the non-client area.** A child window (or a pop-up
 without a caption) with WS_BORDER, WS_DLGFRAME, WS_THICKFRAME or scroll
-bars is a `Win16Frame` PM window that draws the border and holds the
+bars is a `Win32Frame` PM window that draws the border and holds the
 client window and the scroll bars, so GetClientRect, the scroll bars and
 the border are Windows'. A top-level window's scroll bars are WIN16's
 `Win16Sb` windows with PM's frame IDs (FID_VERTSCROLL, FID_HORZSCROLL), so
@@ -519,7 +579,8 @@ Everything a Windows program sees is rs2's own:
 
 ### COMMDLG
 
-`userland/win16/src/commdlg.rs`. COMMDLG's imports go to WIN16 (6000 +
+W32USER's `comdlg.rs` (WIN16's facade, which converts the structures:
+`userland/win16/src/commdlg.rs`). COMMDLG's imports go to WIN16 (6000 +
 the ordinal). Each common dialog is a WIN16 dialog made from a template
 built in Rust (dialog units of the system font, laid out like Windows
 3.1's) whose controls have Windows' IDs from `dlgs.h` (edt1, lst1, cmb1,
@@ -575,7 +636,7 @@ the size needed in the buffer, PDERR_NODEFAULTPRN...).
 
 ### Printing
 
-`userland/win16/src/print.rs`, on docs/PRINTING.md's spooler and
+W32USER's `print.rs`, on docs/PRINTING.md's spooler and
 PostScript driver.
 
 - **The printers are the spooler's queues.** A Windows printer's device
@@ -595,7 +656,7 @@ PostScript driver.
   (the printable page: Letter is 2550 x 3300 pels at 300 dpi); the
   fixed mapping modes (MM_LOENGLISH...) are at 300 dpi; the system
   font, which printers do not have, is Helvetica 10 points (the fixed
-  ones Courier). CreateDC("DISPLAY") is bitmap.rs's memory DC. DeleteDC
+  ones Courier). CreateDC("DISPLAY") is a memory DC (W32USER's bitmap.rs). DeleteDC
   closes the PM DC (a document still open is abandoned).
 - **Jobs**: StartDoc (DOCINFO's name) or Escape(STARTDOC) is
   DEVESC_STARTDOC; EndPage, Escape(NEWFRAME) and NEXTBAND's last band
@@ -706,7 +767,7 @@ of its own, so DDE between two of them crosses processes:
 program): CF_TEXT and CF_OEMTEXT are PM's CF_TEXT; CF_DIB is kept as it
 is and also given to PM programs as a PM bitmap (a Windows DIB is an
 OS/2 2.0 bitmap with a 40-byte header), and a PM bitmap is a 24-bit DIB
-for Windows programs; CF_BITMAP is a GDI bitmap (bitmap.rs), a PM bitmap
+for Windows programs; CF_BITMAP is a GDI bitmap (W32USER's), a PM bitmap
 with its picture for PM; CF_METAFILEPICT keeps the METAFILEPICT and its
 metafile's bits; registered formats (RegisterClipboardFormat) are global
 atoms, the same numbers PM programs get for the names; Windows' other
@@ -837,7 +898,7 @@ Windows; what they needed, in the order they asked for it:
   resolves an import of a DLL still loading from those). A DLL whose
   file was written since it was loaded (Delphi's rebuilt COMPLIB.DCL) is
   loaded anew.
-- **Bitmaps** (`bitmap.rs`): memory DCs are PM memory presentation
+- **Bitmaps** (W32USER's `bitmap.rs`): memory DCs are PM memory presentation
   spaces, HBITMAPs PM bitmaps (1 bit per pixel, or the display's 24 or
   8: "The display's colours" above), BitBlt and
   StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
@@ -855,7 +916,7 @@ Windows; what they needed, in the order they asked for it:
   BitBlt's ROPs with a pattern). PatBlt's ROPs other than PATCOPY with a
   solid brush, BLACKNESS, WHITENESS and DSTINVERT are PM's GpiBitBlt
   with the brush as its pattern (PATINVERT XORs, it does not invert).
-  **Regions** (`region.rs`) are rectangle lists: rectangles, ellipses,
+  **Regions** (W32USER's `region.rs`) are rectangle lists: rectangles, ellipses,
   polygons, round rectangles, CombineRgn's five modes, FillRgn,
   PaintRgn, FrameRgn (what is not in the region moved by the frame's
   width and height), InvertRgn; SelectClipRgn makes a PM clip region
@@ -865,10 +926,10 @@ Windows; what they needed, in the order they asked for it:
   ones at the display's 96 dpi with y up, MM_ISOTROPIC keeping units
   square, MM_ANISOTROPIC) and the window/viewport origins and extents
   transform every coordinate GDI takes (GetPixel's too).
-- **Icons and cursors** (`icon.rs`) from RT_GROUP_ICON/RT_ICON and
+- **Icons and cursors** (W32USER's `icon.rs`) from RT_GROUP_ICON/RT_ICON and
   RT_GROUP_CURSOR/RT_CURSOR, CreateIcon, CreateCursor, ExtractIcon,
   DrawIcon (mask and image), SetCursor (PM pointers made from them).
-- **MDI** (`mdi.rs`): MDI children are PM frame windows inside the
+- **MDI** (W32USER's `mdi.rs`): MDI children are PM frame windows inside the
   MDICLIENT's PM window (PM maximizes a frame inside another window to
   that window and minimizes it to an icon at its bottom). A maximized
   child is Windows': its client area covers the MDI client (its border

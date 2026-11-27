@@ -342,15 +342,18 @@ the program's OS/2 calls, among them W32KERN's on its behalf.
 | Part | State |
 |------|-------|
 | USER32: classes, windows, messages (A and W), painting, timers, properties | done |
-| GDI32: DCs, objects, text, shapes, bitmaps, DIBs, DIB sections, regions, palettes, fonts | done (no paths or world transforms; no printers) |
+| GDI32: DCs, objects, text, shapes, bitmaps, DIBs, DIB sections, regions, palettes, fonts | done (no paths or world transforms) |
 | Menus and accelerators (PE resources, MENUEX, MENUITEMINFO) | done |
 | Dialogs (DLGTEMPLATE, DLGTEMPLATEEX) and BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX, SCROLLBAR | done |
 | The clipboard (text), the caret, icons and cursors from resources | done |
 | MSIMG32 (AlphaBlend, TransparentBlt, GradientFill) | done, on the pels |
-| WIN16 as a facade over the 32-bit core | to do (see below) |
-| COMDLG32: Open, Save As, Color, Font, Find, Replace (A and W), GetFileTitle | done (PrintDlg and PageSetupDlg fail: no printers) |
+| WIN16 as a facade over the 32-bit core | done (docs/WIN16.md, "One window manager") |
+| MDI (MDICLIENT, DefFrameProc, DefMDIChildProc, CreateMDIWindow) | done |
+| Hooks (WH_CALLWNDPROC, WH_GETMESSAGE, WH_KEYBOARD, WH_MSGFILTER) | done |
+| Printing: printer DCs, StartDoc...EndDoc, Escape, PrintDlg | done (PageSetupDlg not yet) |
+| COMDLG32: Open, Save As, Color, Font, Find, Replace, Print, Print Setup (A and W), GetFileTitle | done (PageSetupDlg fails) |
 
-`GUI32.EXE` passes `gui32 done: 0 failure(s) in 129 checks`
+`GUI32.EXE` passes `gui32 done: 0 failure(s) in 163 checks`
 (`cargo xtask run --headless --timeout 120 --init "RS2\GUI32.EXE"`;
 `RS2\GUI32.EXE WAIT` keeps its window and dialog up; `OPEN`, `COLOR` and
 `FONT` leave that common dialog up, for a screenshot).
@@ -361,11 +364,11 @@ USER and GDI turned out to be 16-bit throughout: far pointers in
 messages, 16-bit wParams, Win16 structure layouts in every call. So the
 32-bit form came first instead: W32USER is WIN16's window manager, GDI,
 dialogs and controls ported to 32 bits (as Wine's USER32 is the core
-and its USER.EXE16 a thunking layer over it). WIN16 is unchanged for
-now; making it a facade over W32USER's core (16-bit messages and
-structures translated to the 32-bit ones, as Wine's WINPROC_CallProc16To32
-does) is the step that removes the second copy. Until then a fix to the
-window manager is made in both.
+and its USER.EXE16 a thunking layer over it). Then WIN16 became a facade
+over it (16-bit messages and structures translated to the 32-bit ones,
+as Wine's WINPROC_CallProc16To32 does; docs/WIN16.md, "One window
+manager"): MDI, hooks and printing moved to W32USER first, and WIN16's
+own copies went. A fix to the window manager is made once.
 
 **One DLL.** USER32, GDI32 and MSIMG32 are all W32USER (the loader maps
 the three names, and W32KERN's GetModuleHandle does): windows, DCs and
@@ -422,8 +425,22 @@ dialogs (OFN_EXPLORER) look like the old ones here, and their hooks and
 templates (meant for a child dialog with CDN_ notifications) are not
 used. GUI32 drives each dialog through a hook that posts OK.
 
-**Not yet**: paths, world transforms and metafiles; printing; MDI;
-hooks are accepted but not called; WM_MOUSELEAVE, WM_MOUSEWHEEL; a
+**WIN16's host.** W32USER serves Windows 3.x tasks too: WIN16 registers
+as its host (`kern.rs`), which calls 16-bit procedures (kept as
+0xFFFF0000+n handles), runs the task's side of the message loop, gives
+W32USER the program's NE resources in Win32's forms, and translates PM
+messages only WIN16 knows. Without a host W32USER looks up W32KERN's
+calls when first used, so it needs no W32KERN in a Win16 task.
+
+**MDI** is WIN16's in Win32's message forms (MDI children are PM frames
+inside the client); **hooks** are chains per kind called by the window
+manager (WH_CALLWNDPROC as a message is sent, WH_KEYBOARD and
+WH_GETMESSAGE in GetMessage, WH_MSGFILTER in the dialog loop);
+**printing** is WIN16's on rs2's spooler, with PrintDlg's hDevMode and
+hDevNames in global memory. GUI32 checks all three.
+
+**Not yet**: paths, world transforms and metafiles; PageSetupDlg; the
+other kinds of hook (WH_CBT, WH_MOUSE...); WM_MOUSELEAVE, WM_MOUSEWHEEL; a
 window's region; fonts are WIN16's mapping of faces onto rs2's (no
 TrueType files).
 
