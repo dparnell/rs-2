@@ -232,6 +232,8 @@ pub fn def_dlg_proc_form(h: u16, m: u16, wp: u32, lp: u32, wide: bool) -> u32 {
         set_long(h, DWL_MSGRESULT, 0);
         let uni = dlg(h).is_some_and(|d| d.unicode);
         let r = call_conv(proc_, uni, h, m, wp, lp, wide);
+        // A 16-bit dialog procedure's BOOL is in AX alone.
+        let r = if crate::wnd::far16(proc_).is_some() { r & 0xffff } else { r };
         if r != 0 {
             return match m {
                 W_CTLCOLORMSGBOX..=W_CTLCOLORSTATIC | W_COMPAREITEM | W_VKEYTOITEM | W_CHARTOITEM | W_INITDIALOG | 0x0037 => r,

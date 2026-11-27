@@ -389,7 +389,9 @@ fn call_hook(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     if hook == 0 {
         return 0;
     }
-    call_conv(hook, wide, h, m, wp, lp, false)
+    let r = call_conv(hook, wide, h, m, wp, lp, false);
+    // A 16-bit hook's UINT is in AX alone.
+    if far16(hook).is_some() { r & 0xffff } else { r }
 }
 
 fn end(h: u16, r: i32) {

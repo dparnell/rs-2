@@ -437,7 +437,7 @@ pub fn add_native(addr: u32, f: Native) {
     NATIVES.get().push((addr, f));
 }
 
-fn native(p: u32) -> Option<Native> {
+pub fn native(p: u32) -> Option<Native> {
     NATIVES.get().iter().find(|n| n.0 == p).map(|n| n.1)
 }
 

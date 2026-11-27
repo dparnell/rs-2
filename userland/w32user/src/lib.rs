@@ -59,6 +59,7 @@ mod mdi;
 mod menu;
 mod pm;
 mod print;
+mod private;
 mod region;
 mod res;
 mod scroll;
