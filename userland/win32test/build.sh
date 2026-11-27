@@ -21,6 +21,7 @@ wcl386 -q -bt=nt -bd -l=nt_dll -fe=W32DLL.DLL "$dir/w32dll.c"
 wlib -q -n w32dll.lib +W32DLL.DLL
 mv W32DLL.DLL "$dir/bin/"
 for src in "$dir"/*.c; do
+    [ "$(basename "$src")" = mtest.c ] && continue
     name=$(basename "$src" .c | tr a-z A-Z)
     imp=
     case "$name" in
@@ -30,3 +31,15 @@ for src in "$dir"/*.c; do
     wcl386 -q -bt=nt -l=nt -fe="$name.EXE" "$src" $imp
     mv "$name.EXE" "$dir/bin/"
 done
+
+# The MinGW-w64 programs (i686-w64-mingw32-gcc): their C runtime is
+# W32CRT, as MSVCRT.DLL (MTESTM) and as the UCRT's DLLs (MTEST, MCPP).
+if command -v i686-w64-mingw32-gcc >/dev/null 2>&1; then
+    i686-w64-mingw32-gcc -O1 -static -o "$dir/bin/MTEST.EXE" "$dir/mtest.c"
+    i686-w64-mingw32-gcc -O1 -static -nodefaultlibs -o "$dir/bin/MTESTM.EXE" "$dir/mtest.c" \
+        -lmingw32 -lgcc -lgcc_eh -lmingwex -lmsvcrt-os -lkernel32 -luser32 -ladvapi32 \
+        -lmingw32 -lgcc -lmingwex -lmsvcrt-os -lkernel32
+    i686-w64-mingw32-g++ -O1 -static -o "$dir/bin/MCPP.EXE" "$dir/mcpp.cpp"
+else
+    echo "win32test: MinGW-w64 (i686-w64-mingw32-gcc) not found: no MinGW programs"
+fi

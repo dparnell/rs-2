@@ -904,6 +904,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("w32ntdll", "OS2\\DLL\\W32NTDLL.DLL"),
         ("w32kern", "OS2\\DLL\\W32KERN.DLL"),
         ("w32user", "OS2\\DLL\\W32USER.DLL"),
+        ("w32crt", "OS2\\DLL\\W32CRT.DLL"),
         ("pmbidi", "OS2\\DLL\\PMBIDI.DLL"),
         ("pmddeml", "OS2\\DLL\\PMDDEML.DLL"),
         ("pmviop", "OS2\\DLL\\PMVIOP.DLL"),

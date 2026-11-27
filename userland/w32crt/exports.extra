@@ -1,0 +1,119 @@
+; Variables (data exports).
+_iob
+__argc
+__argv
+__wargv
+_environ
+_wenviron
+__initenv
+__winitenv
+_acmdln
+_wcmdln
+_pgmptr
+_wpgmptr
+_fmode
+_commode
+__lc_codepage
+__lc_collate_cp
+__mb_cur_max
+_osver
+_winver
+_winmajor
+_winminor
+_osplatform
+__app_type
+_pctype
+_pwctype
+_timezone
+_daylight
+_dstbias
+_tzname
+; In assembly (src/misc.rs).
+_setjmp3
+_setjmp
+setjmp
+longjmp
+; The os2 crate's.
+memcpy
+memmove
+memset
+memcmp
+strlen
+; Variable arguments: the fixed ones and a va_list to the v-form.
+printf=va vprintf 1
+fprintf=va vfprintf 2
+sprintf=va vsprintf 2
+_snprintf=va _vsnprintf 3
+snprintf=va vsnprintf 3
+_scprintf=va _vscprintf 1
+wprintf=va vwprintf 1
+fwprintf=va vfwprintf 2
+swprintf=va vswprintf 2
+_swprintf=va vswprintf 2
+_snwprintf=va _vsnwprintf 3
+_scwprintf=va _vscwprintf 1
+_swprintf_c=va _vswprintf_c 3
+sscanf=va vsscanf 2
+fscanf=va vfscanf 2
+scanf=va vscanf 1
+swscanf=va vswscanf 2
+fwscanf=va vfwscanf 2
+_spawnl=va _spawnv 2
+_spawnlp=va _spawnvp 2
+_execl=va _execv 1
+_execlp=va _execvp 1
+; Made by macros (start.rs getter!, string.rs isfn!/iswfn!, fs.rs stat_fns!).
+__p___argc cdecl 0
+__p___argv cdecl 0
+__p___wargv cdecl 0
+__p__environ cdecl 0
+__p__wenviron cdecl 0
+__p___initenv cdecl 0
+__p___winitenv cdecl 0
+__p__acmdln cdecl 0
+__p__wcmdln cdecl 0
+__p__pgmptr cdecl 0
+__p__wpgmptr cdecl 0
+__p__fmode cdecl 0
+__p__commode cdecl 0
+__p___mb_cur_max cdecl 0
+isalpha cdecl 4
+isupper cdecl 4
+islower cdecl 4
+isdigit cdecl 4
+isxdigit cdecl 4
+isspace cdecl 4
+ispunct cdecl 4
+isalnum cdecl 4
+isprint cdecl 4
+isgraph cdecl 4
+iscntrl cdecl 4
+iswalpha cdecl 4
+iswupper cdecl 4
+iswlower cdecl 4
+iswdigit cdecl 4
+iswxdigit cdecl 4
+iswspace cdecl 4
+iswpunct cdecl 4
+iswalnum cdecl 4
+iswprint cdecl 4
+iswgraph cdecl 4
+iswcntrl cdecl 4
+_stat cdecl 8
+_wstat cdecl 8
+_fstat cdecl 8
+_stat32 cdecl 8
+_wstat32 cdecl 8
+_fstat32 cdecl 8
+_stat64i32 cdecl 8
+_wstat64i32 cdecl 8
+_fstat64i32 cdecl 8
+_stati64 cdecl 8
+_wstati64 cdecl 8
+_fstati64 cdecl 8
+_stat32i64 cdecl 8
+_wstat32i64 cdecl 8
+_fstat32i64 cdecl 8
+_stat64 cdecl 8
+_wstat64 cdecl 8
+_fstat64 cdecl 8

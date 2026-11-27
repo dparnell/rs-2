@@ -1,0 +1,14 @@
+[package]
+name = "w32crt-dll"
+description = "W32CRT.DLL: the C runtime of rs2's Win32 layer, as MSVCRT.DLL and the UCRT's DLLs (docs/WIN32.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autolib = false
+
+[[bin]]
+name = "w32crt"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

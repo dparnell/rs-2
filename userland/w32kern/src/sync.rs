@@ -655,7 +655,16 @@ extern "C" fn rs2_w32_thread_main(param: u32) -> ! {
 
 pub fn current_thread_object() -> Option<Arc<Waitable>> {
     let me = tid();
-    THREADS.with(|ts| ts.iter().find(|t| t.read(|k| matches!(k, Kind::Thread { tid, done: false, .. } if *tid == me))).cloned())
+    THREADS.with(|ts| {
+        if let Some(t) = ts.iter().find(|t| t.read(|k| matches!(k, Kind::Thread { tid, done: false, .. } if *tid == me))) {
+            return Some(t.clone());
+        }
+        // A thread CreateThread did not make (thread 1, OS/2 code's): its
+        // object from now on.
+        let o = Waitable::new(Kind::Thread { tid: me, done: false, code: STILL_ACTIVE });
+        ts.push(o.clone());
+        Some(o)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -790,4 +799,10 @@ pub extern "stdcall" fn SetThreadPriority(_h: u32, _p: i32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "stdcall" fn DisableThreadLibraryCalls(_h: u32) -> i32 {
     TRUE
+}
+
+/// SetThreadDescription(h, name): accepted (S_OK).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn SetThreadDescription(_h: u32, _name: *const u16) -> u32 {
+    0
 }

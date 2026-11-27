@@ -927,12 +927,26 @@ pub const WIN32_MODULES: &[(&str, &str)] = &[
     ("KERNEL32", "W32KERN"),
     ("NTDLL", "W32NTDLL"),
     ("USER32", "W32USER"),
+    // The C runtimes: Windows' own MSVCRT.DLL, Visual C++'s and the UCRT.
+    ("MSVCRT", "W32CRT"),
+    ("MSVCR70", "W32CRT"),
+    ("MSVCR71", "W32CRT"),
+    ("MSVCR80", "W32CRT"),
+    ("MSVCR90", "W32CRT"),
+    ("MSVCR100", "W32CRT"),
+    ("MSVCR110", "W32CRT"),
+    ("MSVCR120", "W32CRT"),
+    ("UCRTBASE", "W32CRT"),
 ];
 
 /// The module an import of `name` by a Win32 module loads: an rs2 Win32
-/// DLL for the system DLLs, else the module name.
+/// DLL for the system DLLs (the UCRT's API sets, `api-ms-win-crt-*`, are
+/// W32CRT), else the module name.
 pub fn win32_import(name: &str) -> String {
     let m = module_name(name);
+    if m.starts_with("API-MS-WIN-CRT-") {
+        return String::from("W32CRT");
+    }
     match WIN32_MODULES.iter().find(|(n, _)| *n == m) {
         Some(&(_, rs2)) => String::from(rs2),
         None => m,

@@ -553,10 +553,15 @@ fn base_name(p: &[u8]) -> Vec<u8> {
 /// The rs2 DLL a Windows system DLL is (as the kernel's PE loader maps
 /// imports).
 fn win32_module(name: &[u8]) -> Option<&'static [u8]> {
-    match &base_name(name)[..] {
+    let b = base_name(name);
+    if b.starts_with(b"API-MS-WIN-CRT-") {
+        return Some(b"W32CRT");
+    }
+    match &b[..] {
         b"KERNEL32" => Some(b"W32KERN"),
         b"NTDLL" => Some(b"W32NTDLL"),
         b"USER32" => Some(b"W32USER"),
+        b"MSVCRT" | b"MSVCR70" | b"MSVCR71" | b"MSVCR80" | b"MSVCR90" | b"MSVCR100" | b"MSVCR110" | b"MSVCR120" | b"UCRTBASE" => Some(b"W32CRT"),
         _ => None,
     }
 }

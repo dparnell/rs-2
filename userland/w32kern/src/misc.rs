@@ -307,3 +307,32 @@ pub unsafe extern "stdcall" fn GetProcessTimes(_h: u32, created: *mut u32, exite
 pub unsafe extern "stdcall" fn GetThreadTimes(h: u32, c: *mut u32, e: *mut u32, k: *mut u32, u: *mut u32) -> i32 {
     unsafe { GetProcessTimes(h, c, e, k, u) }
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "stdcall" fn GetProcessAffinityMask(_h: u32, process: *mut u32, system: *mut u32) -> i32 {
+    let mut cpus = 1u32;
+    unsafe { os2::DosQuerySysInfo(26, 26, &mut cpus, 4) };
+    let m = if cpus >= 32 { u32::MAX } else { (1 << cpus.max(1)) - 1 };
+    unsafe {
+        *process = m;
+        *system = m;
+    }
+    TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn SetProcessAffinityMask(_h: u32, _m: u32) -> i32 {
+    TRUE
+}
+
+/// Another thread's registers: not available (rs2 has no call for it
+/// yet).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn GetThreadContext(_h: u32, _ctx: u32) -> i32 {
+    fail(err::CALL_NOT_IMPLEMENTED, FALSE)
+}
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn SetThreadContext(_h: u32, _ctx: u32) -> i32 {
+    fail(err::CALL_NOT_IMPLEMENTED, FALSE)
+}

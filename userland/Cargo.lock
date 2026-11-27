@@ -1020,6 +1020,13 @@ name = "vt100"
 version = "0.1.0"
 
 [[package]]
+name = "w32crt-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "w32kern-dll"
 version = "0.1.0"
 dependencies = [

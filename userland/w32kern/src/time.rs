@@ -263,3 +263,20 @@ pub unsafe extern "stdcall" fn QueryPerformanceFrequency(f: *mut u64) -> i32 {
     }
     TRUE
 }
+
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn GetTickCount64() -> u64 {
+    // Milliseconds since boot from the performance counter, which does
+    // not wrap after 49 days.
+    let (mut t, mut hz) = (0u64, 0u32);
+    unsafe {
+        os2::DosTmrQueryTime(&mut t);
+        os2::DosTmrQueryFreq(&mut hz);
+    }
+    if hz == 0 { GetTickCount() as u64 } else { t / (hz as u64 / 1000).max(1) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "stdcall" fn GetSystemTimePreciseAsFileTime(ft: *mut u32) {
+    unsafe { put_ft(ft, now_ft()) };
+}

@@ -579,6 +579,15 @@ extern "C" fn rs2_w32_start(entry: u32, base: u32, _peb: u32) -> ! {
         Rs2W32ProcessDetach();
         unsafe { os2::DosExit(1, 0xC000_0142) };
     }
+    // The program's own TLS callbacks, after its DLLs' entry points (as
+    // Windows calls them).
+    let exe = {
+        let _g = MODS.lock();
+        modules().iter().find(|m| m.base == base).copied()
+    };
+    if let Some(m) = exe {
+        tls_callbacks(&m, DLL_PROCESS_ATTACH);
+    }
     let peb = unsafe { teb_u32(teb::PEB) };
     let code = call(entry, peb, 0, 0, 0);
     Rs2W32ProcessDetach();
