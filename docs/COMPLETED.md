@@ -779,7 +779,9 @@ file (docs/WIN32.md).
   manager and GDI in 32-bit form: windows, A/W messages, painting,
   menus and accelerators from PE resources, DIBs and DIB sections,
   dialogs (DLGTEMPLATE(EX)) and the standard controls; PE resources in
-  W32KERN (FindResource...). GUI32 passes 112 checks.
+  W32KERN (FindResource...).
+- done (stage 2): COMDLG32 in W32USER: Open, Save As, Color, Font,
+  Find and Replace, A and W. GUI32 passes 129 checks.
 ## Milestone 5: install media
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

@@ -348,11 +348,12 @@ the program's OS/2 calls, among them W32KERN's on its behalf.
 | The clipboard (text), the caret, icons and cursors from resources | done |
 | MSIMG32 (AlphaBlend, TransparentBlt, GradientFill) | done, on the pels |
 | WIN16 as a facade over the 32-bit core | to do (see below) |
-| COMDLG32 | to do |
+| COMDLG32: Open, Save As, Color, Font, Find, Replace (A and W), GetFileTitle | done (PrintDlg and PageSetupDlg fail: no printers) |
 
-`GUI32.EXE` passes `gui32 done: 0 failure(s) in 112 checks`
+`GUI32.EXE` passes `gui32 done: 0 failure(s) in 129 checks`
 (`cargo xtask run --headless --timeout 120 --init "RS2\GUI32.EXE"`;
-`RS2\GUI32.EXE WAIT` keeps its window and dialog up).
+`RS2\GUI32.EXE WAIT` keeps its window and dialog up; `OPEN`, `COLOR` and
+`FONT` leave that common dialog up, for a screenshot).
 
 **The order changed.** The plan below moves WIN16's 16-bit-independent
 code into crates first, and builds the Win32 DLLs on them. WIN16's
@@ -410,6 +411,16 @@ to a frame's client, so DestroyWindow sends WM_DESTROY itself (before
 the children hear theirs) and WM_NCDESTROY after; W32USER's imports of
 W32KERN must be declared `extern "stdcall"` (W32KERN's exports pop their
 arguments).
+
+**COMDLG32** is W32USER too (comdlg.rs): WIN16's common dialogs with
+Win32's structures (OPENFILENAME, CHOOSECOLOR, CHOOSEFONT, FINDREPLACE),
+their strings A or W as the call was, and the dialogs' templates built
+as 32-bit DLGTEMPLATEs in MS Sans Serif 8 with dlgs.h's control IDs, so
+a program's own template (the *_ENABLETEMPLATE flags) works with them.
+Hooks get every message first, in their call's form. Explorer-style
+dialogs (OFN_EXPLORER) look like the old ones here, and their hooks and
+templates (meant for a child dialog with CDN_ notifications) are not
+used. GUI32 drives each dialog through a hook that posts OK.
 
 **Not yet**: paths, world transforms and metafiles; printing; MDI;
 hooks are accepted but not called; WM_MOUSELEAVE, WM_MOUSEWHEEL; a
