@@ -365,7 +365,7 @@ pub fn to32(h: u16, m: u16, wp: u16, lp: u32, k: u32, f: &mut dyn FnMut(u32, u32
 /// Is `h` one of COMDLG32's dialogs (its dialog procedure W32USER's)?
 fn is_commdlg(h: u16) -> bool {
     let p = unsafe { GetWindowLongA(h as u32, 4) };
-    p != 0 && p == Rs2CommDlgProc as usize as u32
+    p != 0 && p == Rs2CommDlgProc as *const () as usize as u32
 }
 
 fn flat_or_id(v: u32) -> u32 {
@@ -741,7 +741,7 @@ pub fn msg32to16(p: *const u8, q: *mut u8) {
 
 /// A posted 32-bit message in its 16-bit form (pointers that came from
 /// 16-bit code become 16:16 again).
-pub fn posted32to16(h: u16, m: u32, wp: u32, lp: u32) -> (u16, u16, u32) {
+pub fn posted32to16(_h: u16, m: u32, wp: u32, lp: u32) -> (u16, u16, u32) {
     let lo = |v: u32| v & 0xffff;
     let hi = |v: u32| v >> 16;
     if let Some(m16) = ctl32to16(m) {

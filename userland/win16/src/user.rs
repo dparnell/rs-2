@@ -20,15 +20,9 @@ use crate::pm::QMsg;
 use crate::w32::*;
 use crate::{far_str, read_rect, trace, write_rect, Global};
 
-pub const W_CREATE: u16 = 0x0001;
-pub const W_DESTROY: u16 = 0x0002;
 pub const W_SETTEXT: u16 = 0x000c;
 pub const W_GETTEXT: u16 = 0x000d;
-pub const W_CLOSE: u16 = 0x0010;
 pub const W_QUIT: u16 = 0x0012;
-pub const W_COMMAND: u16 = 0x0111;
-pub const W_TIMER: u16 = 0x0113;
-pub const W_USER: u16 = 0x0400;
 pub const WS_POPUP: u32 = 0x8000_0000;
 pub const WS_CHILD: u32 = 0x4000_0000;
 
@@ -334,9 +328,6 @@ pub fn top_levels() -> Vec<u16> {
     windows(true)
 }
 
-pub fn all() -> Vec<u16> {
-    windows(false)
-}
 
 /// The top-level window a window is in.
 pub fn top_level(h: u16) -> u16 {
@@ -444,13 +435,6 @@ pub fn destroy_window(h: u16) -> bool {
     unsafe { DestroyWindow(h as u32) != 0 }
 }
 
-pub fn window_text(h: u16) -> Vec<u8> {
-    let n = unsafe { GetWindowTextLengthA(h as u32) } as usize;
-    let mut b = alloc::vec![0u8; n + 1];
-    let k = unsafe { GetWindowTextA(h as u32, b.as_mut_ptr() as u32, b.len() as u32) } as usize;
-    b.truncate(k);
-    b
-}
 
 // ---- Messages ----
 
@@ -547,22 +531,7 @@ pub fn dispatch(p: *mut u8) -> u32 {
     unsafe { DispatchMessageA(m.as_ptr() as u32) }
 }
 
-/// WM_COMMAND notification from a control to its parent.
-pub fn notify(ctl: u16, code: u16) {
-    let parent = unsafe { GetParent(ctl as u32) } as u16;
-    let id = unsafe { GetDlgCtrlID(ctl as u32) } as u16;
-    send(parent, W_COMMAND, id, (code as u32) << 16 | ctl as u32);
-}
 
-/// RegisterWindowMessage: PM's atom table (as W32USER's), the same in
-/// every task (and PM program).
-pub fn register_message(name: &[u8]) -> u16 {
-    if name.is_empty() {
-        return 0;
-    }
-    let n = z(name);
-    unsafe { RegisterWindowMessageA(n.as_ptr() as u32) as u16 }
-}
 
 pub fn z(s: &[u8]) -> Vec<u8> {
     let mut v = s.to_vec();

@@ -17,34 +17,6 @@ use crate::user::{hinst32, str32};
 use crate::w32::*;
 use crate::Global;
 
-/// Arguments for calling one of WIN16's entries from Rust.
-pub enum A {
-    W(u16),
-    L(u32),
-}
-
-/// A `Pascal` reader over arguments laid out as a 16-bit caller pushes
-/// them (the first at the highest address).
-pub fn args(a: &[A]) -> Pascal {
-    static BUF: Global<[u8; 64]> = Global::new([0; 64]);
-    let b = BUF.get();
-    let size: usize = a.iter().map(|x| if matches!(x, A::W(_)) { 2 } else { 4 }).sum();
-    let mut off = size;
-    for x in a {
-        match x {
-            A::W(v) => {
-                off -= 2;
-                b[off..off + 2].copy_from_slice(&v.to_le_bytes());
-            }
-            A::L(v) => {
-                off -= 4;
-                b[off..off + 4].copy_from_slice(&v.to_le_bytes());
-            }
-        }
-    }
-    Pascal::new(b.as_ptr(), size)
-}
-
 fn rd16(p: *const u8, o: usize) -> u16 {
     unsafe { (p.add(o) as *const u16).read_unaligned() }
 }

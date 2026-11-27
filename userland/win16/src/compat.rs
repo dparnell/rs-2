@@ -27,13 +27,6 @@ pub struct Hook {
 pub static HOOKS: Global<Vec<Hook>> = Global::new(Vec::new());
 static NEXT_HOOK: Global<u32> = Global::new(0x4b48_0001);
 
-/// Call the newest hook of a type (it passes the call on with
-/// CallNextHookEx or DefHookProc).
-pub fn call_hooks(kind: i16, code: i16, wp: u16, lp: u32) -> u32 {
-    let Some(p) = HOOKS.get().iter().rev().find(|h| h.kind == kind).map(|h| h.proc_) else { return 0 };
-    PascalCall::new().w(code as u16).w(wp).l(lp).call(p)
-}
-
 /// The hook after `h` (older) in its chain.
 fn next_hook(h: u32) -> Option<u32> {
     let hs = HOOKS.get();
@@ -42,9 +35,6 @@ fn next_hook(h: u32) -> Option<u32> {
     hs[..i].iter().rev().find(|x| x.kind == kind).map(|x| x.proc_)
 }
 
-pub fn has_hooks(kind: i16) -> bool {
-    HOOKS.get().iter().any(|h| h.kind == kind)
-}
 
 /// WinExec(cmdline, show), ShellExecute's programs: start the program
 /// (a Windows or OS/2 program, as a process of its own). Windows finds a

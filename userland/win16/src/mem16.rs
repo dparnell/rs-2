@@ -9,17 +9,6 @@ use crate::Global;
 static SCRATCH: Global<(usize, usize)> = Global::new((0, 0));
 const SIZE: usize = 0x10000;
 
-/// A NUL-terminated string on the 16-bit stack (below `thunk16::sp16()`,
-/// which the caller saves and puts back).
-pub fn push_str(s: &[u8]) -> u32 {
-    let far = thunk16::alloc16(s.len() + 1);
-    let p = thunk16::flat(far);
-    unsafe {
-        core::ptr::copy_nonoverlapping(s.as_ptr(), p, s.len());
-        *p.add(s.len()) = 0;
-    }
-    far
-}
 
 /// Run `f` with `n` bytes of 16-bit addressable memory (zeroed): its
 /// 16:16 address and flat pointer.
@@ -91,15 +80,6 @@ impl Scratch {
     /// A NUL-terminated copy of a string: its 16:16 address.
     pub fn str(&self, t: &[u8]) -> u32 {
         let (far, p) = self.get(t.len() + 1);
-        if !p.is_null() {
-            unsafe { core::ptr::copy_nonoverlapping(t.as_ptr(), p, t.len()) };
-        }
-        far
-    }
-
-    /// A copy of bytes: its 16:16 address.
-    pub fn bytes(&self, t: &[u8]) -> u32 {
-        let (far, p) = self.get(t.len());
         if !p.is_null() {
             unsafe { core::ptr::copy_nonoverlapping(t.as_ptr(), p, t.len()) };
         }

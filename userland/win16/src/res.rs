@@ -13,10 +13,7 @@ use thunk16::Pascal;
 
 use crate::{far_str, Global};
 
-pub const RT_MENU: u16 = 4;
-pub const RT_DIALOG: u16 = 5;
 pub const RT_STRING: u16 = 6;
-pub const RT_ACCELERATOR: u16 = 9;
 
 /// A resource or type name: a number or a string (upper case).
 #[derive(Clone, PartialEq, Eq)]
