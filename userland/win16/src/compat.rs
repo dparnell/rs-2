@@ -1,19 +1,24 @@
 //! Calls real programs make that do not belong to a bigger part of
-//! WIN16: hmemcpy, window placement, hooks, font enumeration, and small
-//! GDI and USER queries.
+//! WIN16: hmemcpy, programs started, hooks (W32USER calls them; the
+//! system-wide ones reach other tasks here), and small KERNEL and SHELL
+//! queries.
 
 use alloc::vec::Vec;
 use thunk16::{Pascal, PascalCall};
 
-use crate::{gdi, Global};
+use crate::Global;
 
-/// Installed hooks: (handle, type, procedure). WH_GETMESSAGE,
-/// WH_KEYBOARD, WH_CALLWNDPROC and WH_MSGFILTER hooks are called (user.rs);
-/// the others are kept.
+/// Installed hooks: (handle, type, procedure). Each is W32USER's too
+/// (`w32`), which calls it for the task's own messages (WH_GETMESSAGE,
+/// WH_KEYBOARD, WH_CALLWNDPROC, WH_MSGFILTER); the chain is passed on
+/// here (CallNextHookEx), and system-wide hooks see other tasks'
+/// messages through `remote`.
 pub struct Hook {
     pub h: u32,
     pub kind: i16,
     pub proc_: u32,
+    /// W32USER's hook.
+    pub w32: u32,
     /// System-wide (SetWindowsHookEx with no task): other tasks' messages
     /// come here too (`forward`).
     pub global: bool,
@@ -39,123 +44,6 @@ fn next_hook(h: u32) -> Option<u32> {
 
 pub fn has_hooks(kind: i16) -> bool {
     HOOKS.get().iter().any(|h| h.kind == kind)
-}
-
-/// One font EnumFonts and EnumFontFamilies report: a face at a height
-/// (raster faces: each of their sizes) or in a style (TrueType faces:
-/// regular, bold, italic, bold italic), with its real metrics.
-struct Enumerated {
-    wface: u8,
-    height: i32,
-    weight: u16,
-    italic: bool,
-}
-
-/// The fonts to enumerate: one per face (no face given), or each size or
-/// style of the face asked for (none for a face rs2 does not have).
-fn fonts_to_enumerate(face: Option<&[u8]>) -> Vec<Enumerated> {
-    let mut v = Vec::new();
-    match face.filter(|f| !f.is_empty()) {
-        None => {
-            for (i, f) in gdi::FACES.iter().enumerate() {
-                let height = if f.tt { -16 } else { f.sizes[0] };
-                v.push(Enumerated { wface: i as u8, height, weight: if i == 0 { 700 } else { 400 }, italic: false });
-            }
-        }
-        Some(name) => {
-            // Only the faces' own names (not aliases) are enumerated.
-            let Some(i) = gdi::FACES.iter().position(|f| f.name.eq_ignore_ascii_case(name)) else { return v };
-            let f = &gdi::FACES[i];
-            if f.tt {
-                for (weight, italic) in [(400, false), (700, false), (400, true), (700, true)] {
-                    v.push(Enumerated { wface: i as u8, height: -16, weight, italic });
-                }
-            } else {
-                for &h in f.sizes {
-                    v.push(Enumerated { wface: i as u8, height: h, weight: if i == 0 { 700 } else { 400 }, italic: false });
-                }
-            }
-        }
-    }
-    v
-}
-
-/// EnumFonts(hdc, face, proc, data), EnumFontFamilies: the callback gets
-/// a LOGFONT (ENUMLOGFONT), a TEXTMETRIC (NEWTEXTMETRIC), the font type
-/// and the data, for each font (`fonts_to_enumerate`), until it returns
-/// 0; the last callback's result.
-fn enum_fonts(face: u32, p: u32, data: u32) -> u32 {
-    let list = fonts_to_enumerate(crate::far_str(face));
-    if list.is_empty() {
-        return 1;
-    }
-    // The metrics come from a memory DC with the font selected.
-    let mem = crate::bitmap::create_memory_dc();
-    let mut r = 1;
-    for e in list {
-        let wf = &gdi::FACES[e.wface as usize];
-        let font = gdi::new_obj(gdi::Obj::Font(gdi::face_font(e.wface, e.height, e.weight, e.italic)));
-        let old = gdi::select_font(mem, font);
-        let tm = gdi::text_metrics(mem);
-        gdi::select_font(mem, old);
-        gdi::delete_object(font);
-        let w = |o: usize| i16::from_le_bytes([tm[o], tm[o + 1]]);
-        let (height, internal, ave) = (w(0), w(6), w(10));
-        // ENUMLOGFONT: LOGFONT (50) + full name (64) + style (32);
-        // NEWTEXTMETRIC: TEXTMETRIC (31) + ntmFlags, ntmSizeEM,
-        // ntmCellHeight, ntmAvgWidth (10).
-        r = crate::mem16::with(146 + 44, |far, buf| {
-            if buf.is_null() {
-                return 0;
-            }
-            let lf = buf;
-            let ntm = unsafe { buf.add(146) };
-            let style: &[u8] = match (e.weight >= 700, e.italic) {
-                (false, false) => b"Regular",
-                (true, false) => b"Bold",
-                (false, true) => b"Italic",
-                (true, true) => b"Bold Italic",
-            };
-            let mut full = wf.name.to_vec();
-            if wf.tt && style != b"Regular" {
-                full.push(b' ');
-                full.extend_from_slice(style);
-            }
-            unsafe {
-                // LOGFONT: the cell height, the average width, the weight,
-                // italic, the charset, OUT_STROKE_PRECIS (3) for TrueType,
-                // CLIP_STROKE_PRECIS (2), PROOF_QUALITY (2), the pitch and
-                // family, the face.
-                (lf as *mut i16).write_unaligned(height);
-                (lf.add(2) as *mut i16).write_unaligned(ave);
-                (lf.add(8) as *mut i16).write_unaligned(e.weight as i16);
-                *lf.add(10) = e.italic as u8;
-                *lf.add(13) = wf.charset;
-                *lf.add(14) = if wf.tt { 3 } else { 1 };
-                *lf.add(15) = 2;
-                *lf.add(16) = if wf.tt { 2 } else { 1 };
-                *lf.add(17) = wf.family;
-                core::ptr::copy_nonoverlapping(wf.name.as_ptr(), lf.add(18), wf.name.len());
-                core::ptr::copy_nonoverlapping(full.as_ptr(), lf.add(50), full.len().min(63));
-                core::ptr::copy_nonoverlapping(style.as_ptr(), lf.add(114), style.len());
-                core::ptr::copy_nonoverlapping(tm.as_ptr(), ntm, 31);
-                // ntmFlags: NTM_ITALIC 1, NTM_BOLD 0x20, NTM_REGULAR 0x40.
-                let flags: u32 = if e.italic { 1 } else { 0 } | if e.weight >= 700 { 0x20 } else { 0 } | if !e.italic && e.weight < 700 { 0x40 } else { 0 };
-                (ntm.add(31) as *mut u32).write_unaligned(if wf.tt { flags } else { 0 });
-                (ntm.add(35) as *mut u16).write_unaligned(if wf.tt { 2048 } else { 0 });
-                (ntm.add(37) as *mut u16).write_unaligned(if wf.tt { (height - internal) as u16 } else { 0 });
-                (ntm.add(39) as *mut u16).write_unaligned(if wf.tt { ave as u16 } else { 0 });
-            }
-            // RASTER_FONTTYPE 1, TRUETYPE_FONTTYPE 4.
-            let ty = if wf.tt { 4 } else { 1 };
-            PascalCall::new().l(far).l(far + 146).w(ty).l(data).call(p) as u16 as u32
-        });
-        if r == 0 {
-            break;
-        }
-    }
-    gdi::release_dc(mem);
-    r
 }
 
 /// WinExec(cmdline, show), ShellExecute's programs: start the program
@@ -450,7 +338,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(1);
             }
             for w in crate::user::top_levels() {
-                if crate::user::wnd(w).is_some() && PascalCall::new().w(w).l(lp).call(p) as u16 == 0 {
+                if crate::user::exists(w) && PascalCall::new().w(w).l(lp).call(p) as u16 == 0 {
                     break;
                 }
             }
@@ -495,29 +383,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             }
             0
         }
-        // GetWindowPlacement(hwnd, lpwndpl), SetWindowPlacement:
-        // length, flags, showCmd, ptMinPosition, ptMaxPosition,
-        // rcNormalPosition.
-        2370 | 2371 => {
-            let (h, p) = (a.w(), a.p());
-            if p.is_null() || crate::user::wnd(h).is_none() {
-                return Some(0);
-            }
-            if ord == 2370 {
-                let r = crate::user::window_rect(h);
-                let cmd = if crate::user::is_iconic(h) { 2 } else if crate::user::is_zoomed(h) { 3 } else { 1 };
-                let v: [i16; 11] = [22, 0, cmd, -1, -1, -1, -1, r[0] as i16, r[1] as i16, r[2] as i16, r[3] as i16];
-                for (i, x) in v.iter().enumerate() {
-                    unsafe { (p.add(2 * i) as *mut i16).write_unaligned(*x) };
-                }
-            } else {
-                let rd = |i: usize| unsafe { (p.add(2 * i) as *const i16).read_unaligned() } as i32;
-                let cmd = rd(2) as u16;
-                crate::user::move_to(h, [rd(7), rd(8), rd(9), rd(10)]);
-                crate::user::show_window(h, cmd);
-            }
-            1
-        }
         // SetWindowsHook(type, proc): the previous hook (none);
         // SetWindowsHookEx(type, proc, hinst, task): a hook handle.
         2121 | 2291 => {
@@ -534,7 +399,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             // A hook on another task (a process of its own) is not called
             // here: its handle is given, nothing is hooked.
             if task == 0 || crate::toolhelp::task_pid(task).is_none_or(|p| p == crate::toolhelp::own_pid()) {
-                HOOKS.get().push(Hook { h, kind, proc_: p, global: ord == 2291 && task == 0 });
+                let w32 = unsafe { crate::w32::SetWindowsHookExA(kind as i32 as u32, crate::msg16::proc16to32(p), 0, 0) };
+                HOOKS.get().push(Hook { h, kind, proc_: p, w32, global: ord == 2291 && task == 0 });
                 publish_hooks();
             }
             if ord == 2291 { h } else { 0 }
@@ -542,13 +408,24 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // UnhookWindowsHook(type, proc), UnhookWindowsHookEx(hhook)
         2234 => {
             let (kind, p) = (a.w() as i16, a.l());
-            HOOKS.get().retain(|x| !(x.kind == kind && x.proc_ == p));
+            HOOKS.get().retain(|x| {
+                let gone = x.kind == kind && x.proc_ == p;
+                if gone {
+                    unsafe { crate::w32::UnhookWindowsHookEx(x.w32) };
+                }
+                !gone
+            });
             publish_hooks();
             1
         }
         2292 => {
             let h = a.l();
-            HOOKS.get().retain(|x| x.h != h);
+            HOOKS.get().retain(|x| {
+                if x.h == h {
+                    unsafe { crate::w32::UnhookWindowsHookEx(x.w32) };
+                }
+                x.h != h
+            });
             publish_hooks();
             1
         }
@@ -610,26 +487,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             a.w();
             90
         }
-        // RectVisible(hdc, lpRect), PtVisible(hdc, x, y)
-        3104 => {
-            let (_h, _r) = (a.w(), a.l());
-            1
-        }
-        3103 => {
-            let (_h, _x, _y) = (a.w(), a.i(), a.i());
-            1
-        }
-        // UnrealizeObject(obj)
-        3150 => {
-            a.w();
-            1
-        }
-        // EnumFonts(hdc, face, proc, data), EnumFontFamilies(hdc, family,
-        // proc, data)
-        3070 | 3330 => {
-            let (_h, face, p, data) = (a.w(), a.l(), a.l(), a.l());
-            enum_fonts(face, p, data)
-        }
         _ => return None,
     })
 }
@@ -683,7 +540,7 @@ fn publish_hooks() {
     let me = crate::dde::pid();
     if kinds != 0 && *WIN.get() == 0 {
         let w = crate::ddeml::messenger_window();
-        *WIN.get() = crate::user::wnd(w).map_or(0, |x| x.client);
+        *WIN.get() = crate::user::pm_client(w);
     }
     let pm = *WIN.get();
     let Some(r) = hook_reg() else { return };
@@ -711,7 +568,7 @@ pub fn forward(kind: i16, hwnd: u16, msg: u16, wp: u16, lp: u32, time: u32) {
         return;
     }
     let me = crate::dde::pid();
-    let pm_win = |h: u16| crate::user::wnd(h).map(|w| w.client).or_else(|| crate::dde::foreign(h)).unwrap_or(0);
+    let pm_win = |h: u16| Some(crate::user::pm_client(h)).filter(|&c| c != 0).or_else(|| crate::dde::foreign(h)).unwrap_or(0);
     let mut b = Vec::with_capacity(16);
     b.extend_from_slice(&pm_win(hwnd).to_le_bytes());
     b.extend_from_slice(&msg.to_le_bytes());

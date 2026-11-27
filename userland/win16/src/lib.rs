@@ -21,43 +21,33 @@ extern crate alloc;
 extern crate os2;
 
 mod atom;
-mod bitmap;
-mod caret;
 mod clip;
 mod commdlg;
 mod compat;
-mod ctl;
 mod dde;
 mod ddeml;
-mod dialog;
 mod dos;
-mod draw;
-mod edit;
 mod gdi;
-mod icon;
 mod kernel;
-mod listbox;
 mod lz;
-mod mdi;
 mod mem16;
-mod menu;
+mod msg16;
 mod misc;
 mod module;
 mod ole;
 mod pm;
-mod print;
 mod progman;
 mod profile;
 mod reg;
-mod region;
 mod res;
-mod scroll;
 mod stress;
 mod stubs;
+mod tmpl16;
 mod toolhelp;
 mod w16lock;
 mod user;
 mod ver;
+mod w32;
 mod winhelp;
 
 use core::cell::UnsafeCell;
@@ -1002,16 +992,11 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
     if (2000..4000).contains(&idx) {
         user::ensure_pm();
     }
-    // Printers' DCs and the printing calls (before bitmap.rs's display
-    // DCs).
-    if let Some(r) = print::call(idx, &mut Pascal::new(args, size)) {
-        return r;
-    }
     if let Some(r) = toolhelp::call(idx, &mut a) {
         return r;
     }
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a))
-        .or_else(|| draw::call(idx, &mut a))
+    if let Some(r) = atom::call(idx, &mut a)
+        .or_else(|| compat::call(idx, &mut a))
         .or_else(|| lz::call(idx, &mut a))
         .or_else(|| ver::call(idx, &mut a))
         .or_else(|| stress::call(idx, &mut a))
@@ -1027,7 +1012,12 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
         }
         2..=12 => {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
-            native(idx, h, m, wp, lp)
+            user::call_native(idx, h, m, wp, lp)
+        }
+        // ExtractIcon(hinst, file, index)
+        6534 => {
+            let (_hi, f, i) = (a.w(), a.l(), a.w());
+            far_str(f).map_or(0, |p| user::extract_icon(p, i) as u32)
         }
         1000..2000 => kernel::call(idx - 1000, &mut a),
         2000..3000 => user::call(idx - 2000, &mut a),
@@ -1037,34 +1027,6 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
         6100..6200 => ddeml::call(idx - 6100, &mut a),
         _ => 0,
     }
-}
-
-/// How many of WIN16's own window procedures are running (the windows
-/// destroyed meanwhile are freed when none is).
-static NATIVE_DEPTH: Global<u32> = Global::new(0);
-
-pub fn native_depth() -> u32 {
-    *NATIVE_DEPTH.get()
-}
-
-/// Call one of WIN16's window procedures: a built-in control's (entry
-/// 2-8), MDICLIENT's (9), the Program Manager stand-in's (10), the
-/// common dialogs' (11), DDEML's (12),
-/// DefWindowProc (2107) or DefDlgProc (2308).
-pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
-    *NATIVE_DEPTH.get() += 1;
-    let r = match idx {
-        2..=8 => ctl::proc_(idx, h, m, wp, lp),
-        9 => mdi::client_proc(h, m, wp, lp),
-        11 => commdlg::dlg_proc(h, m, wp, lp),
-        12 => ddeml::wnd_proc(h, m, wp, lp),
-        10 => progman::wnd_proc(h, m, wp, lp),
-        2107 => user::def_window_proc(h, m, wp, lp),
-        2308 => dialog::def_dlg_proc(h, m, wp, lp),
-        _ => 0,
-    };
-    *NATIVE_DEPTH.get() -= 1;
-    r
 }
 
 // wsprintf is `_cdecl` (its arguments vary).

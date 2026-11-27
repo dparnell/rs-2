@@ -40,6 +40,18 @@ pub struct Host {
     /// GlobalAlloc(flags, n), 1 GlobalLock(h) (a flat pointer), 2
     /// GlobalSize(h), 3 GlobalReAlloc(h, n, flags), 4 GlobalUnlock(h).
     pub global: unsafe extern "C" fn(op: u32, h: u32, n: u32, flags: u32) -> u32,
+    /// A resource of a module (an NE one): type, name (an ID below
+    /// 0x10000, else a UTF-16 string) as FindResourceW takes them; its
+    /// bytes in Win32's form (menus, dialogs, string tables and
+    /// accelerators converted) and `*len`, 0 for none.
+    pub resource: unsafe extern "C" fn(hinst: u32, ty: u32, name: u32, len: *mut u32) -> u32,
+    /// A PM message for a window that W32USER does not translate (the
+    /// host's: PM DDE, the clipboard's, other tasks' messages): 1 and
+    /// (message, wParam, lParam) in `out` if it is a Windows message.
+    pub translate: unsafe extern "C" fn(hwnd: u32, q: *const QMsg, out: *mut u32) -> u32,
+    /// PM messages `base | msg` the host's other tasks post (0: none),
+    /// looked at by PeekMessage with a range.
+    pub posted_base: u32,
     /// Flags: 1, every thread uses the first thread's queue (a Windows
     /// task's threads take turns).
     pub flags: u32,
@@ -118,6 +130,11 @@ pub fn exe() -> u32 {
 
 /// A resource's bytes (FindResourceW, LoadResource, SizeofResource).
 pub fn resource(hinst: u32, name: *const u16, ty: *const u16) -> Option<&'static [u8]> {
+    if let Some(h) = host() {
+        let mut n = 0;
+        let p = unsafe { (h.resource)(hinst, ty as u32, name as u32, &mut n) };
+        return (p != 0).then(|| unsafe { core::slice::from_raw_parts(p as *const u8, n as usize) });
+    }
     let find = kern!(2, fn(u32, *const u16, *const u16) -> u32)?;
     let load = kern!(3, fn(u32, u32) -> u32)?;
     let size = kern!(4, fn(u32, u32) -> u32)?;
@@ -270,4 +287,16 @@ pub fn observe(kind: i32, m: &crate::wnd::Msg) {
     if let Some(h) = host() {
         unsafe { (h.observe)(kind, m) };
     }
+}
+
+/// The host's translation of a PM message W32USER does not know.
+pub fn translate(h: u16, q: &QMsg) -> Option<(u16, u32, u32)> {
+    let hst = host()?;
+    let mut out = [0u32; 3];
+    (unsafe { (hst.translate)(h as u32, q, out.as_mut_ptr()) } != 0).then_some((out[0] as u16, out[1], out[2]))
+}
+
+/// The host's other tasks' posted messages' base.
+pub fn posted_base() -> Option<u32> {
+    host().map(|h| h.posted_base).filter(|&b| b != 0)
 }

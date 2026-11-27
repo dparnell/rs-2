@@ -1574,31 +1574,31 @@ pub extern "stdcall" fn GetGlyphOutlineW(_h: u32, _c: u32, _f: u32, _m: u32, _n:
 /// gets (ENUMLOGFONT(EX), NEW)TEXTMETRIC(EX), FontType, lParam) for each
 /// face (or the one named), until it returns 0.
 fn enum_fonts(h: u32, name: &[u8], f: u32, lp: u32, wide: bool) -> i32 {
-    let hdc = h16(h);
-    let mut r = 1;
+    let _ = h16(h);
+    // One font per face (no face named), or each size of a raster face
+    // and each style of a TrueType one (WIN16's EnumFonts).
+    let mut list: Vec<(usize, i32, u32, bool)> = Vec::new();
     for (i, wf) in FACES.iter().enumerate() {
-        if !name.is_empty() && !wf.name.eq_ignore_ascii_case(name) {
-            continue;
-        }
-        let ft = gdi::face_font(i as u8, if wf.tt { 0 } else { wf.sizes.first().copied().unwrap_or(16) }, 400, false);
-        // ENUMLOGFONTEX: LOGFONT, full name (64), style (32), script (32).
-        let mut lf = logfont(&ft, wide);
-        let pad = |b: &mut Vec<u8>, s: &[u8], n: usize| {
-            if wide {
-                for k in 0..n {
-                    let c = s.get(k).copied().unwrap_or(0) as u16;
-                    b.extend_from_slice(&c.to_le_bytes());
+        if name.is_empty() {
+            let height = if wf.tt { -16 } else { wf.sizes.first().copied().unwrap_or(16) };
+            list.push((i, height, if i == 0 { 700 } else { 400 }, false));
+        } else if wf.name.eq_ignore_ascii_case(name) {
+            if wf.tt {
+                for (weight, italic) in [(400, false), (700, false), (400, true), (700, true)] {
+                    list.push((i, -16, weight, italic));
                 }
             } else {
-                for k in 0..n {
-                    b.push(s.get(k).copied().unwrap_or(0));
+                for &hh in wf.sizes {
+                    list.push((i, hh, if i == 0 { 700 } else { 400 }, false));
                 }
             }
-        };
-        pad(&mut lf, wf.name, 64);
-        pad(&mut lf, b"Regular", 32);
-        pad(&mut lf, b"Western", 32);
-        // NEWTEXTMETRICEX: the face's metrics in a scratch DC.
+        }
+    }
+    let mut r = 1;
+    for (i, height, weight, italic) in list {
+        let wf = &FACES[i];
+        let ft = gdi::face_font(i as u8, height, weight as u16, italic);
+        // NEWTEXTMETRICEX: the font's metrics in a scratch DC.
         let mem = bitmap::create_memory_dc();
         let fo = gdi::new_obj(Obj::Font(ft));
         gdi::select_font(mem, fo);
@@ -1606,10 +1606,41 @@ fn enum_fonts(h: u32, name: &[u8], f: u32, lp: u32, wide: bool) -> i32 {
         text_metrics(mem as u32, tm.as_mut_ptr() as u32, wide);
         gdi::release_dc(mem);
         gdi::delete_object(fo);
+        // ENUMLOGFONTEX: LOGFONT (the cell height, the average width),
+        // full name (64), style (32), script (32).
+        let mut lf = logfont(&ft, wide);
+        let rdtm = |o: usize| i32::from_le_bytes(tm[o..o + 4].try_into().unwrap());
+        lf[0..4].copy_from_slice(&rdtm(0).to_le_bytes());
+        lf[4..8].copy_from_slice(&rdtm(20).to_le_bytes());
+        let style: &[u8] = match (weight >= 700, italic) {
+            (false, false) => b"Regular",
+            (true, false) => b"Bold",
+            (false, true) => b"Italic",
+            (true, true) => b"Bold Italic",
+        };
+        let mut full = wf.name.to_vec();
+        if wf.tt && style != b"Regular" {
+            full.push(b' ');
+            full.extend_from_slice(style);
+        }
+        let pad = |b: &mut Vec<u8>, s: &[u8], n: usize| {
+            if wide {
+                for k in 0..n {
+                    let c = if k + 1 < n { s.get(k).copied().unwrap_or(0) } else { 0 } as u16;
+                    b.extend_from_slice(&c.to_le_bytes());
+                }
+            } else {
+                for k in 0..n {
+                    b.push(if k + 1 < n { s.get(k).copied().unwrap_or(0) } else { 0 });
+                }
+            }
+        };
+        pad(&mut lf, &full, 64);
+        pad(&mut lf, style, 32);
+        pad(&mut lf, b"Western", 32);
         // RASTER_FONTTYPE 1, TRUETYPE_FONTTYPE 4.
         let ty = if wf.tt { 4 } else { 1 };
-        let _ = hdc;
-        r = crate::call4(f, lf.as_ptr() as u32, tm.as_ptr() as u32, ty, lp);
+        r = crate::wnd::call_enum_font(f, lf.as_ptr() as u32, tm.as_ptr() as u32, ty, lp);
         if r == 0 {
             break;
         }

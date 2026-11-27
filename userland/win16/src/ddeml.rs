@@ -19,7 +19,7 @@ use thunk16::{flat, Pascal, PascalCall};
 
 use crate::dde::*;
 use crate::kernel::{global_alloc, global_free, global_size, GMEM_DDESHARE};
-use crate::user::{self, post, send, wnd};
+use crate::user::{self, post, send};
 use crate::Global;
 
 const XTYPF_NODATA: u16 = 0x0004;
@@ -247,7 +247,7 @@ fn alive(pm: u32) -> bool {
 
 /// The PM window of one of this task's windows.
 fn pm_window(h: u16) -> u32 {
-    wnd(h).map_or(0, |w| w.client)
+    user::pm_client(h)
 }
 
 /// Enter (or update) an instance in the list.
@@ -472,7 +472,7 @@ pub fn monitor_msg(posted: bool, to: u16, m: u16, wp: u16, lp: u32) {
         // (and the PM windows of hwndTo and wParam: monitor_with).
         let mut b = Mon::new(18);
         b.w(to).l(now()).w(task()).w(m).w(wp).l(lp);
-        let pm = |h: u16| if h == 0xffff { 0xffff } else { wnd(h).map(|w| w.client).or_else(|| crate::dde::foreign(h)).unwrap_or(0) };
+        let pm = |h: u16| if h == 0xffff { 0xffff } else { Some(user::pm_client(h)).filter(|&c| c != 0).or_else(|| crate::dde::foreign(h)).unwrap_or(0) };
         b.l(pm(to)).l(pm(wp));
         b.0
     });
@@ -513,7 +513,7 @@ fn monitor_link(c: &Conv, item: u16, fmt: u16, nodata: bool, established: bool) 
 
 /// The PM window of the partner of a conversation.
 fn partner_pm(c: &Conv) -> u32 {
-    wnd(c.partner).map(|w| w.client).or_else(|| crate::dde::foreign(c.partner)).unwrap_or(0)
+    Some(user::pm_client(c.partner)).filter(|&x| x != 0).or_else(|| crate::dde::foreign(c.partner)).unwrap_or(0)
 }
 
 /// A conversation's (client, server) handles for the monitors: a server
@@ -714,32 +714,16 @@ fn callback(id: u32, ty: u16, fmt: u16, hconv: u32, hsz1: u32, hsz2: u32, data: 
 
 // ---- Windows ----
 
-/// The class of DDEML's windows (registered on first use).
+/// A window of DDEML's class (registered on first use).
 fn create_window(hinst: u16) -> u16 {
-    static CLASS: Global<bool> = Global::new(false);
-    if !*CLASS.get() {
-        unsafe extern "C" {
-            fn p_ddeml();
-        }
-        let proc_ = thunk16::far(p_ddeml as *const u8);
-        let name = b"DDEMLWnd";
-        let ok = crate::mem16::with_str(name, |fname| {
-            crate::mem16::with(26, |far, p| {
-                let mut b = [0u8; 26];
-                b[2..6].copy_from_slice(&proc_.to_le_bytes());
-                b[10..12].copy_from_slice(&hinst.max(1).to_le_bytes());
-                b[22..26].copy_from_slice(&fname.to_le_bytes());
-                unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 26) };
-                user::call(57, &mut crate::commdlg::args(&[crate::commdlg::A::L(far)]))
-            })
-        });
-        *CLASS.get() = ok != 0;
+    unsafe extern "C" {
+        fn p_ddeml();
     }
-    let Some(ci) = user::find_class_name(b"DDEMLWnd") else { return 0 };
-    let w = user::create(&user::Create { exstyle: 0, class: ci, title: b"", title_far: 0, class_far: 0, style: user::WS_POPUP, pos: [0, 0, 0, 0], parent: 0, menu: 0, hinst, param: 0 });
+    let w = user::own_popup(b"DDEMLWnd", thunk16::far(p_ddeml as *const u8), b"", hinst);
     // (A plain popup: one PM window, no frame whose client ID counts.)
-    if let Some(pm) = wnd(w).filter(|x| x.frame == x.client).map(|x| x.client) {
-        unsafe { crate::pm::WinSetWindowUShort(pm, crate::pm::QWS_ID, DDEML_ID) };
+    let (c, f) = (user::pm_client(w), user::pm_frame(w));
+    if c != 0 && c == f {
+        unsafe { crate::pm::WinSetWindowUShort(c, crate::pm::QWS_ID, DDEML_ID) };
     }
     w
 }
@@ -1377,7 +1361,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if c.list != 0 {
                 st |= ST_INLIST;
             }
-            if user::wnd(c.partner).is_some() {
+            if user::exists(c.partner) {
                 st |= ST_ISLOCAL;
             }
             if inst(c.inst).is_some_and(|i| i.blocked) {
@@ -1599,7 +1583,7 @@ fn disconnect(hc: u32) -> bool {
     end_links(c);
     let (w, partner, client) = (c.wnd, c.partner, c.client);
     post(partner, WM_DDE_TERMINATE, w, 0);
-    if !d().convs.iter().any(|x| x.wnd == w && x.connected) && (client || wnd(w).is_some()) {
+    if !d().convs.iter().any(|x| x.wnd == w && x.connected) && (client || user::exists(w)) {
         user::destroy_window(w);
     }
     true

@@ -298,7 +298,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (app, key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
             if ord == 58 {
                 // WIN.INI's printers are the spooler's queues (print.rs).
-                if let Some(v) = crate::print::profile(far_str(app).unwrap_or(b""), far_str(key)) {
+                let mut v = alloc::vec![0u8; 4096];
+                let n = unsafe { crate::w32::Rs2W32PrinterProfile(crate::user::str32(app), crate::user::str32(key), v.as_mut_ptr() as u32, v.len() as u32) } as i32;
+                if n >= 0 {
+                    v.truncate(n as usize);
                     return profile_out(&v, buf, max);
                 }
             }

@@ -42,24 +42,8 @@ pub fn initiate(client: u16, app: u16, topic: u16) {
 }
 
 fn create_window() -> u16 {
-    static CLASS: Global<bool> = Global::new(false);
     let hinst = crate::kernel::TASK.get().hinst;
-    if !*CLASS.get() {
-        let proc_ = user::native_far(10);
-        let ok = crate::mem16::with_str(b"W16Progman", |fname| {
-            crate::mem16::with(26, |far, p| {
-                let mut b = [0u8; 26];
-                b[2..6].copy_from_slice(&proc_.to_le_bytes());
-                b[10..12].copy_from_slice(&hinst.max(1).to_le_bytes());
-                b[22..26].copy_from_slice(&fname.to_le_bytes());
-                unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 26) };
-                user::call(57, &mut crate::commdlg::args(&[crate::commdlg::A::L(far)]))
-            })
-        });
-        *CLASS.get() = ok != 0;
-    }
-    let Some(ci) = user::find_class_name(b"W16Progman") else { return 0 };
-    user::create(&user::Create { exstyle: 0, class: ci, title: b"Program Manager", title_far: 0, class_far: 0, style: user::WS_POPUP, pos: [0, 0, 0, 0], parent: 0, menu: 0, hinst, param: 0 })
+    user::own_popup(b"W16Progman", user::native_far(10), b"Program Manager", hinst)
 }
 
 /// The server window's procedure (WIN16 entry 10).

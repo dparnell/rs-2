@@ -417,7 +417,7 @@ fn hwnd_for(pm: u32) -> u16 {
 }
 
 fn pm_for(h: u16) -> u32 {
-    user::wnd(h).map(|w| w.client).or_else(|| crate::dde::foreign(h)).unwrap_or(0)
+    Some(user::pm_client(h)).filter(|&c| c != 0).or_else(|| crate::dde::foreign(h)).unwrap_or(0)
 }
 
 /// The clipboard calls (USER ordinals), None for others.
@@ -540,12 +540,12 @@ pub fn translate(m: u32, mp1: u32, _mp2: u32) -> (u16, u16, u32) {
 /// A PM bitmap for the clipboard with a GDI bitmap's picture (the
 /// clipboard keeps it; the program's bitmap stays its own).
 fn bitmap_pm(h: u16) -> Option<u32> {
-    let (hbm, ..) = crate::bitmap::bitmap_of(h)?;
+    let hbm = Some(unsafe { crate::w32::Rs2W32PmBitmap(h as u32) }).filter(|&b| b != 0)?;
     let copy = dib_to_pm(&pm_to_dib(hbm)?);
     (copy != 0).then_some(copy)
 }
 
 /// A GDI bitmap with (a copy of) a PM bitmap's picture.
 fn bitmap_from_pm(hbm: u32) -> u16 {
-    pm_to_dib(hbm).map_or(0, |d| crate::bitmap::from_dib(&d))
+    pm_to_dib(hbm).map_or(0, |d| unsafe { crate::w32::Rs2W32BitmapFromDib(d.as_ptr() as u32, d.len() as u32) } as u16)
 }

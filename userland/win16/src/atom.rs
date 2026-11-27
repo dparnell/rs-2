@@ -93,27 +93,20 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         }
         // RegisterWindowMessage(name): a global atom.
         2118 => add(a.l(), true) as u32,
-        // SetProp(hwnd, name, data), GetProp(hwnd, name), RemoveProp
+        // SetProp(hwnd, name, data), GetProp(hwnd, name), RemoveProp:
+        // W32USER's, keyed by the name's global atom.
         2026 => {
             let (h, n, v) = (a.w(), a.l(), a.w());
             let key = if n >> 16 == 0 { n as u16 } else { add(n, true) };
-            let Some(w) = crate::user::wnd(h) else { return Some(0) };
-            match w.props.iter_mut().find(|p| p.0 == key) {
-                Some(p) => p.1 = v,
-                None => w.props.push((key, v)),
-            }
-            1
+            unsafe { crate::w32::SetPropA(h as u32, key as u32, v as u32) }
         }
         2025 | 2024 => {
             let (h, n) = (a.w(), a.l());
             let key = if n >> 16 == 0 { n as u16 } else { find(n, true) };
-            let Some(w) = crate::user::wnd(h) else { return Some(0) };
-            let Some(i) = w.props.iter().position(|p| p.0 == key) else { return Some(0) };
-            let v = w.props[i].1;
-            if ord == 2024 {
-                w.props.remove(i);
+            if key == 0 {
+                return Some(0);
             }
-            v as u32
+            unsafe { (if ord == 2024 { crate::w32::RemovePropA(h as u32, key as u32) } else { crate::w32::GetPropA(h as u32, key as u32) }) & 0xffff }
         }
         _ => return None,
     })

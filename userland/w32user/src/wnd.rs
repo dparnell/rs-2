@@ -499,6 +499,15 @@ pub fn call_proc4(p: u32, a: u32, b: u32, c: u32, d: u32) -> u32 {
     call4(p, a, b, c, d)
 }
 
+/// A font enumeration callback (ENUMLOGFONT, NEWTEXTMETRIC, type,
+/// lParam): a 16-bit one through the host (kind 3).
+pub fn call_enum_font(p: u32, lf: u32, tm: u32, ty: u32, lp: u32) -> u32 {
+    if let Some(f) = far16(p) {
+        return crate::kern::host().map_or(0, |h| unsafe { (h.call16)(3, f, lf, tm, ty, lp) });
+    }
+    call4(p, lf, tm, ty, lp)
+}
+
 /// Call a window procedure with a message in its own form.
 fn raw_call(p: u32, h: u16, m: u16, wp: u32, lp: u32) -> u32 {
     if p == 0 {
@@ -2092,7 +2101,7 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u32, u32)> {
             (m, wp, lp)
         }
         m if m & 0xffff_0000 == POSTED => ((m & 0xffff) as u16, q.mp1, q.mp2),
-        _ => return None,
+        _ => return crate::kern::translate(w_hwnd, q),
     })
 }
 
@@ -2101,6 +2110,10 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u32, u32)> {
 fn peek_range(hab: u32, filter: u32, lo: u32, hi: u32, remove: bool) -> Option<QMsg> {
     let has = |a: u32, b: u32| lo <= b && a <= hi;
     let mut ranges: Vec<(u32, u32)> = alloc::vec![(POSTED | lo.min(0xffff), POSTED | hi.min(0xffff))];
+    if let Some(b) = crate::kern::posted_base() {
+        // (with the host's flag bits under the base)
+        ranges.push((b | lo.min(0xffff), b | 0x001f_ffff));
+    }
     if has(0x100, 0x109) {
         ranges.push((WM_CHAR, WM_CHAR));
     }

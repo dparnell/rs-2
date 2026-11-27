@@ -217,7 +217,7 @@ pub fn win_help(hwnd: u16, file: u32, cmd: u16, data: u32) -> u32 {
         HELP_CONTEXT | HELP_CONTEXTPOPUP | HELP_SETCONTENTS => (data, Vec::new()),
         _ => (data, Vec::new()),
     };
-    let owner = crate::user::wnd(crate::user::top_level(hwnd)).map_or(0, |w| w.frame);
+    let owner = crate::user::frame_of_top(hwnd);
     let mut req: Vec<u8> = Vec::with_capacity(64 + path.len() + text.len());
     req.extend_from_slice(&MAGIC.to_le_bytes());
     req.extend_from_slice(&cmd.to_le_bytes());

@@ -30,7 +30,7 @@
 use alloc::vec::Vec;
 
 use crate::pm::*;
-use crate::user::{self, wnd, WS_CHILD};
+use crate::user;
 use crate::Global;
 
 unsafe extern "C" {
@@ -63,7 +63,7 @@ unsafe extern "C" {
 }
 
 /// A Windows message between tasks: W16X | the message.
-pub const W16X: u32 = 0x0002_0000;
+pub const W16X: u32 = 0x0020_0000;
 /// mp1 is the sender's PM window (wParam an HWND).
 const FLAG_HWND: u32 = 0x0004_0000;
 /// lParam's low (high) word is a GMEM_DDESHARE block given to the
@@ -160,7 +160,7 @@ pub fn is_foreign_window(h: u16) -> bool {
 /// The PM window standing for HWND `h` in another process (its client;
 /// a proxy's own window).
 fn pm_of(h: u16) -> u32 {
-    wnd(h).map(|w| w.client).or_else(|| foreign(h)).unwrap_or(0)
+    Some(user::pm_client(h)).filter(|&c| c != 0).or_else(|| foreign(h)).unwrap_or(0)
 }
 
 /// Is `m` a message whose wParam is a window (the DDE messages)?
@@ -461,9 +461,9 @@ fn other_tasks_windows() -> Vec<u32> {
 /// the other tasks'.
 pub fn broadcast(m: u16, wp: u16, lp: u32) -> u32 {
     let acks = *ACKS.get();
-    let own: Vec<u16> = user::all().into_iter().filter(|&h| wnd(h).is_some_and(|w| w.style & WS_CHILD == 0)).collect();
+    let own: Vec<u16> = user::top_levels();
     for h in own {
-        if wnd(h).is_some() {
+        if user::exists(h) {
             user::send(h, m, wp, lp);
         }
     }

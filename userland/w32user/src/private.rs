@@ -111,3 +111,14 @@ pub extern "stdcall" fn Rs2W32BitmapFromDib(p: u32, n: u32) -> u32 {
 pub extern "stdcall" fn Rs2W32Destroying(h: u32) -> u32 {
     wnd(hw(h)).is_some_and(|w| w.destroying) as u32
 }
+
+/// Rs2W32Widen(src, n, dst): `n` bytes of the process code page as
+/// UTF-16 at `dst` (W32USER's own table, which narrows them back).
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32Widen(src: u32, n: u32, dst: u32) -> u32 {
+    for i in 0..n {
+        let b = unsafe { *((src + i) as *const u8) };
+        unsafe { ((dst + 2 * i) as *mut u16).write_unaligned(crate::kern::byte_to_wide(b)) };
+    }
+    n
+}

@@ -1,5 +1,5 @@
-//! The rest of USER: the calls of dialog.rs, menu.rs and caret.rs, the
-//! string functions (lstrcmp, AnsiUpper, wsprintf...), LoadString.
+//! The rest of USER: the clipboard's calls (clip.rs), the string
+//! functions (lstrcmp, AnsiUpper, wsprintf...), LoadString, WinHelp.
 
 use alloc::vec::Vec;
 use thunk16::{flat, Pascal};
@@ -7,16 +7,7 @@ use thunk16::{flat, Pascal};
 use crate::{cstr, far_str};
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
-    if let Some(r) = crate::dialog::call(ord, a) {
-        return r;
-    }
-    if let Some(r) = crate::menu::call(ord, a) {
-        return r;
-    }
     if let Some(r) = crate::clip::call(ord, a) {
-        return r;
-    }
-    if let Some(r) = crate::caret::call(ord, a) {
         return r;
     }
     match ord {
