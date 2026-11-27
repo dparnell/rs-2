@@ -619,8 +619,8 @@ pub fn dos_query_proc_type(c: &mut Ctx) -> u32 {
 /// The program type DosQueryAppType reports, as IBM's _LDRQAppType: an
 /// LX or NE module's own type; a DOS program (FAPPTYP_DOS) for an MZ
 /// executable with no NE/LX/LE/PE header behind it; FAPPTYP_32BIT |
-/// FAPPTYP_WINDOWSPROT31 (and FAPPTYP_BOUND for a DLL) for a Win32 PE
-/// file, which only a PE loader can run; ERROR_INVALID_EXE_SIGNATURE for
+/// FAPPTYP_WINDOWSPROT31 (and FAPPTYP_DLL for a DLL) for a Win32 PE
+/// file (docs/WIN32.md); ERROR_INVALID_EXE_SIGNATURE for
 /// an LE file (DOS extender programs, VxDs), which OS/2 does not run
 /// either, and for anything else.
 pub fn app_type(data: &[u8]) -> Result<u32, u32> {
@@ -651,14 +651,12 @@ pub fn app_type(data: &[u8]) -> Result<u32, u32> {
             }
             Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
         },
-        Ok(Format::Mz) => {
-            let lfanew = data.get(0x3c..0x40).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
-            match data.get(lfanew..lfanew + 0x18) {
-                // IMAGE_FILE_DLL (0x2000 in the characteristics).
-                Some(h) if lfanew != 0 && &h[..4] == b"PE\0\0" => Ok(if h[0x17] & 0x20 != 0 { 0x5010 } else { 0x5000 }),
-                _ => Ok(0x0020), // FAPPTYP_DOS
-            }
-        }
+        // FAPPTYP_32BIT | FAPPTYP_WINDOWSPROT31, and FAPPTYP_DLL for a DLL.
+        Ok(Format::Pe { header }) => Ok(match os2_exe::pe::Module::parse(data, header) {
+            Ok(m) if m.header.is_dll() => 0x5010,
+            _ => 0x5000,
+        }),
+        Ok(Format::Mz) => Ok(0x0020), // FAPPTYP_DOS
         Ok(Format::Le { .. }) | Err(_) => Err(ERROR_INVALID_EXE_SIGNATURE),
     }
 }

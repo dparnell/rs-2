@@ -12,6 +12,7 @@ pub mod gate;
 mod elfload;
 mod lxload;
 mod neload;
+pub mod peload;
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -95,6 +96,8 @@ pub enum Format {
     Ne,
     /// A 64-bit module (ELF64, docs/API64.md).
     Elf64,
+    /// A 32-bit Windows module (PE32, docs/WIN32.md).
+    Pe,
 }
 
 pub use elfload::{is_elf64, resource as elf_resource};
@@ -694,8 +697,10 @@ fn load_image(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, space: Opt
     match os2_exe::detect(&data) {
         Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, specific, space),
         Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, specific, space),
-        // As IBM's _ldrOpenNewExe: DOS, LE (DOS extenders) and PE files
-        // are not OS/2 modules.
+        // Windows' 32-bit modules: rs2's Win32 layer (docs/WIN32.md).
+        Ok(os2_exe::Format::Pe { header }) => peload::load(path, data.clone(), header, dll, specific, space),
+        // As IBM's _ldrOpenNewExe: DOS and LE (DOS extenders) files are
+        // not OS/2 modules.
         Ok(_) | Err(_) => Err(err::INVALID_EXE_SIGNATURE),
     }
 }
@@ -913,6 +918,24 @@ pub fn win16_import(name: &str) -> (String, u32) {
     match WIN16_MODULES.iter().find(|(n, _)| *n == m) {
         Some(&(_, base)) => (String::from(WIN16_DLL), base),
         None => (m, 0),
+    }
+}
+
+/// rs2's Win32 layer (docs/WIN32.md): the Windows system DLLs and the
+/// rs2 DLLs that implement them (exporting Windows' names).
+pub const WIN32_MODULES: &[(&str, &str)] = &[
+    ("KERNEL32", "W32KERN"),
+    ("NTDLL", "W32NTDLL"),
+    ("USER32", "W32USER"),
+];
+
+/// The module an import of `name` by a Win32 module loads: an rs2 Win32
+/// DLL for the system DLLs, else the module name.
+pub fn win32_import(name: &str) -> String {
+    let m = module_name(name);
+    match WIN32_MODULES.iter().find(|(n, _)| *n == m) {
+        Some(&(_, rs2)) => String::from(rs2),
+        None => m,
     }
 }
 

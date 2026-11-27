@@ -2,7 +2,8 @@
 //!
 //! Supports the DOS `MZ` stub, the 32-bit linear executable format (`LX`)
 //! used by OS/2 2.x+ and the 16-bit segmented format (`NE`) used by OS/2 1.x
-//! modules that are still shipped with Warp 4.
+//! modules that are still shipped with Warp 4, and the PE format of 32-bit
+//! Windows modules (rs2's Win32 layer, docs/WIN32.md).
 //!
 //! The crate is `no_std` + `alloc` so the kernel loader and host tools share
 //! exactly the same code.
@@ -13,6 +14,7 @@ extern crate alloc;
 
 pub mod lx;
 pub mod ne;
+pub mod pe;
 pub mod res;
 mod read;
 
@@ -29,6 +31,8 @@ pub enum Format {
     Lx { header: usize },
     /// Linear executable (VxD style). Not used for OS/2 applications.
     Le { header: usize },
+    /// Portable executable (32-bit Windows).
+    Pe { header: usize },
 }
 
 /// Identify the format of an executable image.
@@ -54,6 +58,7 @@ pub fn detect(data: &[u8]) -> Result<Format, Error> {
         b"LX" => Ok(Format::Lx { header: lfanew }),
         b"LE" => Ok(Format::Le { header: lfanew }),
         b"NE" => Ok(Format::Ne { header: lfanew }),
+        b"PE" if data.get(lfanew + 2..lfanew + 4) == Some(b"\0\0") => Ok(Format::Pe { header: lfanew }),
         _ => Ok(Format::Mz),
     }
 }

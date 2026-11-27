@@ -55,6 +55,8 @@ pub fn find(m: &Module, ty: u16, name: u16) -> Option<(u32, u32)> {
             None
         }
         Format::Virtual => None,
+        // Win32 resources are read by W32KERN from the image (docs/WIN32.md).
+        Format::Pe => None,
     }
 }
 
