@@ -13,6 +13,7 @@
 //! - text.rs: code pages and strings;
 //! - time.rs: times and clocks;
 //! - console.rs: the console on VIO and KBD;
+//! - res.rs: resources of PE modules;
 //! - misc.rs: versions, system information, errors, the rest.
 //!
 //! Text is the process's OS/2 code page (GetACP says which); W calls
@@ -37,6 +38,7 @@ mod handles;
 mod mem;
 mod misc;
 mod process;
+mod res;
 mod sync;
 mod text;
 mod time;
@@ -163,6 +165,8 @@ pub mod err {
     pub const NOT_OWNER: u32 = 288;
     pub const TOO_MANY_POSTS: u32 = 298;
     pub const INVALID_ADDRESS: u32 = 487;
+    pub const RESOURCE_TYPE_NOT_FOUND: u32 = 1813;
+    pub const RESOURCE_NAME_NOT_FOUND: u32 = 1814;
 }
 
 // ---- Strings ----
