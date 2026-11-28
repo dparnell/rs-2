@@ -22,6 +22,7 @@ pub fn make_dirs() {
 
 /// A profile's path: in the Windows directory unless it has one.
 fn path(file: &[u8]) -> Vec<u8> {
+    let file = &crate::kernel::oem(file)[..];
     if file.iter().any(|&c| c == b'\\' || c == b':' || c == b'/') {
         return file.to_vec();
     }

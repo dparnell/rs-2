@@ -46,7 +46,8 @@ fn find(dir: Option<&[u8]>, pattern: &[u8], attr: u32) -> Vec<(Vec<u8>, bool)> {
         path.push(b'\\');
     }
     path.extend_from_slice(pattern);
-    let z = crate::z(&path);
+    // (File names are in PM's code page; a Windows 3.x task's in ANSI.)
+    let z = crate::z(&crate::kern::to_pm(&path));
     let mut out = Vec::new();
     let mut hdir = 0xffff_ffffu32;
     let mut buf = vec![0u8; 4096];
@@ -59,7 +60,7 @@ fn find(dir: Option<&[u8]>, pattern: &[u8], attr: u32) -> Vec<(Vec<u8>, bool)> {
             let (next, a, len) = (rd(0), rd(24), buf[off + 28] as usize);
             let name = &buf[off + 29..off + 29 + len];
             if name != b"." {
-                out.push((name.to_ascii_lowercase(), a & 0x10 != 0));
+                out.push((crate::kern::from_pm_str(&name.to_ascii_lowercase()), a & 0x10 != 0));
             }
             if next == 0 {
                 break;
@@ -169,7 +170,7 @@ fn dir_list(h: u32, spec: u32, id: i32, st: i32, attr: u32, combo: bool) -> i32 
 
 /// A directory relative to the current one.
 fn set_rel(d: &[u8]) -> bool {
-    let z = crate::z(d);
+    let z = crate::z(&crate::kern::to_pm(d));
     unsafe { os2::DosSetCurrentDir(z.as_ptr()) == 0 }
 }
 

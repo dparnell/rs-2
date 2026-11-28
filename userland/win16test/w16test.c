@@ -2452,6 +2452,21 @@ static void installer_tests(HINSTANCE hInst)
         OpenFile("C:\\W16BAD.EXE", &bad, OF_DELETE);
     }
 
+    /* File names: KERNEL takes ANSI (e acute E9), the file system and DOS
+     * have OEM (82); DlgDirList lists ANSI. */
+    {
+        static char ansi_name[] = "C:\\W16CAF\xe9.TXT";
+        OFSTRUCT of;
+        struct find_t ft;
+        HFILE f = _lcreat(ansi_name, 0);
+        _lclose(f);
+        check(f != HFILE_ERROR && _dos_findfirst("C:\\W16CAF*.TXT", _A_NORMAL, &ft) == 0 && (BYTE)ft.name[6] == 0x82,
+              "_lcreat of an ANSI name makes the OEM name");
+        check(OpenFile(ansi_name, &of, OF_EXIST) != HFILE_ERROR, "OpenFile finds a file by its ANSI name");
+        check(OpenFile(ansi_name, &of, OF_DELETE) != HFILE_ERROR && _dos_findfirst("C:\\W16CAF*.TXT", _A_NORMAL, &ft) != 0,
+              "OpenFile OF_DELETE of an ANSI name");
+    }
+
     /* What Windows Setup writes: WIN.INI's [intl], SYSTEM.INI's code
      * page; SHARE is loaded (INT 2Fh AX=1000h). */
     check(GetProfileInt("intl", "iCountry", 0) != 0, "WIN.INI [intl] iCountry from the country settings");

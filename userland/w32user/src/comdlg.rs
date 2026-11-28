@@ -561,7 +561,8 @@ pub(crate) fn cur_dir() -> Vec<u8> {
     let mut p = vec![b'a' + d.max(1) as u8 - 1, b':', b'\\'];
     p.extend_from_slice(unsafe { crate::cstr(buf.as_ptr()) });
     p.make_ascii_lowercase();
-    p
+    // (File names are in PM's code page; a Windows 3.x task's in ANSI.)
+    crate::kern::from_pm_str(&p)
 }
 
 /// Make `dir` the current drive and directory.
@@ -573,7 +574,7 @@ pub(crate) fn set_dir(dir: &[u8]) -> bool {
     if unsafe { os2::DosSetDefaultDisk(drive) } != 0 {
         return false;
     }
-    let z = crate::z(dir);
+    let z = crate::z(&crate::kern::to_pm(dir));
     unsafe { os2::DosSetCurrentDir(z.as_ptr()) == 0 }
 }
 
@@ -589,7 +590,7 @@ fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
 
 /// The file's attributes, if it exists.
 fn attrs(path: &[u8]) -> Option<u32> {
-    let z = crate::z(path);
+    let z = crate::z(&crate::kern::to_pm(path));
     let mut buf = [0u8; 24];
     // FIL_STANDARD: attrFile at 20.
     (unsafe { os2::DosQueryPathInfo(z.as_ptr(), 1, buf.as_mut_ptr(), 24) } == 0).then(|| u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]))
@@ -602,7 +603,7 @@ pub(crate) fn is_dir(path: &[u8]) -> bool {
 /// The names in `dir` matching `spec` (directories when `dirs`).
 fn list(dir: &[u8], spec: &[u8], dirs: bool) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
-    let z = crate::z(&join(dir, spec));
+    let z = crate::z(&crate::kern::to_pm(&join(dir, spec)));
     let mut hdir = 0xffff_ffffu32;
     let mut buf = vec![0u8; 2048];
     let mut n = 64u32;
@@ -616,7 +617,7 @@ fn list(dir: &[u8], spec: &[u8], dirs: bool) -> Vec<Vec<u8>> {
             let (next, a, len) = (rd(0), rd(24), buf[off + 28] as usize);
             let name = &buf[off + 29..off + 29 + len];
             if (a & 0x10 != 0) == dirs && name != b"." && name != b".." {
-                out.push(name.to_ascii_lowercase());
+                out.push(crate::kern::from_pm_str(&name.to_ascii_lowercase()));
             }
             if next == 0 {
                 break;
@@ -706,7 +707,7 @@ fn volume_label(drive: u32) -> Option<Vec<u8>> {
         return None;
     }
     let n = (buf[4] as usize).min(32);
-    (n > 0).then(|| buf[5..5 + n].to_vec())
+    (n > 0).then(|| crate::kern::from_pm_str(&buf[5..5 + n]))
 }
 
 /// Show directory `dir`: the current directory, the lists.
@@ -890,7 +891,7 @@ fn file_msg(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
                 let drive = (l - b'a') as u32 + 1;
                 let mut d = vec![l, b':', b'\\'];
                 if unsafe { os2::DosQueryCurrentDir(drive, buf.as_mut_ptr(), &mut cb) } == 0 {
-                    d.extend_from_slice(unsafe { crate::cstr(buf.as_ptr()) });
+                    d.extend_from_slice(&crate::kern::from_pm_str(unsafe { crate::cstr(buf.as_ptr()) }));
                 }
                 if !change_dir(h, &d) {
                     message(h, b"The drive is not ready.", 0x30);

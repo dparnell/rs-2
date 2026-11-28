@@ -385,7 +385,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // _lcreat(path, attr), _lopen(path, mode)
         83 | 85 => {
             let (path, v) = (a.l(), a.w());
-            let mut p = far_str(path).unwrap_or(b"").to_vec();
+            let mut p = oem(far_str(path).unwrap_or(b""));
             p.push(0);
             let (flags, mode, attr) = if ord == 83 {
                 (0x12, 0x42, v as u32 & 0x27)
@@ -1026,6 +1026,17 @@ fn forget_selector(sel: u16) {
     }
 }
 
+/// A file name a program gives KERNEL (Windows' ANSI code page) as the
+/// file system has it (the OEM code page, PM's), as Windows' KERNEL
+/// converts it for DOS. DOS calls (INT 21h) take OEM names as they are.
+pub fn oem(p: &[u8]) -> alloc::vec::Vec<u8> {
+    let mut v = p.to_vec();
+    if v.iter().any(|&c| c >= 0x80) {
+        unsafe { crate::w32::Rs2W32AnsiPm(v.as_mut_ptr() as u32, v.len() as u32, 1) };
+    }
+    v
+}
+
 /// OpenFile: OF_READ/WRITE/READWRITE, OF_CREATE, OF_EXIST, OF_DELETE,
 /// OF_PARSE; the OFSTRUCT (cBytes, fFixedDisk, nErrCode, reserved,
 /// szPathName) gets the full path.
@@ -1034,6 +1045,7 @@ pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     const OF_DELETE: u16 = 0x0200;
     const OF_CREATE: u16 = 0x1000;
     const OF_EXIST: u16 = 0x4000;
+    let path = &oem(path)[..];
     let mut full = [0u8; 260];
     let mut z = path.to_vec();
     z.push(0);

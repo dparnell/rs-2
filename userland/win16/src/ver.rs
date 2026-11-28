@@ -78,11 +78,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // an NE file (VS_FILE_INFO is RT_VERSION).
         6302 | 6303 => {
             let (f, t, id) = (a.l(), a.l(), a.l());
-            let Some(path) = crate::far_str(f) else { return Some(0) };
+            let Some(path) = crate::far_str(f).map(crate::kernel::oem) else { return Some(0) };
             if crate::tracing() {
                 crate::trace(format_args!("W16 version resource of {}", path.iter().map(|&c| c as char).collect::<alloc::string::String>()));
             }
-            let Some(file) = crate::compat::find_program(path).and_then(|p| crate::module::read_file(&p, usize::MAX)) else { return Some(0) };
+            let Some(file) = crate::compat::find_program(&path).and_then(|p| crate::module::read_file(&p, usize::MAX)) else { return Some(0) };
             let ty = Name::of(t).unwrap_or(Name::Id(RT_VERSION));
             let name = Name::of(id).unwrap_or(Name::Id(1));
             let found = match (&ty, &name) {
@@ -184,8 +184,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // tmpfile, lpuTmpLen): copy (expanding) the file into place.
         6309 => {
             let (_fl, s, d, sd, dd, _cd, _tmp, _tl) = (a.w(), a.l(), a.l(), a.l(), a.l(), a.l(), a.p(), a.p());
-            let src = join(crate::far_str(sd).unwrap_or(b"."), crate::far_str(s).unwrap_or(b""));
-            let dst = join(crate::far_str(dd).unwrap_or(b"."), crate::far_str(d).unwrap_or(b""));
+            let src = crate::kernel::oem(&join(crate::far_str(sd).unwrap_or(b"."), crate::far_str(s).unwrap_or(b"")));
+            let dst = crate::kernel::oem(&join(crate::far_str(dd).unwrap_or(b"."), crate::far_str(d).unwrap_or(b"")));
             // As LZOpenFile opens it: a file not there may be there
             // compressed, its name's last letter an underscore
             // (WINASCII.EXE as WINASCII.EX_; WinASCII's installer).
