@@ -1824,6 +1824,17 @@ static void misc_tests(void)
     int fd;
     /* "ABCD" and a 4-byte copy of it: COMPRESS's SZDD format. */
     static BYTE szdd[] = { 'S', 'Z', 'D', 'D', 0x88, 0xf0, 0x27, 0x33, 'A', 'X', 8, 0, 0, 0, 0x0f, 'A', 'B', 'C', 'D', 0xf0, 0xf1 };
+    static char ansi[] = "\xe9\x95" "A";
+
+    /* Windows' ANSI (1252) and the OEM code page (850): e acute is E9 and
+       82, the bullet has no OEM character */
+    {
+        char oem[4];
+        AnsiToOem(ansi, oem);
+        check((BYTE)oem[0] == 0x82 && oem[2] == 'A' && (BYTE)oem[1] != 0x95, "AnsiToOem: 1252 to 850");
+        OemToAnsi(oem, oem);
+        check((BYTE)oem[0] == 0xe9 && oem[2] == 'A', "OemToAnsi: 850 to 1252");
+    }
 
     stage = 0;
     r = Catch(cb);

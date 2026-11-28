@@ -538,16 +538,20 @@ pub const WINFLAGS: u32 = 0x0001 | 0x0004 | 0x0020 | 0x0400;
 
 pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
     match ord {
-        // AnsiToOem(src, dst), OemToAnsi(src, dst): text is passed as it
-        // is (both are the process code page here).
+        // AnsiToOem(src, dst), OemToAnsi(src, dst): Windows' ANSI (1252)
+        // and the OEM code page (the process's, PM's).
         5 | 6 => {
             let (s, d) = (a.l(), a.l());
             let src = unsafe { cstr(flat(s)) };
+            let n = src.len();
             let dst = flat(d);
-            if !dst.is_null() && dst as *const u8 != src.as_ptr() {
+            if !dst.is_null() {
                 unsafe {
-                    core::ptr::copy(src.as_ptr(), dst, src.len());
-                    *dst.add(src.len()) = 0;
+                    if dst as *const u8 != src.as_ptr() {
+                        core::ptr::copy(src.as_ptr(), dst, n);
+                    }
+                    *dst.add(n) = 0;
+                    crate::w32::Rs2W32AnsiPm(dst as u32, n as u32, (ord == 5) as u32);
                 }
             }
             1
@@ -556,8 +560,13 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
         134 | 135 => {
             let (s, d, n) = (a.l(), a.l(), a.w());
             let (src, dst) = (flat(s), flat(d));
-            if !src.is_null() && !dst.is_null() && src != dst {
-                unsafe { core::ptr::copy(src, dst, n as usize) };
+            if !src.is_null() && !dst.is_null() {
+                unsafe {
+                    if src != dst {
+                        core::ptr::copy(src, dst, n as usize);
+                    }
+                    crate::w32::Rs2W32AnsiPm(dst as u32, n as u32, (ord == 134) as u32);
+                }
             }
             0
         }

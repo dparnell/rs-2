@@ -377,6 +377,21 @@ under the integrated debugger). What they found:
   as ⌂, as OS/2's GPI and Windows do (WinASCII 1.0's character tables
   had blank cells); PM's own controls and WinDrawText still draw them
   blank, their strings holding tabs and line ends.
+- **Windows' ANSI code page**: a Windows 3.x task's text is code page
+  1252, which W32USER (WIN16 being its host) turns into PM's code page
+  where it meets PM (text drawn and measured, window titles, menu
+  items) and back where it comes from PM (typed characters, titles and
+  menu items read back); characters PM's code page lacks become the
+  nearest one (quotes, dashes, "·" for the bullet). AnsiToOem and
+  OemToAnsi convert between 1252 and the OEM code page (PM's), as does
+  the clipboard between CF_TEXT and PM's text (CF_OEMTEXT is PM's as it
+  is). The installers' "Copyright ®" is "©" again, and their bullets
+  were "Â".
+- **Dialog items' creation data** reach the control as lpCreateParams
+  (WM_CREATE's CREATESTRUCT): tmpl16 keeps a copy in 16-bit memory and
+  passes its 16:16 address; Win32 programs get a pointer to its size
+  word, as on Windows. Borland's installers' BorBtnII picture buttons
+  (Delphi's, Turbo Debugger's) find their bitmaps there, and were empty.
 - The Delphi installer's background is its pattern brush (an 8x8
   dither of navy and black) drawn as a pattern, as Windows draws it;
   WIN16 used to fill with its average colour, the solid dark navy of the
@@ -1443,8 +1458,6 @@ What they needed (W16TEST checks each):
 
 Not yet:
 
-- The Turbo Debugger installer's last page shows its picture button
-  empty (Borland's BORBTNII class gets its bitmaps another way).
 - **Turbo Debugger for Windows** (`C:\TDW\BIN\TDW.EXE`) starts, loads
   its debugger DLL (TDWINTH.DLL, TOOLHELP-based) and its display DLL
   (TDWGUI.DLL, which draws TDW's text screen in a window) and stops with

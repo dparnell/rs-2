@@ -282,8 +282,11 @@ fn set_data(f: u16, h: u16) -> u32 {
     }
     let ok = match f {
         CF_TEXT | CF_OEMTEXT | CF_DSPTEXT => {
-            let t = unsafe { crate::cstr(flat(((h | 7) as u32) << 16)) }.to_vec();
-            let mut z = t;
+            let mut z = unsafe { crate::cstr(flat(((h | 7) as u32) << 16)) }.to_vec();
+            // CF_TEXT is ANSI; PM's text is in its code page (CF_OEMTEXT's).
+            if f != CF_OEMTEXT {
+                unsafe { crate::w32::Rs2W32AnsiPm(z.as_mut_ptr() as u32, z.len() as u32, 1) };
+            }
             z.push(0);
             let ok = put_bytes(pf, &z, false);
             if ok {
@@ -341,6 +344,9 @@ fn get_data(f: u16) -> u16 {
                 return 0;
             }
             let mut t = unsafe { crate::cstr(p) }.to_vec();
+            if f != CF_OEMTEXT {
+                unsafe { crate::w32::Rs2W32AnsiPm(t.as_mut_ptr() as u32, t.len() as u32, 0) };
+            }
             t.push(0);
             new_block(&t)
         }

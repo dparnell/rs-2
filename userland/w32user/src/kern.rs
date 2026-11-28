@@ -211,9 +211,92 @@ pub fn tick_count() -> u32 {
 
 // ---- The process code page ----
 
-use crate::cptab::{CP437, CP850};
+use crate::cptab::{CP1252, CP437, CP850};
 
 static PROCESS_CP: Global<u32> = Global::new(0);
+
+/// A Windows 3.x task's text is in Windows' ANSI code page (1252), not
+/// the process's (a Win32 program's ANSI here): its strings, resources and
+/// fonts were made for it.
+fn ansi() -> bool {
+    host().is_some()
+}
+
+/// The task's text code page as Unicode.
+fn text_table() -> &'static [u16; 128] {
+    if ansi() { &CP1252 } else { table() }
+}
+
+/// The PM code page's byte for each ANSI byte 0x80-0xFF (the nearest
+/// character where it has none: quotes, dashes, the bullet...).
+static TO_PM: Global<Option<[u8; 128]>> = Global::new(None);
+
+fn to_pm_table() -> &'static [u8; 128] {
+    TO_PM.get().get_or_insert_with(|| {
+        let pm = table();
+        core::array::from_fn(|i| {
+            let c = CP1252[i];
+            if let Some(j) = pm.iter().position(|&x| x == c) {
+                return j as u8 + 0x80;
+            }
+            let near = match c {
+                0x2018 | 0x2019 | 0x201a | 0x2039 | 0x203a => b'\'',
+                0x201c | 0x201d | 0x201e => b'"',
+                0x2013 | 0x2014 => b'-',
+                0x2026 => b'.',
+                0x2022 => return pm.iter().position(|&x| x == 0x00b7).map_or(b'*', |j| j as u8 + 0x80),
+                0x02c6 => b'^',
+                0x02dc => b'~',
+                0x2020 | 0x2021 => b'+',
+                0x2030 => b'%',
+                0x20ac => b'E',
+                0x2122 => b'T',
+                0x0160 => b'S',
+                0x0161 => b's',
+                0x017d => b'Z',
+                0x017e => b'z',
+                0x0152 => b'O',
+                0x0153 => b'o',
+                0x0178 => b'Y',
+                _ => b'?',
+            };
+            near
+        })
+    })
+}
+
+/// A Windows 3.x task's text as PM draws it (the process's code page);
+/// others' as it is.
+pub fn to_pm(s: &[u8]) -> alloc::vec::Vec<u8> {
+    if !ansi() {
+        return s.to_vec();
+    }
+    ansi_to_pm(s)
+}
+
+/// ANSI (1252) text in PM's code page.
+pub fn ansi_to_pm(s: &[u8]) -> alloc::vec::Vec<u8> {
+    let t = to_pm_table();
+    s.iter().map(|&b| if b < 0x80 { b } else { t[(b - 0x80) as usize] }).collect()
+}
+
+/// A character from PM (keyboard, PM's own texts) in the task's code page.
+pub fn from_pm(b: u8) -> u8 {
+    if !ansi() { b } else { pm_to_ansi(b) }
+}
+
+/// A byte of PM's code page in ANSI (1252).
+pub fn pm_to_ansi(b: u8) -> u8 {
+    if b < 0x80 {
+        return b;
+    }
+    let c = table()[(b - 0x80) as usize];
+    CP1252.iter().position(|&x| x == c).map_or(b'?', |i| i as u8 + 0x80)
+}
+
+pub fn from_pm_str(s: &[u8]) -> alloc::vec::Vec<u8> {
+    s.iter().map(|&b| from_pm(b)).collect()
+}
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.291"]
@@ -233,14 +316,14 @@ fn table() -> &'static [u16; 128] {
 }
 
 pub fn byte_to_wide(b: u8) -> u16 {
-    if b < 0x80 { b as u16 } else { table()[(b - 0x80) as usize] }
+    if b < 0x80 { b as u16 } else { text_table()[(b - 0x80) as usize] }
 }
 
 pub fn wide_to_byte(c: u16) -> u8 {
     if c < 0x80 {
         return c as u8;
     }
-    table().iter().position(|&x| x == c).map_or(b'?', |i| i as u8 + 0x80)
+    text_table().iter().position(|&x| x == c).map_or(b'?', |i| i as u8 + 0x80)
 }
 
 // ---- The host's side of the message loop ----

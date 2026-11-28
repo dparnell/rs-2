@@ -951,6 +951,7 @@ fn text_width_ps(hps: u32, s: &[u8]) -> i32 {
         return 0;
     }
     let mut pts = [PointL::default(); 5];
+    let s = crate::kern::to_pm(s);
     unsafe { GpiQueryTextBox(hps, s.len() as i32, s.as_ptr(), TXTBOX_COUNT, pts.as_mut_ptr()) };
     pts[TXTBOX_CONCAT].x
 }
@@ -1029,6 +1030,7 @@ pub fn text_at(hdc: u16, x: i32, y: i32, s: &[u8]) {
     set_text_attrs(d);
     let (x, y) = to_dev(d, x, y);
     let p = PointL { x, y: d.height - y - asc };
+    let s = crate::kern::to_pm(s);
     unsafe { GpiCharStringAt(d.hps, &p, s.len() as i32, s.as_ptr()) };
 }
 
@@ -1147,7 +1149,8 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
                 unsafe {
                     GpiSetColor(hps, fg);
                     GpiSetBackMix(hps, BM_LEAVEALONE);
-                    GpiCharStringAt(hps, &PointL { x, y: base }, line.len() as i32, line.as_ptr());
+                    let pm = crate::kern::to_pm(line);
+                    GpiCharStringAt(hps, &PointL { x, y: base }, pm.len() as i32, pm.as_ptr());
                 }
             }
             widest = widest.max(w);
@@ -1171,7 +1174,8 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
             }
             // The extent: for DT_CALCRECT and the opaque background.
             let mut ext = lr;
-            let used = if rest.is_empty() { 0 } else { unsafe { WinDrawText(hps, rest.len() as i32, rest.as_ptr(), &mut ext, fg, bg, fl | 0x0002) } };
+            let pm = crate::kern::to_pm(rest);
+            let used = if rest.is_empty() { 0 } else { unsafe { WinDrawText(hps, pm.len() as i32, pm.as_ptr(), &mut ext, fg, bg, fl | 0x0002) } };
             if rest.is_empty() {
                 ext.r = ext.l;
             }
@@ -1181,7 +1185,7 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
                     unsafe { WinFillRect(hps, &ext, bg) };
                 }
                 let mut dr = lr;
-                unsafe { WinDrawText(hps, rest.len() as i32, rest.as_ptr(), &mut dr, fg, bg, fl) };
+                unsafe { WinDrawText(hps, pm.len() as i32, pm.as_ptr(), &mut dr, fg, bg, fl) };
             }
             count += 1;
             top -= lh;

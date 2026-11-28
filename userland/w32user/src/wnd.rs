@@ -1286,7 +1286,7 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     let mut cr = RectL { l: r.l + l, b: r.t - l - cap, r: r.r - l, t: r.t - l };
                     WinFillRect(hps, &cr, gdi::rgb(bg));
                     cr.b += 1;
-                    let t = window_text(h);
+                    let t = crate::kern::to_pm(&window_text(h));
                     WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut cr, gdi::rgb(fg), 0, 0x0100 | 0x0400);
                 }
                 let both = wnd(h).is_some_and(|w| w.vsb.as_ref().is_some_and(|b| b.shown) && w.hsb.as_ref().is_some_and(|b| b.shown));
@@ -1737,7 +1737,7 @@ pub fn window_text(h: u16) -> Vec<u8> {
     if w.framed {
         let mut b = [0u8; 512];
         let n = unsafe { WinQueryWindowText(w.frame, 512, b.as_mut_ptr()) };
-        return b[..n.max(0) as usize].to_vec();
+        return crate::kern::from_pm_str(&b[..n.max(0) as usize]);
     }
     w.text.clone()
 }
@@ -1746,7 +1746,7 @@ pub fn window_text(h: u16) -> Vec<u8> {
 pub fn set_text_raw(h: u16, t: &[u8]) {
     let Some(w) = wnd(h) else { return };
     if w.framed {
-        let s = z(t);
+        let s = z(&crate::kern::to_pm(t));
         unsafe { WinSetWindowText(w.frame, s.as_ptr()) };
     }
     w.text = t.to_vec();
@@ -2136,7 +2136,7 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u32, u32)> {
             };
             let wp = if vk != 0 { vk } else { chr & 0xff } as u32;
             if !up && fs & 0x0001 != 0 && chr != 0 {
-                let c = chr & 0xff;
+                let c = crate::kern::from_pm((chr & 0xff) as u8) as u16;
                 let c = if ctrl && !alt && (c as u8).is_ascii_alphabetic() { c & 0x1f } else { c };
                 let cs = &mut u().chars;
                 if !cs.iter().any(|x| x.0 == q.time && x.1 == w_hwnd && x.3 == lp) {
@@ -2617,7 +2617,7 @@ pub fn def_window_proc(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
             let t = far_str(lp).unwrap_or(b"").to_vec();
             let Some(w) = wnd(h) else { return 0 };
             if w.framed {
-                let s = z(&t);
+                let s = z(&crate::kern::to_pm(&t));
                 unsafe { WinSetWindowText(w.frame, s.as_ptr()) };
             }
             w.text = t;

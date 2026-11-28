@@ -512,7 +512,17 @@ pub fn create_dialog(hinst: u32, t: &[u8], owner: u16, proc_: u32, param: u32, u
             Name::Str(s) => crate::narrow(&s),
             Name::Id(v) => [&[0xff][..], &v.to_le_bytes()].concat(),
         };
+        // The creation data, lpCreateParams: Win32's points to its size
+        // word; a Windows 3.x task's (WIN16's template, tmpl16.rs) is the
+        // 16:16 address of the bytes, as Windows 3.1 passes it.
         let extra = res::w16(t, p) as usize;
+        let param = if extra == 0 || p + 2 + extra > t.len() {
+            0
+        } else if crate::kern::host().is_some() && extra == 4 {
+            res::l32(t, p + 2)
+        } else {
+            t[p..].as_ptr() as u32
+        };
         p += 2 + extra;
         let Some(cci) = find_class(&ClassName::Name(cls.clone()), hinst) else {
             crate::trace(format_args!("W32 dialog: control class {} not found", alloc::string::String::from_utf8_lossy(&cls)));
@@ -521,7 +531,7 @@ pub fn create_dialog(hinst: u32, t: &[u8], owner: u16, proc_: u32, param: u32, u
         if cls.eq_ignore_ascii_case(b"BUTTON") && istyle & 0x0f == 1 && def_id == 0 {
             def_id = id as u16;
         }
-        let c = create(&Create { exstyle: iex, class: cci, title: text, title_arg: 0, class_arg: 0, wide: false, style: istyle | WS_CHILD, pos: [px(ix), py(iy), px(icx), py(icy)], parent: h, menu: id, hinst, param: 0 });
+        let c = create(&Create { exstyle: iex, class: cci, title: text, title_arg: 0, class_arg: 0, wide: false, style: istyle | WS_CHILD, pos: [px(ix), py(iy), px(icx), py(icy)], parent: h, menu: id, hinst, param });
         if c != 0 && font != 0 {
             send(c, W_SETFONT, font as u32, 0);
         }

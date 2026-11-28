@@ -33,6 +33,7 @@ w32! {
     Rs2W32QueryAbort(hdc);
     Rs2W32Widen(src, n, dst);
     Rs2W32IsDialog(h);
+    Rs2W32AnsiPm(p, n, to_pm);
     // The built-in procedures.
     Rs2ButtonProc(h, m, wp, lp);
     Rs2StaticProc(h, m, wp, lp);

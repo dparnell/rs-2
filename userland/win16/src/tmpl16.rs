@@ -17,6 +17,31 @@ pub fn widen(s: &[u8]) -> Vec<u16> {
     w
 }
 
+/// Dialog items' creation data in 16-bit memory, kept (once for each
+/// different one) for the controls of the dialogs made from them.
+static CREATION: crate::Global<Vec<(Vec<u8>, u32)>> = crate::Global::new(Vec::new());
+
+fn creation_data(data: &[u8]) -> Option<u32> {
+    if data.is_empty() {
+        return None;
+    }
+    if let Some(e) = CREATION.get().iter().find(|e| e.0 == data) {
+        return Some(e.1);
+    }
+    let h = crate::kernel::global_alloc(0, data.len() as u32);
+    if h == 0 {
+        return None;
+    }
+    let far_ = ((h | 7) as u32) << 16;
+    let q = thunk16::flat(far_);
+    if q.is_null() {
+        return None;
+    }
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), q, data.len()) };
+    CREATION.get().push((data.to_vec(), far_));
+    Some(far_)
+}
+
 fn put16(b: &mut Vec<u8>, v: u16) {
     b.extend_from_slice(&v.to_le_bytes());
 }
@@ -125,12 +150,21 @@ pub fn dialog(t: &[u8]) -> Vec<u8> {
                 put_wstr(&mut o, s);
             }
         }
-        // The creation data: a byte count and the bytes.
+        // The creation data: a byte count and the bytes, which Windows
+        // gives the control as lpCreateParams (Borland's BorBtnII buttons
+        // find their bitmaps in it). W32USER gets the 16:16 address of a
+        // copy in 16-bit memory as the item's 4 bytes of creation data.
         let k = t.get(p).copied().unwrap_or(0) as usize;
         p += 1;
-        put16(&mut o, k as u16);
-        o.extend_from_slice(&t[p.min(t.len())..(p + k).min(t.len())]);
+        let data = &t[p.min(t.len())..(p + k).min(t.len())];
         p += k;
+        match creation_data(data) {
+            Some(far_) => {
+                put16(&mut o, 4);
+                put32(&mut o, far_);
+            }
+            None => put16(&mut o, 0),
+        }
     }
     o
 }

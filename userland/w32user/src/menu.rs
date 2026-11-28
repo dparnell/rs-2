@@ -137,6 +137,7 @@ pub fn mp(lo: u32, hi: u32) -> u32 {
 
 /// Windows' "&" mnemonics as PM's "~".
 fn pm_text(s: &[u8]) -> Vec<u8> {
+    let s = &crate::kern::to_pm(s)[..];
     let mut v = Vec::with_capacity(s.len() + 1);
     let mut i = 0;
     while i < s.len() {
@@ -156,6 +157,7 @@ fn pm_text(s: &[u8]) -> Vec<u8> {
 }
 
 pub fn win_text(s: &[u8]) -> Vec<u8> {
+    let s = &crate::kern::from_pm_str(s)[..];
     let mut v = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < s.len() {

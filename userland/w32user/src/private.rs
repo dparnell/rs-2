@@ -129,3 +129,16 @@ pub extern "stdcall" fn Rs2W32Widen(src: u32, n: u32, dst: u32) -> u32 {
 pub extern "stdcall" fn Rs2W32IsDialog(h: u32) -> u32 {
     crate::dialog::is_dialog(hw(h)) as u32
 }
+
+/// A Windows 3.x task's ANSI text (`n` bytes, in place) in PM's code page
+/// (`to_pm`) or back: AnsiToOem, OemToAnsi, CF_TEXT on PM's clipboard.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32AnsiPm(p: u32, n: u32, to_pm: u32) -> u32 {
+    if p == 0 {
+        return 0;
+    }
+    let s = unsafe { core::slice::from_raw_parts_mut(p as *mut u8, n as usize) };
+    let v: alloc::vec::Vec<u8> = if to_pm != 0 { crate::kern::ansi_to_pm(s) } else { s.iter().map(|&b| crate::kern::pm_to_ansi(b)).collect() };
+    s.copy_from_slice(&v);
+    1
+}
