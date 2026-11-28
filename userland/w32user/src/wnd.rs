@@ -791,13 +791,18 @@ pub fn find_class(name: &ClassName, hinst: u32) -> Option<usize> {
         ClassName::Atom(a) => c.atom == *a && *a != 0,
     };
     let exe = crate::kern::exe();
+    let given = hinst;
     let hinst = if hinst == 0 { exe } else { hinst };
     s.classes
         .iter()
         .position(|c| hit(c) && c.hinst == hinst && c.hinst != 0)
         .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst != 0 && c.style & CS_GLOBALCLASS != 0))
         .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst == 0))
-        .or_else(|| s.classes.iter().rposition(|c| hit(c)))
+        // No module given: the class of that name registered last. (A
+        // module's own class is never another module's: Delphi and its
+        // component library each register TPanel, with their own
+        // procedures.)
+        .or_else(|| (given == 0).then(|| s.classes.iter().rposition(|c| hit(c))).flatten())
 }
 
 pub fn class(i: usize) -> Option<&'static mut Class> {

@@ -18,7 +18,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 | INT 21h from Windows programs (and DOS3Call): files, version, exit | works (the calls the C runtime makes) |
 | Global and local memory, huge blocks (`__AHINCR`) | works |
 | Window classes, top-level and child windows, the message loop | works |
-| USER, GDI and COMMDLG as a facade over W32USER, the window manager Win32 programs use ("One window manager") | works (W16TEST, the test programs, PFE and Open Watcom's samples checked) |
+| USER, GDI and COMMDLG as a facade over W32USER, the window manager Win32 programs use ("One window manager") | works (W16TEST, the test programs, PFE, Open Watcom's samples and Delphi 1.0 checked) |
 | WM_PAINT, BeginPaint/EndPaint, TextOut, DrawText, FillRect, lines | works |
 | MessageBox | works (PM's message box for now) |
 | Moving, sizing, closing (Alt+F4, the system menu) from PM | works |
@@ -315,6 +315,17 @@ to 32 bits; WIN16 now loads it and calls its Win32 calls.
 - **What stays WIN16's**: KERNEL, DOS, the clipboard's formats, DDE and
   DDEML between tasks, TOOLHELP, STRESS, the profile files, VER, LZEXPAND,
   SHELL, and the system-wide hooks other tasks see.
+
+Delphi 1.0 was run again on the facade (installed by hand as below, on
+a second disk): the IDE, dropping components, the Object Inspector and
+its drop-down editors, a handler written from a double click, Save
+Project As with Delphi's dialog templates, Options|Environment's pages,
+the Gallery's templates, and F9 compiling and running the program. Two
+things the move to W32USER had lost came back: a module's own class is
+never another module's (Delphi and its component library both register
+TPanel; the library got the IDE's, whose InitWndProc found no control
+being made, a General Protection Fault in DELPHI.EXE), and a child moved
+to the desktop is not activated by a click (W16TEST checks the first).
 
 A Win16 task's PM windows are of class `Win16Wnd` (a Win32 program's
 are `Win32Wnd`): DDE between tasks knows them by it. Some details below

@@ -386,6 +386,16 @@ pub fn hinst32(h: u16) -> u32 {
     crate::module::find(h).map_or(h as u32, |m| m.hinst as u32)
 }
 
+/// An instance handle for finding a class: the module's (0 for a handle
+/// of no module, such as a block a DLL allocated: then W32USER takes the
+/// class of that name registered last, as WIN16 did).
+pub fn class_hinst32(h: u16) -> u32 {
+    if h == 0 {
+        return 0;
+    }
+    crate::module::find(h).map_or(0, |m| m.hinst as u32)
+}
+
 /// A 16:16 string or ID argument as W32USER takes it (flat, or the ID).
 pub fn str32(far_: u32) -> u32 {
     if far_ >> 16 == 0 { far_ & 0xffff } else { flat(far_) as u32 }
@@ -410,7 +420,7 @@ pub fn create_window(ex: u32, class: u32, title: u32, style: u32, pos: [i32; 4],
         ccs = [unsafe { (p as *const u16).read_unaligned() } as u32, unsafe { (p.add(2) as *const u16).read_unaligned() } as u32];
         param32 = ccs.as_ptr() as u32;
     }
-    let h = unsafe { CreateWindowExA(ex, str32(class), str32(title), style, cw(pos[0]), cw(pos[1]), cw(pos[2]), cw(pos[3]), parent as u32, menu as u32, hinst32(hinst), param32) };
+    let h = unsafe { CreateWindowExA(ex, str32(class), str32(title), style, cw(pos[0]), cw(pos[1]), cw(pos[2]), cw(pos[3]), parent as u32, menu as u32, class_hinst32(hinst), param32) };
     let _ = ccs;
     if crate::tracing() {
         trace(format_args!("W16 CreateWindow -> {h:#x}"));
@@ -662,7 +672,7 @@ fn register_class(p: *const u8) -> u32 {
 /// GetClassInfo into a WNDCLASS16.
 fn class_info(hinst: u16, name: u32, p: *mut u8) -> u32 {
     let mut wc = [0u32; 10];
-    if unsafe { GetClassInfoA(hinst32(hinst), str32(name), wc.as_mut_ptr() as u32) } == 0 {
+    if unsafe { GetClassInfoA(class_hinst32(hinst), str32(name), wc.as_mut_ptr() as u32) } == 0 {
         return 0;
     }
     if !p.is_null() {
@@ -1734,7 +1744,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         403 => {
             let (n, hi) = (a.l(), a.w());
-            unsafe { UnregisterClassA(str32(n), hinst32(hi)) }
+            unsafe { UnregisterClassA(str32(n), class_hinst32(hi)) }
         }
         404 => {
             let (hi, n, p) = (a.w(), a.l(), a.p());

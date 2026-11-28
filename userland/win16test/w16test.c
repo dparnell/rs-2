@@ -2550,6 +2550,14 @@ static void dll_tests(void)
         check(call && call((int (FAR PASCAL *)(void))MakeProcInstance((FARPROC)DsMark, hInstance)) == 4321,
               "a program's exported procedure called from a DLL gets the program's DS");
     }
+    /* A module's own classes are its own: the DLL does not get the
+     * program's (Delphi and its component library each register TPanel
+     * with procedures of their own). */
+    if (d > HINSTANCE_ERROR) {
+        WNDCLASS wc;
+        check(GetClassInfo(hInstance, "W16Test", &wc) && !GetClassInfo(d, "W16Test", &wc),
+              "GetClassInfo: another module's private class is not found");
+    }
     if (d > HINSTANCE_ERROR)
         FreeLibrary(d);
 }

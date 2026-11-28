@@ -586,6 +586,12 @@ pub extern "stdcall" fn SetParent(h: u32, p: u32) -> u32 {
     if child || p != 0 {
         unsafe { WinSetParent(f, pm, 1) };
     }
+    // A child of the desktop (a drop-down list: SetParent(NULL)) is not
+    // activated by a click: the window it drops from keeps the focus.
+    if child {
+        let bit = if p == 0 { crate::pm::NOACTIVATE } else { 0 };
+        unsafe { crate::pm::WinSetWindowBits(f, crate::pm::QWL_STYLE, bit, crate::pm::NOACTIVATE) };
+    }
     if let Some(w) = wnd(h) {
         w.parent = p;
     }
