@@ -867,22 +867,3 @@ pub extern "stdcall" fn GetDialogBaseUnits() -> u32 {
     (by as u32) << 16 | bx as u32
 }
 
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn DlgDirListA(_h: u32, _p: u32, _id: i32, _s: i32, _t: u32) -> i32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn DlgDirListW(_h: u32, _p: u32, _id: i32, _s: i32, _t: u32) -> i32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn DlgDirSelectExA(_h: u32, _b: u32, _n: i32, _id: i32) -> i32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "stdcall" fn DlgDirSelectExW(_h: u32, _b: u32, _n: i32, _id: i32) -> i32 {
-    0
-}

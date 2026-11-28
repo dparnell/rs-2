@@ -456,8 +456,6 @@ thunk16::entries16_pascal! {
     x_7715 = 7715, 0;
     x_2016 = 2016, 4;
     x_2123 = 2123, 6;
-    x_2194 = 2194, 8;
-    x_2195 = 2195, 12;
     x_2200 = 2200, 8;
     x_2201 = 2201, 4;
     x_2202 = 2202, 6;
@@ -488,8 +486,6 @@ thunk16::entries16_pascal! {
     x_2319 = 2319, 22;
     x_2331 = 2331, 2;
     x_2402 = 2402, 6;
-    x_2422 = 2422, 10;
-    x_2423 = 2423, 10;
 }
 
 /// (WIN16 ordinal, Windows module.ordinal name).
@@ -944,8 +940,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (7715, "TYPELIB.15 OABUILDVERSION"),
     (2016, "USER.16 CLIPCURSOR"),
     (2123, "USER.123 CALLMSGFILTER"),
-    (2194, "USER.194 DLGDIRSELECTCOMBOBOX"),
-    (2195, "USER.195 DLGDIRLISTCOMBOBOX"),
     (2200, "USER.200 OPENCOMM"),
     (2201, "USER.201 SETCOMMSTATE"),
     (2202, "USER.202 GETCOMMSTATE"),
@@ -976,8 +970,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2319, "USER.319 SCROLLWINDOWEX"),
     (2331, "USER.331 ENABLEHARDWAREINPUT"),
     (2402, "USER.402 GETPRIORITYCLIPBOARDFORMAT"),
-    (2422, "USER.422 DLGDIRSELECTEX"),
-    (2423, "USER.423 DLGDIRSELECTCOMBOBOXEX"),
 ];
 
 /// The OLE functions returning an HRESULT: E_FAIL.

@@ -232,6 +232,8 @@ w32! {
     GetDialogBaseUnits();
     DlgDirListA(h, s, a, b, f);
     DlgDirSelectExA(h, s, n, id);
+    DlgDirListComboBoxA(h, s, a, b, f);
+    DlgDirSelectComboBoxExA(h, s, n, id);
 
     // ---- Menus and accelerators ----
     LoadMenuA(hinst, name);

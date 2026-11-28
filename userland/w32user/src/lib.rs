@@ -47,6 +47,7 @@ mod comdlg;
 mod cptab;
 mod ctl;
 mod dialog;
+mod dirlist;
 mod draw;
 mod edit;
 mod gdi;

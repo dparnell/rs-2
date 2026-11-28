@@ -686,7 +686,7 @@ fn register_class(p: *const u8) -> u32 {
     let l = |o: usize| unsafe { (p.add(o) as *const u32).read_unaligned() };
     let wc = [w(0), msg16::proc16to32(l(2)), w(6), w(8), hinst32(w(10) as u16).max(1), w(12), w(14), w(16), str32(l(18)), str32(l(22))];
     if crate::tracing() {
-        trace(format_args!("W16 RegisterClass {:?}", alloc::string::String::from_utf8_lossy(far_str(l(22)).unwrap_or(b"#"))));
+        trace(format_args!("W16 RegisterClass {:?} style {:#x} brush {:#x}", alloc::string::String::from_utf8_lossy(far_str(l(22)).unwrap_or(b"#")), w(0), w(16)));
     }
     unsafe { RegisterClassA(wc.as_ptr() as u32) & 0xffff }
 }
@@ -1208,6 +1208,21 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         100 => {
             let (h, s, lb, st, at) = (a.w(), a.l(), a.w(), a.w(), a.w());
             unsafe { DlgDirListA(h32(h), str32(s), lb as u32, st as u32, at as u32) }
+        }
+        // DlgDirSelectComboBox(hwnd, buf, id), DlgDirListComboBox(hwnd,
+        // spec, cb, st, attr)
+        194 => {
+            let (h, b, id) = (a.w(), a.l(), a.w());
+            unsafe { DlgDirSelectComboBoxExA(h32(h), str32(b), 128, id as u32) }
+        }
+        // DlgDirSelectEx(hwnd, buf, len, id), DlgDirSelectComboBoxEx
+        422 | 423 => {
+            let (h, b, n, id) = (a.w(), a.l(), a.i(), a.w());
+            unsafe { if ord == 422 { DlgDirSelectExA(h32(h), str32(b), n as u32, id as u32) } else { DlgDirSelectComboBoxExA(h32(h), str32(b), n as u32, id as u32) } }
+        }
+        195 => {
+            let (h, s, cb, st, at) = (a.w(), a.l(), a.w(), a.w(), a.w());
+            unsafe { DlgDirListComboBoxA(h32(h), str32(s), cb as u32, st as u32, at as u32) }
         }
         // SendDlgItemMessage(hwnd, id, msg, wParam, lParam)
         101 => {

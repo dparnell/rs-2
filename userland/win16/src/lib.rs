@@ -438,6 +438,10 @@ entries! {
     u_isdlgbuttonchecked = 2098, 4;
     u_dlgdirselect = 2099, 8;
     u_dlgdirlist = 2100, 12;
+    u_dlgdirselectcombobox = 2194, 8;
+    u_dlgdirlistcombobox = 2195, 12;
+    u_dlgdirselectex = 2422, 10;
+    u_dlgdirselectcomboboxex = 2423, 10;
     u_senddlgitemmessage = 2101, 12;
     u_adjustwindowrect = 2102, 10;
     u_mapdialogrect = 2103, 6;

@@ -552,7 +552,7 @@ fn file(h: u16) -> Option<&'static mut File> {
 }
 
 /// The process's current directory ("c:\dir").
-fn cur_dir() -> Vec<u8> {
+pub(crate) fn cur_dir() -> Vec<u8> {
     let (mut d, mut map) = (0u32, 0u32);
     unsafe { os2::DosQueryCurrentDisk(&mut d, &mut map) };
     let mut buf = [0u8; 260];
@@ -565,7 +565,7 @@ fn cur_dir() -> Vec<u8> {
 }
 
 /// Make `dir` the current drive and directory.
-fn set_dir(dir: &[u8]) -> bool {
+pub(crate) fn set_dir(dir: &[u8]) -> bool {
     if dir.len() < 2 || dir[1] != b':' {
         return false;
     }
@@ -595,7 +595,7 @@ fn attrs(path: &[u8]) -> Option<u32> {
     (unsafe { os2::DosQueryPathInfo(z.as_ptr(), 1, buf.as_mut_ptr(), 24) } == 0).then(|| u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]))
 }
 
-fn is_dir(path: &[u8]) -> bool {
+pub(crate) fn is_dir(path: &[u8]) -> bool {
     path.len() == 3 && path[1] == b':' || attrs(path).is_some_and(|a| a & 0x10 != 0)
 }
 

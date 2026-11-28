@@ -1121,6 +1121,40 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
     let mut widest = 0;
     let mut count = 0;
     for line in lines {
+        // One line with control characters: drawn as glyphs, as Windows'
+        // DrawText draws them (WinASCII's table of a font: CR, LF, TAB...);
+        // PM's WinDrawText ends its line at CR or LF.
+        if fmt & DT_SINGLELINE != 0 && line.iter().any(|&c| c != 0 && c < 0x20) && !line.contains(&b'~') {
+            let w = text_width_ps(hps, line);
+            let x = if fmt & DT_CENTER != 0 {
+                pr.l + (pr.r - pr.l - w) / 2
+            } else if fmt & DT_RIGHT != 0 {
+                pr.r - w
+            } else {
+                pr.l
+            };
+            let base = if fmt & DT_VCENTER != 0 {
+                pr.b + (pr.t - pr.b - lh) / 2 + desc
+            } else if fmt & DT_BOTTOM != 0 {
+                pr.b + desc
+            } else {
+                pr.t - asc
+            };
+            if fmt & DT_CALCRECT == 0 {
+                if opaque {
+                    unsafe { WinFillRect(hps, &RectL { l: x, b: base - desc, r: x + w, t: base + asc }, bg) };
+                }
+                unsafe {
+                    GpiSetColor(hps, fg);
+                    GpiSetBackMix(hps, BM_LEAVEALONE);
+                    GpiCharStringAt(hps, &PointL { x, y: base }, line.len() as i32, line.as_ptr());
+                }
+            }
+            widest = widest.max(w);
+            count += 1;
+            top -= lh;
+            continue;
+        }
         let mut rest: &[u8] = line;
         loop {
             let mut lr = RectL { l: pr.l, b: top - lh, r: pr.r, t: top };

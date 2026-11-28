@@ -146,16 +146,38 @@ fn lookup(c: char) -> Option<[u8; 16]> {
 
 /// The graphic characters of code page 850's control positions
 /// (0x01-0x1F, as OS/2's fonts have them; Klondike draws its suits with
-/// them). BEL to CR stay blank: text passes tabs and line ends.
-const CP850_LOW: &str = "\u{263a}\u{263b}\u{2665}\u{2666}\u{2663}\u{2660}       \u{266b}\u{263c}\u{25ba}\u{25c4}\u{2195}\u{203c}\u{b6}\u{a7}\u{25ac}\u{21a8}\u{2191}\u{2193}\u{2192}\u{2190}\u{221f}\u{2194}\u{25b2}\u{25bc}";
+/// them). BEL to CR draw only for GPI's character strings (`with_control_glyphs`).
+const CP850_LOW: &str = "\u{263a}\u{263b}\u{2665}\u{2666}\u{2663}\u{2660}\u{2022}\u{25d8}\u{25cb}\u{25d9}\u{2642}\u{2640}\u{266a}\u{266b}\u{263c}\u{25ba}\u{25c4}\u{2195}\u{203c}\u{b6}\u{a7}\u{25ac}\u{21a8}\u{2191}\u{2193}\u{2192}\u{2190}\u{221f}\u{2194}\u{25b2}\u{25bc}";
 
 pub fn cp850(b: u8) -> char {
     match b {
         0x01..=0x1f => CP850_LOW.chars().nth((b - 1) as usize).unwrap_or(' '),
         0x20..=0x7e => b as char,
+        0x7f => '\u{2302}',
         0x80..=0xff => CP850_HIGH.chars().nth((b - 0x80) as usize).unwrap_or('?'),
         _ => ' ',
     }
+}
+
+/// Whether BEL..CR (0x07-0x0D) draw their glyphs now. GpiCharString and
+/// its kin draw every byte's glyph, as OS/2's GPI and Windows' TextOut do
+/// (WinASCII's character tables); PM's own text (controls, WinDrawText)
+/// leaves them blank, its strings holding tabs and line ends. Set only
+/// with PM's lock held.
+static CONTROL_GLYPHS: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// `f` with BEL..CR drawn as glyphs.
+pub fn with_control_glyphs<T>(f: impl FnOnce() -> T) -> T {
+    use core::sync::atomic::Ordering;
+    let was = CONTROL_GLYPHS.swap(true, Ordering::Relaxed);
+    let r = f();
+    CONTROL_GLYPHS.store(was, Ordering::Relaxed);
+    r
+}
+
+/// A control character drawn blank now.
+fn blank(b: u8) -> bool {
+    (0x07..=0x0d).contains(&b) && !CONTROL_GLYPHS.load(core::sync::atomic::Ordering::Relaxed)
 }
 
 impl Font {
@@ -242,12 +264,8 @@ impl Font {
     pub fn from_outline(name: &'static str, ascender: i32, descender: i32, avg: i32, render: &dyn Fn(char) -> crate::ttf::Rendered) -> Font {
         let mut v = Vec::with_capacity(256);
         for b in 0..=255u8 {
-            let mut r = if b == 0 { crate::ttf::Rendered::default() } else { render(cp850(b)) };
-            // Line ends and tabs have no ink.
-            if matches!(b, 0x07..=0x0d) {
-                r = crate::ttf::Rendered { advance: r.advance, ..Default::default() };
-            }
-            v.push(r);
+            // (BEL..CR draw blank but for GPI's character strings: `blank`.)
+            v.push(if b == 0 { crate::ttf::Rendered::default() } else { render(cp850(b)) });
         }
         Font { name, width: avg.max(1), height: ascender + descender, descender, glyphs: [[0; 16]; 256], loaded: None, rendered: Some(v), source: None, em: 0 }
     }
@@ -268,6 +286,9 @@ impl Font {
     /// Coverage 0..=255 of pel (`col`, `r`) of character `b` (`col`
     /// relative to the pen, `r` from the top of the cell).
     pub fn coverage(&self, b: u8, r: i32, col: i32) -> u8 {
+        if blank(b) {
+            return 0;
+        }
         match &self.rendered {
             Some(g) => {
                 let g = &g[b as usize];
@@ -293,6 +314,9 @@ impl Font {
     /// Row `r` (0 = top) of the glyph for byte `b`; bit 7 is the leftmost
     /// pixel (the first 8 columns of a loaded font's glyph).
     pub fn row(&self, b: u8, r: usize) -> u8 {
+        if blank(b) {
+            return 0;
+        }
         if self.rendered.is_some() {
             return (0..8).fold(0, |a, c| a | if self.pixel(b, r as i32, c) { 0x80 >> c } else { 0 });
         }
@@ -316,7 +340,7 @@ impl Font {
     /// Whether pel (`col`, `r`) of character `b`'s glyph is set (0, 0 is
     /// its top left).
     pub fn pixel(&self, b: u8, r: i32, col: i32) -> bool {
-        if r < 0 || r >= self.height {
+        if r < 0 || r >= self.height || blank(b) {
             return false;
         }
         if self.rendered.is_some() {

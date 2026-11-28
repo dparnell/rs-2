@@ -20,6 +20,7 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <string.h>
 #include <stdio.h>
 #include <io.h>
+#include <direct.h>
 #include <dos.h>
 #include <fcntl.h>
 #include <lzexpand.h>
@@ -508,6 +509,27 @@ static void dialog_tests(HWND hwnd)
     last_notify = 0;
     SendMessage(list, WM_KEYDOWN, VK_HOME, 1);
     check(SendMessage(list, LB_GETCURSEL, 0, 0) == 0 && last_notify == LBN_SELCHANGE, "a key selects; LBN_SELCHANGE");
+
+    /* Directory lists (GANDER's Open dialog showed nothing) */
+    {
+        char spec[80], sel[80], cwd[80];
+        int d, f;
+        _getcwd(cwd, sizeof cwd);
+        lstrcpy(spec, "C:\\RS2\\*.EXE");
+        check(DlgDirList(dlg, spec, IDC_LIST, IDC_LABEL, DDL_DIRECTORY | DDL_DRIVES) && lstrcmpi(spec, "*.exe") == 0,
+              "DlgDirList changes directory and gives back the pattern");
+        GetDlgItemText(dlg, IDC_LABEL, buf, sizeof buf);
+        f = (int)SendMessage(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)(LPSTR)"w16test.exe");
+        d = (int)SendMessage(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)(LPSTR)"[-c-]");
+        check(lstrcmpi(buf, "c:\\rs2") == 0 && f >= 0 && d >= 0 && SendMessage(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)(LPSTR)"[..]") >= 0,
+              "DlgDirList: files, [..], [-c-] and the path");
+        SendMessage(list, LB_SETCURSEL, d, 0);
+        check(DlgDirSelect(dlg, sel, IDC_LIST) && lstrcmpi(sel, "c:") == 0, "DlgDirSelect: a drive");
+        SendMessage(list, LB_SETCURSEL, f, 0);
+        check(!DlgDirSelect(dlg, sel, IDC_LIST) && lstrcmpi(sel, "w16test.exe") == 0, "DlgDirSelect: a file");
+        chdir(cwd);
+        SetDlgItemText(dlg, IDC_LABEL, "&Label:");
+    }
 
     /* COMBOBOX */
     SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"red");
@@ -1574,6 +1596,31 @@ static void bitmap_tests(void)
     check(GetPixel(mem, 5, 5) == RGB(255, 255, 255), "PatBlt WHITENESS, GetPixel");
     SetPixel(mem, 3, 4, RGB(255, 0, 0));
     check(GetPixel(mem, 3, 4) == RGB(255, 0, 0) && GetPixel(mem, 4, 3) == RGB(255, 255, 255), "SetPixel/GetPixel in a bitmap (y down)");
+
+    /* A colour pattern brush whose bitmap is deleted (the Delphi
+       installer's navy background was black) */
+    {
+        HDC pdc = CreateCompatibleDC(mem);
+        HBITMAP pbm = CreateBitmap(8, 8, 1, 24, NULL), pold;
+        HBRUSH pbr;
+        RECT pr;
+        int px, py;
+        pold = SelectObject(pdc, pbm);
+        for (py = 0; py < 8; py++)
+            for (px = 0; px < 8; px++)
+                SetPixel(pdc, px, py, (px + py) & 1 ? RGB(0, 0, 128) : RGB(0, 0, 0));
+        SelectObject(pdc, pold);
+        DeleteDC(pdc);
+        pbr = CreatePatternBrush(pbm);
+        DeleteObject(pbm);
+        SetRect(&pr, 0, 0, 16, 16);
+        FillRect(mem, &pr, pbr);
+        check(GetPixel(mem, 0, 0) == RGB(0, 0, 0) && GetPixel(mem, 1, 0) == RGB(0, 0, 128) && GetPixel(mem, 9, 8) == RGB(0, 0, 128),
+              "a colour pattern brush fills with its pels (its bitmap deleted)");
+        DeleteObject(pbr);
+        PatBlt(mem, 0, 0, 16, 16, WHITENESS);
+        SetPixel(mem, 3, 4, RGB(255, 0, 0));
+    }
 
     mem2 = CreateCompatibleDC(mem);
     bm2 = CreateBitmap(16, 16, 1, 24, NULL);

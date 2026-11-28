@@ -365,6 +365,22 @@ under the integrated debugger). What they found:
   which waited for the Win16Lock: both hung at F9. A thread waiting for
   the Win16Lock now answers what other threads send it meanwhile, as
   Windows switches to the task a message is sent to.
+- **Directory lists in dialogs**: LB_DIR, CB_DIR, DlgDirList,
+  DlgDirListComboBox, DlgDirSelect(Ex) and DlgDirSelectComboBox(Ex)
+  (W32USER `dirlist.rs`): files, "[dir]", "[..]" and "[-c-]" in lower
+  case, the directory made current and shown in the static control
+  (GANDER's Open dialog was empty; it starts from its own directory,
+  which has its BWCC.DLL).
+- **Every byte's glyph in a program's text**: GpiCharString and its
+  kin (Windows' TextOut, ExtTextOut, and a single-line DrawText with
+  control characters) draw BEL to CR as code page 850's •◘○◙♂♀♪ and DEL
+  as ⌂, as OS/2's GPI and Windows do (WinASCII 1.0's character tables
+  had blank cells); PM's own controls and WinDrawText still draw them
+  blank, their strings holding tabs and line ends.
+- The Delphi installer's background is its pattern brush (an 8x8
+  dither of navy and black) drawn as a pattern, as Windows draws it;
+  WIN16 used to fill with its average colour, the solid dark navy of the
+  screenshot above.
 
 A Win16 task's PM windows are of class `Win16Wnd` (a Win32 program's
 are `Win32Wnd`): DDE between tasks knows them by it. Some details below

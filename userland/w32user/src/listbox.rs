@@ -701,7 +701,10 @@ pub fn proc_(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
             let i = find(h, wp as i32, &s, m == LB_FINDSTRINGEXACT);
             if i < 0 { LB_ERR } else { i as u32 }
         }
-        LB_DIR => LB_ERR,
+        LB_DIR => {
+            let spec = crate::far_str(lp).unwrap_or(b"*.*").to_vec();
+            crate::dirlist::fill(wp, &spec, |t| insert(h, -1, t[..t.len() - 1].to_vec(), 0) as u32)
+        }
         LB_GETTOPINDEX => lb(h).map_or(0, |l| l.top as u32),
         LB_SETTOPINDEX => {
             if let Some(l) = lb(h) {
@@ -1472,7 +1475,7 @@ pub fn combo_proc(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
         }
         CB_GETEXTENDEDUI => cb(h).is_some_and(|c| c.ext_ui) as u32,
         CB_GETDROPPEDSTATE => cb(h).is_some_and(|c| c.dropped) as u32,
-        CB_DIR => LB_ERR,
+        CB_DIR => send(list_of(h), LB_DIR, wp, lp),
         _ => def_window_proc(h, m, wp, lp),
     }
 }

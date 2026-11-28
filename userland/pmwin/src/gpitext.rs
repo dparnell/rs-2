@@ -41,7 +41,8 @@ pub extern "C" fn GpiCharStringAt(hps: u32, p: *const PointL, n: i32, s: *const 
 }
 
 fn text_at(hps: u32, p: Point, t: &[u8]) -> i32 {
-    draw(hps, |e, surf| e.ps.gpi_text(surf, p, t, None, None, false, false)).map_or(GPI_ERROR, |_| GPI_OK)
+    // A program's character strings draw every byte's glyph (font.rs).
+    draw(hps, |e, surf| gpi::font::with_control_glyphs(|| e.ps.gpi_text(surf, p, t, None, None, false, false))).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
@@ -77,7 +78,7 @@ fn string_pos(hps: u32, at: Option<Point>, prcl: *const RectL, opts: u32, n: i32
     draw(hps, |e, surf| {
         let start = at.unwrap_or(e.ps.pos);
         let before = e.ps.pos;
-        e.ps.gpi_text(surf, start, t, dx.as_deref(), rect, opts & CHS_OPAQUE != 0 && rect.is_some(), opts & CHS_CLIP != 0);
+        gpi::font::with_control_glyphs(|| e.ps.gpi_text(surf, start, t, dx.as_deref(), rect, opts & CHS_OPAQUE != 0 && rect.is_some(), opts & CHS_CLIP != 0));
         if opts & CHS_LEAVEPOS != 0 {
             e.ps.pos = before;
         }
