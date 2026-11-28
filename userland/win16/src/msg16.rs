@@ -696,6 +696,9 @@ pub fn to16(h: u16, m: u32, wp: u32, lp: u32, f: &mut dyn FnMut(u16, u16, u32) -
             f(0x0087, wp as u16, far16)
         }
         0x0113 => f(0x0113, wp as u16, proc32to16(lp)),
+        // WM_NCHITTEST, WM_MOUSEACTIVATE: a small signed result (HTTRANSPARENT
+        // -1, HTERROR -2) in AX.
+        0x0084 | 0x0021 => sx(f(m as u16, wp as u16, lp) as u16),
         // A common dialog's structure (WM_INITDIALOG to its hook, its
         // registered messages): the program's own.
         0x0110 | 0xc000..=0xffff => f(m as u16, wp as u16, crate::commdlg::map_lp(lp).unwrap_or(lp)),

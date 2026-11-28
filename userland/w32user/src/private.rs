@@ -122,3 +122,10 @@ pub extern "stdcall" fn Rs2W32Widen(src: u32, n: u32, dst: u32) -> u32 {
     }
     n
 }
+
+/// Rs2W32IsDialog(hwnd): a dialog made from a template (whatever its
+/// class: BWCC's BORDLG too), whose DWL_DLGPROC is a procedure.
+#[unsafe(no_mangle)]
+pub extern "stdcall" fn Rs2W32IsDialog(h: u32) -> u32 {
+    crate::dialog::is_dialog(hw(h)) as u32
+}

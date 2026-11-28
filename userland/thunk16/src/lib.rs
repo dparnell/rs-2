@@ -100,7 +100,11 @@ impl Pascal {
 }
 
 const SLOTS: usize = 256;
-const DEPTHS: usize = 12;
+/// Nesting depths with a stack of their own (each allocated on first use):
+/// Resource Workshop saving a dialog it edits nests 13 (BWCC's static
+/// controls read their text back from inside WM_SETTEXT, through
+/// CallWindowProc); deeper ones share the last.
+const DEPTHS: usize = 48;
 const STACK: u32 = 64 * 1024;
 static STACKS: [[AtomicU32; DEPTHS]; SLOTS] = [const { [const { AtomicU32::new(0) }; DEPTHS] }; SLOTS];
 static DEPTH: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];

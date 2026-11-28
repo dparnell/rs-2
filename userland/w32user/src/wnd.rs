@@ -1372,6 +1372,27 @@ pub fn to_client(h: u16, x: i32, y: i32) -> (i32, i32) {
 /// The window a mouse message goes to: `h`, or the first parent of it
 /// that does not answer WM_NCHITTEST with HTTRANSPARENT (-1); `lp` in
 /// that window's client coordinates.
+/// The first visible, enabled sibling below a child window in the Z order
+/// at a screen point.
+fn sibling_below(h: u16, sx: i32, sy: i32) -> Option<u16> {
+    if !wnd(h).is_some_and(|w| w.style & WS_CHILD != 0) {
+        return None;
+    }
+    let mut s = get_window(h, 2);
+    for _ in 0..256 {
+        if s == 0 {
+            return None;
+        }
+        let ok = wnd(s).is_some_and(|w| w.style & WS_DISABLED == 0 && unsafe { WinIsWindowVisible(w.frame) } != 0);
+        let r = window_screen_rect(s);
+        if ok && sx >= r[0] && sx < r[2] && sy >= r[1] && sy < r[3] {
+            return Some(s);
+        }
+        s = get_window(s, 2);
+    }
+    None
+}
+
 fn hit_target(h: u16, lp: u32) -> (u16, u32) {
     let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
     let mut t = enabled_ancestor(h).unwrap_or(h);
@@ -1379,6 +1400,13 @@ fn hit_target(h: u16, lp: u32) -> (u16, u32) {
         let at = (sy as u16 as u32) << 16 | sx as u16 as u32;
         if send(t, W_NCHITTEST, 0, at) as i32 != -1 {
             break;
+        }
+        // HTTRANSPARENT: the window under it there, a sibling lower in
+        // the Z order (BWCC's group panels lie over the controls they
+        // hold: Resource Workshop's list boxes), else its parent.
+        if let Some(b) = sibling_below(t, sx, sy) {
+            t = b;
+            continue;
         }
         match wnd(t).filter(|w| w.style & WS_CHILD != 0).map(|w| w.parent) {
             Some(p) if p != 0 => t = p,

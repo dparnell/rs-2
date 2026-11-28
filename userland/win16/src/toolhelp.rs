@@ -636,8 +636,15 @@ fn let_stop_run() {
         if s.stop_tid == 0 || (s.stop_waiting && STOP_KICKED.load(Ordering::SeqCst) == 0) || HANDED.load(Ordering::SeqCst) != 0 || SWITCH_TO.load(Ordering::SeqCst) != 0 {
             break;
         }
-        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+        crate::w16lock::waiting_answering(|| unsafe { os2::DosSleep(5) }, answer_sent);
     }
+}
+
+/// Answer the messages other threads sent this one (PM does it first
+/// when asked for a message; none is in the range asked for).
+fn answer_sent() {
+    let mut q = crate::pm::QMsg::default();
+    unsafe { crate::pm::WinPeekMsg(crate::kernel::TASK.get().hab, &mut q, 0, 0xffff_fff0, 0xffff_fff0, 0) };
 }
 
 /// This task yields (Yield, PeekMessage or GetMessage finding nothing):
@@ -657,7 +664,7 @@ fn yield_to_task() {
         if HANDED.load(Ordering::SeqCst) == 0 {
             break;
         }
-        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+        crate::w16lock::waiting_answering(|| unsafe { os2::DosSleep(5) }, answer_sent);
     }
     HANDED.store(0, Ordering::SeqCst);
 }

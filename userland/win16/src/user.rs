@@ -635,7 +635,7 @@ fn out_rect(far_: u32, f: impl FnOnce(u32) -> u32) -> u32 {
 /// Get/SetWindowWord/Long: procedures converted (GWL_WNDPROC, a
 /// dialog's DWL_DLGPROC).
 fn window_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
-    let is_proc = i == -4 || (i == 4 && long && msg16::kind(h) == K_DIALOG);
+    let is_proc = i == -4 || (i == 4 && long && (msg16::kind(h) == K_DIALOG || unsafe { Rs2W32IsDialog(h as u32) } != 0));
     if is_proc {
         let r = match set {
             Some(v) => unsafe { SetWindowLongA(h as u32, i as u32, msg16::proc16to32(v)) },

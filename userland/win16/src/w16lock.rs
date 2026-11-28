@@ -65,6 +65,26 @@ pub fn waiting<T>(f: impl FnOnce() -> T) -> T {
     r
 }
 
+/// `waiting`, answering meanwhile what other threads send this one
+/// (`answer`) until the lock is back: the other thread may be waiting for
+/// that, holding the lock (a debugger's stop activating the IDE's window,
+/// which PM sends WM_ADJUSTWINDOWPOS to and waits for the IDE's thread).
+/// Windows switches to the task a message is sent to the same way.
+pub fn waiting_answering<T>(f: impl FnOnce() -> T, answer: impl Fn()) -> T {
+    if !shared() {
+        return f();
+    }
+    release();
+    let r = f();
+    let h = LOCK.load(Ordering::Relaxed);
+    if h != 0 {
+        while unsafe { os2::DosRequestMutexSem(h, 5) } != 0 {
+            answer();
+        }
+    }
+    r
+}
+
 /// Yield: the other thread runs if it can.
 pub fn yield_now() {
     if shared() {

@@ -398,7 +398,20 @@ pub fn create_dialog(hinst: u32, t: &[u8], owner: u16, proc_: u32, param: u32, u
     let menu = res::sz_or_ord(t, &mut p);
     let class = res::sz_or_ord(t, &mut p);
     let caption = crate::narrow(&res::wsz(t, &mut p));
-    let (font, (bx, by)) = if style & DS_SETFONT != 0 {
+    // A Windows 3.x task's dialogs (WIN16 is the host) are laid out in
+    // the system font, its template's font or not, as WIN16 always did:
+    // rs2's MS Sans Serif is narrower than Windows', and its programs'
+    // dialogs were made for more room than that gives.
+    let win16 = crate::kern::host().is_some();
+    let (font, (bx, by)) = if style & DS_SETFONT != 0 && win16 {
+        let mut q = p + 2;
+        if ex {
+            q += 4;
+        }
+        res::wsz(t, &mut q);
+        p = q;
+        (0, base_units())
+    } else if style & DS_SETFONT != 0 {
         let pts = res::w16(t, p) as i32;
         p += 2;
         let (weight, italic) = if ex {

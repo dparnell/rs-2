@@ -327,6 +327,45 @@ TPanel; the library got the IDE's, whose InitWndProc found no control
 being made, a General Protection Fault in DELPHI.EXE), and a child moved
 to the desktop is not activated by a click (W16TEST checks the first).
 
+The other real programs were run again on the facade too: the CICA
+programs and the others in the table below, Calmira, the Delphi
+installer, and the RAD Pack (its setup and four installers, Resource
+Workshop opening, editing and saving a script, a VBX in Delphi run
+under the integrated debugger). What they found:
+
+- **Windows 2.x menu templates** (no header, byte flags: ProShape) are
+  converted, and MF_BITMAP items take the bitmap from the low word.
+- **A window keeps the instance handle it was made with**
+  (GWW_HINSTANCE; EM_SETHANDLE's block in a segment the program made
+  with LocalInit: the Delphi installer's readme).
+- **Windows 3.x tasks' dialogs and controls** have the window colours
+  (W32USER's defaults are Win32's grey otherwise), and **their dialogs
+  are laid out in the system font**, as WIN16 always laid them out:
+  DS_SETFONT is not used for a Win16 task (rs2's MS Sans Serif is
+  narrower than Windows', and the programs' dialogs were made for more
+  room than its units give: the VSP installer's text was clipped).
+- **DWL_DLGPROC of a dialog of another class** (BWCC's BORDLG: the VSP
+  installer's dialogs) is converted as a dialog procedure: it was taken
+  for a data value, and the installer's call of it faulted.
+- **VerInstallFile** finds a source file stored compressed (NAME.EX_).
+- **HTTRANSPARENT passes the mouse to the window under it**: a sibling
+  lower in Z order if one is there (BWCC's group panels lie over the
+  controls they frame: Resource Workshop's resource-type list and radio
+  buttons took no clicks), else the parent. WM_NCHITTEST's and
+  WM_MOUSEACTIVATE's 16-bit results are signed.
+- **Thirteen calls from 16-bit code nested in each other** (Resource
+  Workshop saving an edited dialog: BWCC's statics read their text back
+  inside WM_SETTEXT, through CallWindowProc): thunk16 had 32-bit stacks
+  for 12 depths, and the 13th used the 12th's, overwriting the frames
+  the 12th returned to. It has 48 now.
+- **A debugger's stop reactivating the IDE**: Delphi's debug kernel
+  calls SetActiveWindow on the IDE's window from the stop (the thread
+  standing for the stopped task, which holds the Win16Lock); PM sends
+  the IDE's frame WM_ADJUSTWINDOWPOS and waits for the IDE's thread,
+  which waited for the Win16Lock: both hung at F9. A thread waiting for
+  the Win16Lock now answers what other threads send it meanwhile, as
+  Windows switches to the task a message is sent to.
+
 A Win16 task's PM windows are of class `Win16Wnd` (a Win32 program's
 are `Win32Wnd`): DDE between tasks knows them by it. Some details below
 still say where things were in WIN16 before; the code is W32USER's
@@ -1337,7 +1376,8 @@ What they needed (W16TEST checks each):
   WM_SYSCOMMAND for a program's items), **INT 11h**, **SetCapture(NULL)**
   (the tool palette lets the mouse go so), **WM_PARENTNOTIFY** for
   button presses, **WM_NCHITTEST**: a window answering HTTRANSPARENT
-  lets the mouse through to its parent (the dialog editor gets the
+  lets the mouse through to the window under it, a sibling or else its
+  parent (the dialog editor gets the
   clicks on the dialog so; statics and group boxes are transparent, as
   on Windows), **captions of child windows** (the editor's windows and
   palettes; the edited dialog's controls were a caption's height off).
@@ -1387,12 +1427,6 @@ What they needed (W16TEST checks each):
 
 Not yet:
 
-- Resource Workshop's Open dialog lists its directories and drives
-  without their names: its list control (WORKLIB2) takes a never-set
-  local variable for the font height when the item has no font. On
-  Windows that slot holds what USER's own BeginPaint left on the stack;
-  here what WIN16's thunks leave makes the name's rectangle upside down.
-  Typing the path works.
 - The Turbo Debugger installer's last page shows its picture button
   empty (Borland's BORBTNII class gets its bitmaps another way).
 - **Turbo Debugger for Windows** (`C:\TDW\BIN\TDW.EXE`) starts, loads

@@ -32,6 +32,7 @@ w32! {
     Rs2W32PrinterProfile(app, key, buf, max);
     Rs2W32QueryAbort(hdc);
     Rs2W32Widen(src, n, dst);
+    Rs2W32IsDialog(h);
     // The built-in procedures.
     Rs2ButtonProc(h, m, wp, lp);
     Rs2StaticProc(h, m, wp, lp);
