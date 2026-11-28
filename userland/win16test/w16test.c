@@ -2467,6 +2467,27 @@ static void installer_tests(HINSTANCE hInst)
               "OpenFile OF_DELETE of an ANSI name");
     }
 
+    /* WinExec and LoadLibrary find a program by its ANSI path: a file
+     * that is no program is 11 (2 would be not found). */
+    {
+        static char exe_name[] = "C:\\W16CAF\xe9.EXE";
+        static char dll_name[] = "C:\\W16CAF\xe9.DLL";
+        static char junk2[] = "this is not a program";
+        OFSTRUCT of;
+        HFILE f = _lcreat(exe_name, 0);
+        HINSTANCE r;
+        _lwrite(f, junk2, sizeof junk2);
+        _lclose(f);
+        check(WinExec(exe_name, SW_SHOWNORMAL) == 11, "WinExec of an ANSI path finds the file");
+        f = _lcreat(dll_name, 0);
+        _lwrite(f, junk2, sizeof junk2);
+        _lclose(f);
+        r = LoadLibrary(dll_name);
+        check((UINT)r < 32 && (UINT)r != 2, "LoadLibrary of an ANSI path finds the file");
+        OpenFile(exe_name, &of, OF_DELETE);
+        OpenFile(dll_name, &of, OF_DELETE);
+    }
+
     /* What Windows Setup writes: WIN.INI's [intl], SYSTEM.INI's code
      * page; SHARE is loaded (INT 2Fh AX=1000h). */
     check(GetProfileInt("intl", "iCountry", 0) != 0, "WIN.INI [intl] iCountry from the country settings");

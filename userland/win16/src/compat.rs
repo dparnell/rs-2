@@ -50,6 +50,10 @@ pub fn exec(cmd: &[u8]) -> u16 {
     if prog.is_empty() {
         return 2;
     }
+    // The program's path is ANSI, the file system's OEM (as KERNEL's
+    // file calls); its arguments go to it as they are.
+    let prog_oem = crate::kernel::oem(prog);
+    let prog = &prog_oem[..];
     let with_ext = if prog.iter().rev().take_while(|&&c| c != b'\\').any(|&c| c == b'.') { prog.to_vec() } else { [prog, b".EXE"].concat() };
     let Some(path) = find_program(&with_ext) else {
         // REGEDIT FILE.REG (/s: silently) merges a file into the

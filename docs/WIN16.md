@@ -387,8 +387,10 @@ under the integrated debugger). What they found:
   the clipboard between CF_TEXT and PM's text (CF_OEMTEXT is PM's as it
   is). The installers' "Copyright ®" is "©" again, and their bullets
   were "Â". File names too, as Windows' KERNEL converts them for DOS:
-  OpenFile, _lopen, _lcreat, LZOpenFile, the profile files and VER's
-  files take ANSI names and use the OEM ones (OFSTRUCT's szPathName is
+  OpenFile, _lopen, _lcreat, LZOpenFile, the profile files, VER's
+  files, LoadLibrary and the program WinExec, LoadModule and
+  ShellExecute start (its arguments go to it as they are) take ANSI
+  names and use the OEM ones (OFSTRUCT's szPathName is
   OEM, as on Windows); the common file dialogs and DlgDirList show and
   return ANSI names; DOS calls (INT 21h) take OEM names as they are.
 - **Dialog items' creation data** reach the control as lpCreateParams

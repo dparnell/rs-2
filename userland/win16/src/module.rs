@@ -196,7 +196,9 @@ fn here(base: &[u8]) -> u32 {
 /// LoadLibrary(name): the instance handle, or an error below 32 (2: file
 /// not found).
 pub fn load_library(name: u32) -> u16 {
-    let Some(n) = far_str(name) else { return 2 };
+    // An ANSI path, the file system's OEM (as KERNEL's file calls).
+    let Some(n) = far_str(name).map(crate::kernel::oem) else { return 2 };
+    let n = &n[..];
     let base = base_name(n);
     if let Some(m) = SYSTEM.iter().find(|m| m.0 == &base[..]) {
         return m.1;
@@ -234,12 +236,20 @@ pub fn load_library(name: u32) -> u16 {
         tries.push(base.clone());
     }
     let mut why = alloc::string::String::new();
+    // Windows' error: 2 not found, unless a file was there and was no
+    // module (11) or there was no memory for it (8).
+    let mut err = 2u16;
     for t in &tries {
         let mut z = t.clone();
         z.push(0);
         let mut hmod = 0u32;
         let mut fail = [0u8; 64];
         let r = unsafe { os2::DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, z.as_ptr(), &mut hmod) };
+        match r {
+            11 | 191 | 192 | 193 | 195 | 196 if err == 2 => err = 11,
+            8 if err == 2 => err = 8,
+            _ => {}
+        }
         if r != 0 && r != 2 && r != 3 && crate::tracing() {
             let f = unsafe { crate::cstr(fail.as_ptr()) };
             why = alloc::format!(" ({}: error {r}, {})", t.iter().map(|&c| c as char).collect::<alloc::string::String>(), f.iter().map(|&c| c as char).collect::<alloc::string::String>());
@@ -260,7 +270,7 @@ pub fn load_library(name: u32) -> u16 {
     if crate::tracing() {
         trace(format_args!("W16 LoadLibrary({}) failed{why}", n.iter().map(|&c| c as char).collect::<alloc::string::String>()));
     }
-    2
+    err
 }
 
 /// FreeLibrary(h), FreeModule(h): the last free of a DLL loaded with
