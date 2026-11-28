@@ -136,6 +136,9 @@ pub fn dialog(t: &[u8]) -> Vec<u8> {
 }
 
 /// A Win16 menu template as a Win32 one (the same, with UTF-16 text).
+/// Windows 2.x's templates have no header and their flags are a byte:
+/// their first byte is the first item's flags (a pop-up's MF_POPUP),
+/// never 3.x's version 0.
 pub fn menu(t: &[u8]) -> Vec<u8> {
     let mut o = Vec::with_capacity(t.len() * 2);
     if t.len() < 4 {
@@ -143,17 +146,18 @@ pub fn menu(t: &[u8]) -> Vec<u8> {
     }
     put16(&mut o, 0);
     put16(&mut o, 0);
-    let mut p = 4 + w16(t, 2) as usize;
-    menu_level(t, &mut p, &mut o, 0);
+    let old = t[0] != 0;
+    let mut p = if old { 0 } else { 4 + w16(t, 2) as usize };
+    menu_level(t, &mut p, &mut o, 0, old);
     o
 }
 
 /// One level of a menu: items until the one with MF_END (a pop-up's
 /// items follow it, a level of their own).
-fn menu_level(t: &[u8], p: &mut usize, o: &mut Vec<u8>, depth: u32) {
+fn menu_level(t: &[u8], p: &mut usize, o: &mut Vec<u8>, depth: u32, old: bool) {
     while *p + 2 <= t.len() && depth < 16 {
-        let fl = w16(t, *p);
-        *p += 2;
+        let fl = if old { t[*p] as u16 } else { w16(t, *p) };
+        *p += if old { 1 } else { 2 };
         put16(o, fl);
         let popup = fl & 0x10 != 0;
         if !popup {
@@ -163,7 +167,7 @@ fn menu_level(t: &[u8], p: &mut usize, o: &mut Vec<u8>, depth: u32) {
         let s = sz(t, p);
         put_wstr(o, s);
         if popup {
-            menu_level(t, p, o, depth + 1);
+            menu_level(t, p, o, depth + 1, old);
         }
         if fl & 0x80 != 0 {
             return;

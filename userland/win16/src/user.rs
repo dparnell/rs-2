@@ -422,10 +422,29 @@ pub fn create_window(ex: u32, class: u32, title: u32, style: u32, pos: [i32; 4],
     }
     let h = unsafe { CreateWindowExA(ex, str32(class), str32(title), style, cw(pos[0]), cw(pos[1]), cw(pos[2]), cw(pos[3]), parent as u32, menu as u32, class_hinst32(hinst), param32) };
     let _ = ccs;
+    if h != 0 {
+        set_raw_hinst(h as u16, hinst);
+    }
     if crate::tracing() {
         trace(format_args!("W16 CreateWindow -> {h:#x}"));
     }
     h as u16
+}
+
+/// The instance handle each window was made with, as the program gave it
+/// (W32USER keeps the module's): GetWindowWord(GWW_HINSTANCE) gives it
+/// back, and an edit control's EM_SETHANDLE block is in it (a segment
+/// the program made with LocalInit: Delphi's installer's readme).
+static RAW_HINST: Global<Vec<(u16, u16)>> = Global::new(Vec::new());
+
+fn set_raw_hinst(h: u16, hinst: u16) {
+    let v = RAW_HINST.get();
+    v.retain(|e| e.0 != h);
+    v.push((h, hinst));
+}
+
+pub fn raw_hinst(h: u16) -> u16 {
+    RAW_HINST.get().iter().find(|e| e.0 == h).map_or_else(|| unsafe { GetWindowLongA(h as u32, (-6i32) as u32) } as u16, |e| e.1)
 }
 
 /// Register a class of WIN16's own (DDEML's, the Program Manager
@@ -624,6 +643,9 @@ fn window_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
         };
         return msg16::proc32to16(r);
     }
+    if i == -6 && set.is_none() {
+        return raw_hinst(h) as u32;
+    }
     unsafe {
         match (set, long) {
             (Some(v), true) => SetWindowLongA(h as u32, i as u32, v),
@@ -718,7 +740,14 @@ pub fn frame_of_top(h: u16) -> u32 {
 /// A menu item's "new item" argument: a string's flat address (a bitmap
 /// handle or owner-drawn data as it is).
 fn item32(fl: u16, v: u32) -> u32 {
-    if fl & (0x0004 | 0x0100) != 0 { v } else { str32(v) }
+    if fl & 0x0004 != 0 {
+        // MF_BITMAP: the bitmap's handle (the low word).
+        v & 0xffff
+    } else if fl & 0x0100 != 0 {
+        v
+    } else {
+        str32(v)
+    }
 }
 
 /// Accelerator tables: the 16-bit handles WIN16 gives out for W32USER's

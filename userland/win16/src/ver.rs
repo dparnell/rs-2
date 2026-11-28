@@ -25,6 +25,16 @@ fn align4(o: usize) -> usize {
     (o + 3) & !3
 }
 
+/// A directory and a name, one backslash between them.
+fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
+    let mut v = dir.to_vec();
+    if !v.is_empty() && !v.ends_with(b"\\") && !v.ends_with(b":") {
+        v.push(b'\\');
+    }
+    v.extend_from_slice(name);
+    v
+}
+
 /// A block at `o`: (its end, its key, where its value is and how long,
 /// where its children start).
 fn block(b: &[u8], o: usize) -> Option<(usize, &[u8], usize, usize, usize)> {
@@ -174,9 +184,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // tmpfile, lpuTmpLen): copy (expanding) the file into place.
         6309 => {
             let (_fl, s, d, sd, dd, _cd, _tmp, _tl) = (a.w(), a.l(), a.l(), a.l(), a.l(), a.l(), a.p(), a.p());
-            let src = [crate::far_str(sd).unwrap_or(b"."), b"\\", crate::far_str(s).unwrap_or(b"")].concat();
-            let dst = [crate::far_str(dd).unwrap_or(b"."), b"\\", crate::far_str(d).unwrap_or(b"")].concat();
-            let Some(data) = crate::module::read_file(&src, usize::MAX) else { return Some(0x0001_0000) }; // VIF_CANNOTREADSRC
+            let src = join(crate::far_str(sd).unwrap_or(b"."), crate::far_str(s).unwrap_or(b""));
+            let dst = join(crate::far_str(dd).unwrap_or(b"."), crate::far_str(d).unwrap_or(b""));
+            // As LZOpenFile opens it: a file not there may be there
+            // compressed, its name's last letter an underscore
+            // (WINASCII.EXE as WINASCII.EX_; WinASCII's installer).
+            let data = crate::module::read_file(&src, usize::MAX).or_else(|| {
+                let mut c = src.clone();
+                c.iter().rposition(|&b| b == b'.').filter(|&i| i + 1 < c.len())?;
+                *c.last_mut()? = b'_';
+                crate::module::read_file(&c, usize::MAX)
+            });
+            let Some(data) = data else { return Some(0x0001_0000) }; // VIF_CANNOTREADSRC
             let data = crate::lz::expand(&data).unwrap_or(data);
             let mut z = dst.clone();
             z.push(0);

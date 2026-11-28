@@ -2312,6 +2312,46 @@ static void installer_tests(HINSTANCE hInst)
         check(lstrcmp(buf, "Read me\r\nfirst") == 0 && SendMessage(e, EM_GETLINECOUNT, 0, 0) == 2, "EM_SETHANDLE: the text of a local block");
         DestroyWindow(e);
     }
+    /* ... of a segment the program made with LocalInit and gave as the
+     * control's instance (Delphi's installer's readme). */
+    {
+        HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 4096);
+        WORD sg = HIWORD((DWORD)GlobalLock(g));
+        HWND e;
+        WORD off = 0;
+        LocalInit(sg, 0, 4000);
+        _asm {
+            push ds
+            mov ax, sg
+            mov ds, ax
+        }
+        {
+            HLOCAL hl = LocalAlloc(LMEM_FIXED, 32);
+            off = (WORD)hl;
+        }
+        _asm { pop ds }
+        _fstrcpy((char FAR *)MAKELP(sg, off), "From a segment");
+        e = CreateWindow("EDIT", "", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100, NULL, NULL, (HINSTANCE)sg, NULL);
+        SendMessage(e, EM_SETHANDLE, (WPARAM)off, 0);
+        GetWindowText(e, buf, sizeof buf);
+        check(off != 0 && lstrcmp(buf, "From a segment") == 0 && GetWindowWord(e, GWW_HINSTANCE) == sg,
+              "EM_SETHANDLE: a local block of the segment given as the instance");
+        DestroyWindow(e);
+        GlobalUnlock(g);
+        GlobalFree(g);
+    }
+    /* Windows 3.x's dialogs and controls are the window's colours. */
+    {
+        HWND w = CreateWindow("STATIC", "", WS_POPUP, 0, 0, 10, 10, NULL, NULL, hInst, NULL);
+        HDC dc = GetDC(w);
+        HBRUSH br = (HBRUSH)DefWindowProc(w, WM_CTLCOLOR, (WPARAM)dc, MAKELONG(w, CTLCOLOR_DLG));
+        LOGBRUSH lb;
+        GetObject(br, sizeof lb, &lb);
+        check(br && lb.lbColor == GetSysColor(COLOR_WINDOW) && GetBkColor(dc) == GetSysColor(COLOR_WINDOW),
+              "DefWindowProc WM_CTLCOLOR: the window's colours (Windows 3.x's dialogs are white)");
+        ReleaseDC(w, dc);
+        DestroyWindow(w);
+    }
 
     /* The registration database (SHELL), and REGEDIT /s merging a .REG
      * file (the installer registers OLE 2 so). */

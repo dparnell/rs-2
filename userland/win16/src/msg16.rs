@@ -476,7 +476,7 @@ fn ctl_to32(h: u16, m: u32, wp: u16, lp: u32, f: &mut dyn FnMut(u32, u32, u32) -
         // EM_SETHANDLE(hlocal): a local block of the control's instance
         // segment (its text, for W32USER).
         EM_SETHANDLE if wp != 0 => {
-            let seg = unsafe { GetWindowLongA(h as u32, (-6i32) as u32) } as u16;
+            let seg = crate::user::raw_hinst(h);
             f(m, flat((seg as u32) << 16 | w) as u32, lp)
         }
         LB_ADDSTRING | LB_INSERTSTRING | LB_SELECTSTRING | LB_FINDSTRING | LB_FINDSTRINGEXACT => {

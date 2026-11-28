@@ -2554,12 +2554,18 @@ pub fn def_window_proc(h: u16, m: u16, wp: u32, lp: u32) -> u32 {
         W_PRINTCLIENT => return 0,
         W_CTLCOLORMSGBOX..=W_CTLCOLORSTATIC => {
             let hdc = wp as u16;
+            // Windows 3.x's dialogs and controls are the window's colours
+            // (a Windows 3.x task's: WIN16 is the host); Win32's the
+            // button face's.
+            let win31 = crate::kern::host().is_some();
             let (bk, br) = match m {
                 W_CTLCOLORSCROLLBAR => (gdi::COLOR_SCROLLBAR, gdi::COLOR_SCROLLBAR),
                 W_CTLCOLOREDIT | W_CTLCOLORLISTBOX => (gdi::COLOR_WINDOW, gdi::COLOR_WINDOW),
+                _ if win31 => (gdi::COLOR_WINDOW, gdi::COLOR_WINDOW),
                 _ => (gdi::COLOR_BTNFACE, gdi::COLOR_BTNFACE),
             };
-            gdi::set_text_color(hdc, gdi::sys_color(if m == W_CTLCOLOREDIT || m == W_CTLCOLORLISTBOX { gdi::COLOR_WINDOWTEXT } else { gdi::COLOR_BTNTEXT }));
+            let window_text = win31 || m == W_CTLCOLOREDIT || m == W_CTLCOLORLISTBOX;
+            gdi::set_text_color(hdc, gdi::sys_color(if window_text { gdi::COLOR_WINDOWTEXT } else { gdi::COLOR_BTNTEXT }));
             gdi::set_bk_color(hdc, gdi::sys_color(bk));
             return gdi::sys_brush(br) as u32;
         }

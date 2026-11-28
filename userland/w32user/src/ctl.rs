@@ -22,7 +22,9 @@ pub const CTLCOLOR_STATIC: u16 = W_CTLCOLORSTATIC;
 pub fn ctl_color(h: u16, hdc: u16, kind: u16) -> u16 {
     let parent = wnd(h).map_or(0, |w| w.parent);
     let target = if parent != 0 { parent } else { h };
-    let (fg, bg) = if kind == CTLCOLOR_EDIT || kind == CTLCOLOR_LISTBOX { (gdi::COLOR_WINDOWTEXT, gdi::COLOR_WINDOW) } else { (gdi::COLOR_BTNTEXT, gdi::COLOR_BTNFACE) };
+    // (Windows 3.x's are the window's colours: see DefWindowProc.)
+    let win31 = crate::kern::host().is_some();
+    let (fg, bg) = if win31 || kind == CTLCOLOR_EDIT || kind == CTLCOLOR_LISTBOX { (gdi::COLOR_WINDOWTEXT, gdi::COLOR_WINDOW) } else { (gdi::COLOR_BTNTEXT, gdi::COLOR_BTNFACE) };
     gdi::set_text_color(hdc, gdi::sys_color(fg));
     gdi::set_bk_color(hdc, gdi::sys_color(bg));
     let br = send(target, kind, hdc as u32, h as u32) as u16;
